@@ -5,10 +5,8 @@
 #include "../include/Riemann.h"
 //#include "../include/riemannhelper.h"
 
-
-Riemann::Riemann(double *WL, double *WR, double *vFrame, double *Aij, int i) :
-
-                WR { WR }, WL { WL }, vFrame { vFrame },  Aij { Aij }, i { i }{
+Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i) :
+                    WR { WR }, WL { WL }, vFrame { vFrame },  Aij { Aij }, i { i }{
 
     // compute norm of effective face
     AijNorm = sqrt(Helper::dotProduct(Aij, Aij));
@@ -91,16 +89,16 @@ Riemann::Riemann(double *WL, double *WR, double *vFrame, double *Aij, int i) :
 void Riemann::HLLCFlux(double *Fij, const double &gamma){
 
 #if DIM==3
-        HLLC::solveHLLC(WL, WR, hatAij, Fij, vFrame, gamma);
+        HLLC::solveHLLC(WR, WL, hatAij, Fij, vFrame, gamma); // ToDo: 3d is not implemented
 
         // Rotate and project fluxes onto Aij
 #else
         // Logger(DEBUG) << " WL: " << WL[0] << " " << WL[1] << " " << WL[2] << " " << WL[3];
 
 #if USE_HLL
-        HLLC::HLL(WL, WR, Fij, gamma);
+        HLLC::HLL(WR, WL, Fij, gamma);
 #else
-        HLLC::solveHLLC1(WL, WR, hatAij, Fij, vFrame, gamma);
+        HLLC::solveHLLC1(WR, WL, hatAij, Fij, vFrame, gamma);
 #endif  // USE_HLL
 
         // Logger(DEBUG) << "i = " << i << " mF = " << Fij[0];
@@ -166,7 +164,7 @@ void Riemann::exact(double *Fij, const double &gamma){
     //                  << ", PL = " << WL[1] << ", PR = " << WR[1];
     //}
 
-    int flagLR = solver.solve(WR[0], WR[2], WR[1], WL[0], WL[2], WL[1],
+    int flagLR = solver.solve(WL[0], WL[2], WL[1], WR[0], WR[2], WR[1],
                               rhoSol, vSol[0], PSol);
 
     // Fij[3] = 0.; // explicitly setting vy flux to zero
