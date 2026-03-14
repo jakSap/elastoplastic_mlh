@@ -440,14 +440,19 @@ void HLLC::solveHLLC1(double *WR, double *WL, double *n,
         const double SL = SLmuL + uL;
 
         /* flux FL */
-        // WATCH THIS
+#if MESHLESS_FINITE_MASS
+        totflux[0] = 0;
+        totflux[1] = rhoLuL * eL + WL[1] * uL;
+        totflux[2] = WL[1] * n[0];
+        totflux[3] = WL[1] * n[1];
+#else
         totflux[0] = rhoLuL;
         /* these are the actual correct fluxes in the boosted lab frame
            (not rotated to interface frame) */
         totflux[1] = rhoLuL * eL + WL[1] * uL;
         totflux[2] = rhoLuL * WL[2] + WL[1] * n[0];
         totflux[3] = rhoLuL * WL[3] + WL[1] * n[1];
-
+#endif //MESHLESS_FINITE_MASS
 
         if (SL < 0.0d) {
             // Logger(DEBUG) << "SL < 0";
@@ -457,12 +462,19 @@ void HLLC::solveHLLC1(double *WR, double *WL, double *n,
             const double SstarmuL = Sstar - uL;
             const double rhoLSLstarfac = rhoLSL * (starfac - 1.0d);
             const double rhoLSLSstarmuL = rhoLSL * SstarmuL * starfac;
-
+#if MESHLESS_FINITE_MASS
+            totflux[0] += 0;
+            totflux[1] += rhoLSLstarfac * eL +
+                rhoLSLSstarmuL * (Sstar + WL[1] / (WL[0] * SLmuL));
+            totflux[2] += rhoLSLSstarmuL * n[0];
+            totflux[3] += rhoLSLSstarmuL * n[1];
+#else
             totflux[0] += rhoLSLstarfac;
             totflux[1] += rhoLSLstarfac * eL +
                 rhoLSLSstarmuL * (Sstar + WL[1] / (WL[0] * SLmuL));
             totflux[2] += rhoLSLstarfac * WL[2] + rhoLSLSstarmuL * n[0];
             totflux[3] += rhoLSLstarfac * WL[3] + rhoLSLSstarmuL * n[1];
+#endif // MESHLESS_FINITE_MASS
 
         }
     } else {
@@ -474,11 +486,19 @@ void HLLC::solveHLLC1(double *WR, double *WL, double *n,
             WR[1] * rhoRinv * hydro_one_over_gamma_minus_one + 0.5d * v2;
         const double SR = SRmuR + uR;
 
+#if MESHLESS_FINITE_MASS
+        /* flux FR */
+        totflux[0] = 0;
+        totflux[1] = rhoRuR * eR + WR[1] * uR;
+        totflux[2] = WR[1] * n[0];
+        totflux[3] = WR[1] * n[1];
+#else
         /* flux FR */
         totflux[0] = rhoRuR;
         totflux[1] = rhoRuR * eR + WR[1] * uR;
         totflux[2] = rhoRuR * WR[2] + WR[1] * n[0];
         totflux[3] = rhoRuR * WR[3] + WR[1] * n[1];
+#endif //MESHLESS_FINITE_MASS
 
 
         if (SR > 0.0d) {
@@ -489,13 +509,21 @@ void HLLC::solveHLLC1(double *WR, double *WL, double *n,
             const double SstarmuR = Sstar - uR;
             const double rhoRSRstarfac = rhoRSR * (starfac - 1.d);
             const double rhoRSRSstarmuR = rhoRSR * SstarmuR * starfac;
+#if MESHLESS_FINITE_MASS
+            //Logger(DEBUG) << Sstar;
+            totflux[0] += 0;
+            totflux[1] += rhoRSRstarfac * eR +
+                rhoRSRSstarmuR * (Sstar + WR[1] / (WR[0] * SRmuR));
+            totflux[2] += rhoRSRSstarmuR * n[0];
+            totflux[3] += rhoRSRSstarmuR * n[1];
+#else
             //Logger(DEBUG) << Sstar;
             totflux[0] += rhoRSRstarfac;
             totflux[1] += rhoRSRstarfac * eR +
                 rhoRSRSstarmuR * (Sstar + WR[1] / (WR[0] * SRmuR));
             totflux[2] += rhoRSRstarfac * WR[2] + rhoRSRSstarmuR * n[0];
             totflux[3] += rhoRSRstarfac * WR[3] + rhoRSRSstarmuR * n[1];
-
+#endif //MESHLESS_FINITE_MASS
         }
 
     }
@@ -516,6 +544,10 @@ void HLLC::solveHLLC1(double *WR, double *WL, double *n,
     totflux[3] += vij[2] * totflux[0];
 
 #else
+#if MESHLESS_FINITE_MASS
+    totflux[0] = 0;
+
+#endif // MESHLESS_FINITE_MASS
 
     const double v2 = vij[0] * vij[0] + vij[1] * vij[1];
     /* order is important: we first use the momentum fluxes to update the energy
