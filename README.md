@@ -1,7 +1,8 @@
 # meshlessHydro
 Implementing a meshless scheme for hydrodynamic particle simulations as described implemented in [GIZMO](http://www.tapir.caltech.edu/~phopkins/Site/GIZMO.html). Below a Kelvin-Helmholtz testcase with 10000 particles simulated with the **meshless finite volume (MFV)** algorithm is shown.
 
-<img src="media/KH_N10000.gif" alt="Kelvin-Helmholtz testcase" width="100%"/>
+This is a fork of the [MeshlessHydro](https://github.com/jammartin/meshlessHydro) project by [jammartin](https://github.com/jammartin). It uses the HLLC approximate Riemann solver from [Swift](https://gitlab.cosma.dur.ac.uk/swift/swiftsim) to implement the Meshless Finite Volume Method by Hopkins et al implemented in [GIZMO](http://www.tapir.caltech.edu/~phopkins/Site/GIZMO.html) and described in "[Accurate, Meshless Methods for Magneto-Hydrodynamics](https://arxiv.org/abs/1505.02783)". For more info on the code setup and structure, check out [MeshlessHydro](https://github.com/jammartin/meshlessHydro).
+Also available is a simple SPH method with artificial viscosity. The SPH method can not yet run with adaptive timesteps.
 
 ## Implementation roadmap
 
@@ -39,22 +40,26 @@ An exact Riemann solver taken from [this repository](https://github.com/bwvdnbro
 │   │   ├── ConfigParser.h
 │   │   ├── Domain.h
 │   │   ├── Helper.h
+│   │   ├── HLLC.h
 │   │   ├── InitialDistribution.h
 │   │   ├── Logger.h
 │   │   ├── MeshlessScheme.h
 │   │   ├── Particles.h
 │   │   ├── Riemann.h
+│   │   ├── SPH.h
 │   │   └── parameter.h
 │   ├── log
 │   └── src
 │       ├── ConfigParser.cpp
 │       ├── Domain.cpp
 │       ├── Helper.cpp
+│       ├── HLLC.cpp
 │       ├── InitialDistribution.cpp
 │       ├── Logger.cpp
 │       ├── MeshlessScheme.cpp
 │       ├── Particles.cpp
 │       ├── Riemann.cpp
+│       ├── SPH.cpp
 │       └── main.cpp
 ├── media
 │   ├── KH_N10000.gif
@@ -73,7 +78,6 @@ An exact Riemann solver taken from [this repository](https://github.com/bwvdnbro
 └── tools
     └── plotInteraction.py
 ```
-### Directories
 
 - `demonstrator` is dedicated to write a single CPU C++ program to implement the algorithm
 - `media` holds resources for readme files
@@ -137,3 +141,7 @@ Proceed analogously as for the Kelvi-Helmholtz testcase. This testcase throws so
 <!--
 ### Keplerian disk
 -->
+
+## Roadmap
+This project aims to implement the Meshless Finite Mass method in the above paper, and to develop it to simulate granular media using elastic and solid dynamics as well as a Von Mieses strength model.
+
