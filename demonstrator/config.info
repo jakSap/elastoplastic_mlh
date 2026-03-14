@@ -1,25 +1,25 @@
 ; h5 file containing the initial particle distribution
 ;initFile ../testcases/kelvin-helmholtz/khN16384.h5
 ;initFile ../testcases/kelvin-helmholtz_hllc/khN900.h5
-initFile ../testcases/kh_hllc_big/khN16384.h5
+initFile ../testcases/kelvin-helmholtz/khN16384.h5
 
 ; output directory for particle distribution h5 files
 ;outDir output
-outDir ../testcases/kh_hllc_big/output
+outDir ../testcases/kelvin-helmholtz/kh_hllc_big_mfm/data
 ;outDir ../testcases/kh_exact_big/output
 ;outDir ../testcases/kh_sph_big/output
 
 ; fixed time step
 ; when ADAPTIVE_TIMESTEP is set in parameter.h,
 ; this gives the output timesteps combined with h5DumpInterval
-timeStep .05
+timeStep .5
 
 ; end of the simulation
 ;timeEnd .05
-timeEnd 5
+timeEnd 20
 
 ; output particle distribution each h5DumpInterval steps
-h5DumpInterval 2
+h5DumpInterval 10
 
 ; periodic boundaries of box
 ; ignored when PERIODIC_BOUNDARIES is not set in parameter.h
@@ -36,4 +36,20 @@ periodicBoxLimits {
 kernelSize .025
 
 ; adiabatic index
-gamma 1.6666666666666667
+hydro_gamma 1.6666666666666667
+
+; Murnaghan EOS: K0, n, rho0
+MURN_K0 1.
+MURN_n 2.
+MURN_rho0 1.
+
+; Tillotson EOS: A_T, B_T, u0, a_T, b_T, alpha_T, beta_T, also u_iv_T, u_cv_T
+TIL_A -1
+TIL_B -1
+TIL_u0 -1
+TIL_a -1
+TIL_b -1
+TIL_alpha -1
+TIL_beta -1
+TIL_u_iv -1
+TIL_u_cv -1

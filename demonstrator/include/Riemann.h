@@ -12,19 +12,20 @@
 #include "parameter.h"
 #include "Logger.h"
 #include "HLLC.h"
+#include "EquationOfState.h"
 
 class Riemann {
 
 public:
     /// WR, WL and Aij must be pre-allocated
-    Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i);
+    Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i, EquationOfState &MeshlessEOS);
 
     /**
      * Solving a one-dimensional Riemann problem for an ideal gas
      *
      * @param[out] Fij flux to be computed
      */
-    void exact(double *Fij, const double &gamma);
+    void exact(double *Fij);
 
     // HLL approximate Riemann solver, as in Toro, chapter 10.3
     // For != ideal gas
@@ -44,13 +45,14 @@ public:
     // void HLLC(const double *WL, const double *WR, const double *nUnit,
     //                                    const double *vij, const double &gamma, double *Fij);
 #if USE_HLLC
-    void HLLCFlux(double *Fij, const double &gamma);
+    void HLLCFlux(double *Fij);
 #endif
 
 private:
 #if USE_HLLC
     double *nUnit;
 #endif
+    EquationOfState MeshlessEOS;
 
     int i;
     double *WR, *WL, *vFrame, *Aij;
@@ -62,9 +64,9 @@ private:
 #endif
     };
 #if DIM==2
-    void rotateAndProjectFluxes2D(double *Fij, const double &gamma);
+    void rotateAndProjectFluxes2D(double *Fij);
 #else
-    void rotateAndProjectFluxes3D(double *Fij, const double &gamma);
+    void rotateAndProjectFluxes3D(double *Fij);
 #endif
 };
 

@@ -7,6 +7,7 @@
 
 #include "parameter.h"
 #include "Helper.h"
+#include "EquationOfState.h"
 //#include "riemannhelper.h"
 
 class HLLC {
@@ -34,7 +35,9 @@ public:
     //         const double *vij, const double &hydro_gamma);
 
     static void solveHLLC1(double *WL, double *WR, double *n, double *totflux,
-            const double *vij, const double &hydro_gamma);
+            const double *vij, EquationOfState &MeshlessEOS);
+    
+    
 
     // HLL Solver
     static void HLL(double *WL, double *WR, double *totflux, const double &hydro_gamma);

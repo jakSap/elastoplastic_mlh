@@ -4,19 +4,36 @@
 
 #include "../include/Riemann.h"
 //#include "../include/riemannhelper.h"
+Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i, EquationOfState &MeshlessEOS) :
+                    WR { WR }, WL { WL }, vFrame { vFrame },  Aij { Aij }, i { i }, MeshlessEOS{MeshlessEOS}{
 
-Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i) :
-                    WR { WR }, WL { WL }, vFrame { vFrame },  Aij { Aij }, i { i }{
+    // compute norm of effective face
+    // double AijNorm = sqrt(Helper::dotProduct(Aij, Aij));
 
     // compute norm of effective face
     AijNorm = sqrt(Helper::dotProduct(Aij, Aij));
+    
+    // Logger(INFO) << "Gamma by EOS: " << MeshlessEOS.EOSPressure(WR[0], 0);
 
-    hatAij[0] = 1./AijNorm*Aij[0];
-    hatAij[1] = 1./AijNorm*Aij[1];
+    if(AijNorm > 0){
+        hatAij[0] = 1./AijNorm*Aij[0];
+        hatAij[1] = 1./AijNorm*Aij[1];
 #if DIM == 3
-    hatAij[2] = 1./AijNorm*Aij[2];
+        hatAij[2] = 1./AijNorm*Aij[2];
 #endif
 
+    }
+    else{
+        Logger(WARN) << "Warning, AijNorm = 0 encountered, i = " << i;
+        Logger(WARN) << "Aborting for debugging";
+        exit(6);
+	
+        //hatAij[0] = 0;
+        //hatAij[1] = 0;
+#if DIM == 3
+        hatAij[2] = 0;
+#endif
+    }
     // if (i == 6){
     //    Logger(DEBUG) << "Aij = [" << Aij[0] << ", " << Aij[1] << "], AijNorm = " << AijNorm;
     // }
@@ -86,7 +103,7 @@ Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i) :
 
 #if USE_HLLC
 // Add HLLC function for approximate Riemann Solver
-void Riemann::HLLCFlux(double *Fij, const double &gamma){
+void Riemann::HLLCFlux(double *Fij){
 
 #if DIM==3
         HLLC::solveHLLC(WR, WL, hatAij, Fij, vFrame, gamma); // ToDo: 3d is not implemented
@@ -96,9 +113,10 @@ void Riemann::HLLCFlux(double *Fij, const double &gamma){
         // Logger(DEBUG) << " WL: " << WL[0] << " " << WL[1] << " " << WL[2] << " " << WL[3];
 
 #if USE_HLL
+        const double gamma = MeshlessEOS.EOSGetHydroGammaParam();
         HLLC::HLL(WR, WL, Fij, gamma);
 #else
-        HLLC::solveHLLC1(WR, WL, hatAij, Fij, vFrame, gamma);
+        HLLC::solveHLLC1(WR, WL, hatAij, Fij, vFrame, MeshlessEOS);
 #endif  // USE_HLL
 
         // Logger(DEBUG) << "i = " << i << " mF = " << Fij[0];
@@ -154,7 +172,16 @@ void Riemann::HLLCFlux(double *Fij, const double &gamma){
 }
 #endif
 // Exact Riemann solver
-void Riemann::exact(double *Fij, const double &gamma){
+void Riemann::exact(double *Fij){
+#if HLLC_general_EOS
+    Logger(INFO) << "For general EOS, only HLLC solver is available, exiting.";
+    exit(6);
+#endif
+#if EOS == 0
+    const double gamma = MeshlessEOS.EOSGetHydroGammaParam();
+#else
+    const double gamma = -1; // Placeholder
+#endif
     RiemannSolver solver { gamma };
 
     //if(WR[1] < 0. || WL[1] < 0.){
@@ -204,7 +231,7 @@ void Riemann::exact(double *Fij, const double &gamma){
     //    Logger(DEBUG) << "riemann solution = [" << rhoSol << ", " << vSol[0] << ", " << vSol[1] << ", " << PSol << "]";
     //}
 
-    rotateAndProjectFluxes2D(Fij, gamma);
+    rotateAndProjectFluxes2D(Fij);
 
     //if (i == 46){
     //    Logger(DEBUG) << "Fij = [" << Fij[0] << " (mass), " << Fij[2] << " (vx), "
@@ -215,7 +242,16 @@ void Riemann::exact(double *Fij, const double &gamma){
 }
 
 #if DIM==2
-void Riemann::rotateAndProjectFluxes2D(double *Fij, const double &gamma){
+void Riemann::rotateAndProjectFluxes2D(double *Fij){
+#if HLLC_general_EOS
+    Logger(INFO) << "Exact solver with general EOS not implemented yet, exiting";
+    exit(6);
+#endif
+#if EOS == 0
+    const double gamma = MeshlessEOS.EOSGetHydroGammaParam();
+#else
+    const double gamma = -1; // Placeholder
+#endif
 
     // rotate back velocities to simulation coordinate frame
     double LambdaInv[DIM*DIM];
@@ -263,7 +299,16 @@ void Riemann::rotateAndProjectFluxes2D(double *Fij, const double &gamma){
 }
 
 #else
-void Riemann::rotateAndProjectFluxes3D(double *Fij, const double &gamma){
+void Riemann::rotateAndProjectFluxes3D(double *Fij){
+#if HLLC_general_EOS
+    Logger(Info << "Exact solver with general EOS not implemented yet, exiting");
+    exit(6);
+#endif
+#if EOS == 0
+    const double gamma = MeshlessEOS.EOSGetHydroGammaParam();
+#else
+    const double gamma = -1; // PLaceholder
+#endif
 
     // rotate back velocities to simulation coordinate frame
     double LambdaInv[DIM*DIM];

@@ -10,9 +10,11 @@ SPH::SPH(Configuration config, Particles *particles,
                                Domain::Cell bounds) : config { config }, particles { particles },
                                                       domain(bounds)
 #if PERIODIC_BOUNDARIES
-                                                      , ghostParticles(DIM*particles->N, true) // TODO: memory optimization
-#endif
-                                                      {
+                                                      , ghostParticles(DIM*particles->N,
+                                                                        particles->MeshlessEOS,
+                                                                        true) // TODO: memory optimization
+#endif                                                      
+{
 
     Logger(INFO) << "    > Creating grid ... ";
     domain.createGrid(config.kernelSize);
@@ -118,7 +120,8 @@ void SPH::run(){
         particles->compAccSPH(ghostParticles, config.kernelSize);
 #else
         Logger(DEBUG) << "	> Computing acceleration";
-    particles->compAccSPH(config.kernelSize);
+        particles->compAccSPH(config.kernelSize);
+
 #endif
 
 #if PERIODIC_BOUNDARIES

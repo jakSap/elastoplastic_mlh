@@ -18,7 +18,11 @@
 #define CFL .2              // TODO: move to config
 
 /// maximum number of interactions for each particle
-#define MAX_NUM_INTERACTIONS 120
+#define MAX_NUM_INTERACTIONS 200
+
+/* Define which equation of state to use.
+For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
+#define EOS 0 // Ideal gas EOS
 /** maximum interactions with ghost particles
  *  ignored when `PERIODIC_BOUNDARIES` is not set
 **/
@@ -36,7 +40,7 @@
 #define PSI_2 .25           // TODO: move to config
 
 /// meshless finite mass method instead of meshless finite volume
-#define MESHLESS_FINITE_MASS 0
+#define MESHLESS_FINITE_MASS 1
 
 
 #define USE_MATID 0
@@ -44,6 +48,7 @@
 #define USE_HLLC 1
 
 // Use HLL solver
+#define HLLC_general_EOS 1
 #define USE_HLL 0
 
 // Use Roe Average for HLL solver. Otherwise direct estimate is used.

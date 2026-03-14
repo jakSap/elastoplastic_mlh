@@ -64,7 +64,11 @@ double Kernel::dWdh(const double &r, const double &h){
     }
 }
 
-Particles::Particles(int numParticles, bool ghosts) : N { numParticles }, ghosts { ghosts }{
+Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
+            , bool ghosts
+            ) : N { numParticles }, MeshlessEOS(MeshlessEOS),
+            ghosts { ghosts }
+{
     // allocate memory
 #if USE_MATID
     matId = new int[numParticles];
@@ -132,6 +136,7 @@ Particles::Particles(int numParticles, bool ghosts) : N { numParticles }, ghosts
         // estimated memory allocation
         nnlGhosts = new int[numParticles*MAX_NUM_GHOST_INTERACTIONS];
         noiGhosts = new int[numParticles];
+        Logger(DEBUG) << "Declared array size: " << numParticles*(DIM+1);
         ghostMap = new int[numParticles*(DIM+1)]; // TODO: this is only applicable for DIM==2
         psijTilde_xiGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
         AijGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
@@ -371,9 +376,9 @@ void Particles::gridNNS(Domain &domain, const double &kernelSize){
 
 #if RUNSPH
 // For comparable ICs: This sets the internal energies so that P = 2.5 everywhere
-void Particles::setInternalEnergy(double Pressure, const double gamma){
+void Particles::setInternalEnergy(double Pressure, const double hydro_gamma){
     for (int i = 0; i < N; i++){
-        u[i] = Pressure / ((gamma - 1) * rho[i]);
+        u[i] = MeshlessEOS->EOSInternalEnergy(rho[i], Pressure);
     }
 }
 
@@ -834,9 +839,9 @@ void Particles::calcdE(const Particles &ghostParticles, const double &kernelSize
 #if ARTVISC
 // Artificial Viscocity!
 // Compute cs
-void Particles::compCs(const double gamma){
+void Particles::compCs(const double hydro_gamma){
     for (int i = 0; i < N; i++){
-        cs[i] = sqrt((gamma - 1) * u[i]);
+        cs[i] = sqrt((hydro_gamma - 1) * u[i]);
     }
 }
 
@@ -1310,12 +1315,14 @@ void Particles::gradient(double *f, double (*grad)[DIM]){
     }
 }
 
-void Particles::compPressure(const double &gamma){
+void Particles::compPressure(){
     for (int i=0; i<N; ++i){
         // if (i % 1 == 0){
         //     Logger(DEBUG) << "Paricle " << i << " has density " << rho[i] << " and u[i] " << u[i];
         // }
-        P[i] = (gamma-1.)*rho[i]*u[i];
+        // P[i] = (MeshlessEOS->hydro_gamma-1.)*rho[i]*u[i]
+
+        P[i] = MeshlessEOS->EOSPressure(rho[i], u[i]);
         // std::cout << P[i] << std::endl;
 //#if DIM == 3
 //        P[i] = (gamma-1.)*rho[i]*(u[i]+.5*(vx[i]*vx[i]+vy[i]*vy[i]+vz[i]*vz[i]));
@@ -1330,6 +1337,9 @@ void Particles::compPressure(const double &gamma){
 
 void Particles::compEffectiveFace(){
     for (int i=0; i<N; ++i){
+        if(i < 10){
+            Logger(DEBUG) << "Particle i = " << i << ", noi[i] = " << noi[i];
+        }
         for (int j=0; j<noi[i]; ++j){
             int ji = nnl[i*MAX_NUM_INTERACTIONS+j]; // index i of particle j
             // search neighbor i in nnl[] of j
@@ -1484,17 +1494,19 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kerne
     }
 }
 
-double Particles::compGlobalTimestep(const double &gamma, const double &kernelSize){
+double Particles::compGlobalTimestep(const double &kernelSize){
     double dt_ = std::numeric_limits<double>::max();
     for (int i=0; i<N; ++i){
         double vSig = std::numeric_limits<double>::min();
-        double ci = sqrt(gamma*P[i]/rho[i]); // soundspeed @i
+        // double ci = sqrt(hydro_gamma*P[i]/rho[i]); // soundspeed @i
+        double ci = MeshlessEOS->EOSSoundSpeed(rho[i], -1, P[i]); // SOundspeed @i, -1 is a dummy
 
         // searching for maximum signal speed
         for (int jn=0; jn<noi[i]; ++jn){
             int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
 
-            double cj = sqrt(gamma*P[j]/rho[j]); // soundspeed @j
+            // double cj = sqrt(hydro_gamma*P[j]/rho[j]); // soundspeed @j
+            double cj = MeshlessEOS->EOSSoundSpeed(rho[j], -1, P[j]); // SOundspeed @j, -1 is a dummy
 
             double xij[DIM], vij[DIM];
 
@@ -1525,7 +1537,7 @@ double Particles::compGlobalTimestep(const double &gamma, const double &kernelSi
 }
 
 
-void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize, const double &gamma){
+void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
     for (int i=0; i<N; ++i){
         double xij[DIM];
         //double vFrame[DIM];
@@ -1714,8 +1726,14 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize, 
             WijL[iW][0] -= dt/2. * (rho[j] * vjDiv + (vx[j]-vFrame[iW][0])*rhoGrad[j][0] + (vy[j]-vFrame[iW][1])*rhoGrad[j][1]);
 
             // energy
-            WijR[iW][1] -= dt/2. * (gamma*P[i] * viDiv + (vx[i]-vFrame[iW][0])*PGrad[i][0] + (vy[i]-vFrame[iW][1])*PGrad[i][1]);
-            WijL[iW][1] -= dt/2. * (gamma*P[j] * vjDiv + (vx[j]-vFrame[iW][0])*PGrad[j][0] + (vy[j]-vFrame[iW][1])*PGrad[j][1]);
+            // WijR[iW][1] -= dt/2. * (hydro_gamma*P[i] * viDiv + (vx[i]-vFrame[iW][0])*PGrad[i][0] + (vy[i]-vFrame[iW][1])*PGrad[i][1]);
+            // WijL[iW][1] -= dt/2. * (hydro_gamma*P[j] * vjDiv + (vx[j]-vFrame[iW][0])*PGrad[j][0] + (vy[j]-vFrame[iW][1])*PGrad[j][1]);
+            double EnergyFluxhydro_gammai = MeshlessEOS->EOSEnergyFluxGamma(rho[i], P[i], u[i]);
+            double EnergyFluxhydro_gammaj = MeshlessEOS->EOSEnergyFluxGamma(rho[j], P[j], u[j]);
+            WijR[iW][1] -= dt/2. * (EnergyFluxhydro_gammai * P[i] * viDiv
+                                        + (vx[i]-vFrame[iW][0])*PGrad[i][0] + (vy[i]-vFrame[iW][1])*PGrad[i][1]);
+            WijL[iW][1] -= dt/2. * (EnergyFluxhydro_gammaj * P[j] * vjDiv
+                                        + (vx[j]-vFrame[iW][0])*PGrad[j][0] + (vy[j]-vFrame[iW][1])*PGrad[j][1]);
 
             // velocities
             // TODO: center vL and vR and update vFrame (compare to GIZMO code hydro_core_meshless.h:178ff) ??
@@ -1736,7 +1754,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize, 
             if(WijR[iW][1] < 0. || WijL[iW][1] < 0.) {
                 Logger(WARN) << "TIME PREDICTION > Negative pressure encountered@(i = " << i << ", j = " << j << ")";
 
-                double timePredP_i = dt / 2. * (gamma * P[i] * viDiv + (vx[i] - vFrame[iW][0]) * PGrad[i][0] +
+                double timePredP_i = dt / 2. * (MeshlessEOS->EOSEnergyFluxGamma(rho[i], P[i], u[i]) * viDiv + (vx[i] - vFrame[iW][0]) * PGrad[i][0] +
                                                 (vy[i] - vFrame[iW][1]) * PGrad[i][1]
 #if DIM == 3
                                                 + (vz[i] - vFrame[iW][2]) * PGrad[i][2]
@@ -1744,7 +1762,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize, 
                 );
                 Logger(DEBUG) << "Pressure timestep prediction term @i: " << timePredP_i;
 
-                double timePredP_j = dt / 2. * (gamma * P[j] * viDiv + (vx[j] - vFrame[iW][0]) * PGrad[j][0] +
+                double timePredP_j = dt / 2. * (MeshlessEOS->EOSEnergyFluxGamma(rho[j], P[j], u[j]) * viDiv + (vx[j] - vFrame[iW][0]) * PGrad[j][0] +
                                                 (vy[j] - vFrame[iW][1]) * PGrad[j][1]
 #if DIM == 3
                                                 + (vz[j] - vFrame[iW][2]) * PGrad[j][2]
@@ -1828,7 +1846,7 @@ double Particles::pairwiseLimiter(double phi0, double phi_i, double phi_j, doubl
     return phi_;
 }
 
-void Particles::solveRiemannProblems(const double &gamma, const Particles &ghostParticles){
+void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #if USE_HLLC
     double n_unit[DIM];
 #endif
@@ -1901,11 +1919,11 @@ void Particles::solveRiemannProblems(const double &gamma, const Particles &ghost
 
             //    calcNunit(i, ii, n_unit);
                 // Logger(DEBUG) << "Ok " << j << " "<< i;
-                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i};
-                solver.HLLCFlux(Fij[ii], gamma);
+                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i, *MeshlessEOS};
+                solver.HLLCFlux(Fij[ii]);
 #else
-                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii] , i };
-                solver.exact(Fij[ii], gamma);
+                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii] , i, *MeshlessEOS};
+                solver.exact(Fij[ii]);
 #endif
             } else {
                 // Logger(DEBUG) << " i = " << i << " j = " << nnl[ii] << " No compute";
@@ -1929,9 +1947,9 @@ void Particles::solveRiemannProblems(const double &gamma, const Particles &ghost
 
             if(WijRGhosts[ii][1] < 0. || WijLGhosts[ii][1] < 0.){
                 Logger(WARN) << "Negative pressure encountered@(i = " << i << ", jGhost = " << j << ") Very bad :( !!";
-                // Logger(DEBUG) << "rhoL = " << WijLGhosts[ii][0] << ", rhoR = " << WijRGhosts[ii][0]
-                //               << ", uL = " << WijLGhosts[ii][2] << ", uR = " << WijRGhosts[ii][2]
-                //               << ", PL = " << WijLGhosts[ii][1] << ", PR = " << WijRGhosts[ii][1];
+                Logger(DEBUG) << "rhoL = " << WijLGhosts[ii][0] << ", rhoR = " << WijRGhosts[ii][0]
+                              << ", uL = " << WijLGhosts[ii][2] << ", uR = " << WijRGhosts[ii][2]
+                              << ", PL = " << WijLGhosts[ii][1] << ", PR = " << WijRGhosts[ii][1];
 #if DEBUG_LVL
                 Logger(DEBUG) << "Aborting for debugging.";
                 exit(6);
@@ -1959,12 +1977,12 @@ void Particles::solveRiemannProblems(const double &gamma, const Particles &ghost
                 // Logger(DEBUG) << " i = " << i << " j = " << nnl[ii] << " mF = " << Fij[ii][0];
 
                 // calcNunit(i, ii, n_unit);
-                Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i};
+                Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i, *MeshlessEOS};
 
-                solver.HLLCFlux(FijGhosts[ii], gamma);
+                solver.HLLCFlux(FijGhosts[ii]);
 #else
-                Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i};
-                solver.exact(FijGhosts[ii], gamma);
+                Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i, *MeshlessEOS};
+                solver.exact(FijGhosts[ii]);
 #endif
             } else {
                 // Logger(DEBUG) << " i = " << i << " j = " << nnl[ii] << " No compute";
@@ -2613,7 +2631,7 @@ void Particles::compEffectiveFace(const Particles &ghostParticles){
     }
 }
 
-void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize, const double &gamma,
+void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
                                   const Particles &ghostParticles){
 
     for (int i=0; i<N; ++i){
@@ -2740,10 +2758,12 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize, 
             viDiv += vzGrad[i][2];
             vjDiv += ghostParticles.vzGrad[j][2];
 #endif
+            double EnergyFluxhydro_gammai = MeshlessEOS->EOSEnergyFluxGamma(rho[i], P[i], u[i]);
+            double EnergyFluxhydro_gammaj = MeshlessEOS->EOSEnergyFluxGamma(ghostParticles.rho[j], ghostParticles.P[j], ghostParticles.u[j]);
             WijRGhosts[iW][0] -= dt/2. * (rho[i] * viDiv + (vx[i]-vFrameGhosts[iW][0])*rhoGrad[i][0] + (vy[i]-vFrameGhosts[iW][1])*rhoGrad[i][1]);
             WijLGhosts[iW][0] -= dt/2. * (ghostParticles.rho[j] * vjDiv + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.rhoGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.rhoGrad[j][1]);
-            WijRGhosts[iW][1] -= dt/2. * (gamma*P[i] * viDiv + (vx[i]-vFrameGhosts[iW][0])*PGrad[i][0] + (vy[i]-vFrameGhosts[iW][1])*PGrad[i][1]);
-            WijLGhosts[iW][1] -= dt/2. * (gamma*ghostParticles.P[j] * vjDiv + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.PGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.PGrad[j][1]);
+            WijRGhosts[iW][1] -= dt/2. * (EnergyFluxhydro_gammai * P[i] * viDiv + (vx[i]-vFrameGhosts[iW][0])*PGrad[i][0] + (vy[i]-vFrameGhosts[iW][1])*PGrad[i][1]);
+            WijLGhosts[iW][1] -= dt/2. * (EnergyFluxhydro_gammaj * P[j] * vjDiv + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.PGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.PGrad[j][1]);
             WijRGhosts[iW][2] -= dt/2. * (PGrad[i][0]/rho[i] + (vx[i] - vFrameGhosts[iW][0])*vxGrad[i][0] + (vy[i] - vFrameGhosts[iW][1])*vxGrad[i][1]);
             WijLGhosts[iW][2] -= dt/2. * (ghostParticles.PGrad[j][0]/ghostParticles.rho[j] + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.vxGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.vxGrad[j][1]);
             WijRGhosts[iW][3] -= dt/2. * (PGrad[i][1]/rho[i] + (vx[i] - vFrameGhosts[iW][0])*vyGrad[i][0] + (vy[i] - vFrameGhosts[iW][1])*vyGrad[i][1]);

@@ -14,6 +14,7 @@
 #include "Domain.h"
 #include "Helper.h"
 #include "Riemann.h"
+#include "EquationOfState.h"
 
 namespace Kernel {
     double cubicSpline(const double &r, const double &h);
@@ -27,10 +28,12 @@ namespace Kernel {
 class Particles {
 
 public:
-    Particles(int numParticles, bool ghosts=false);
+    Particles(int numParticles, EquationOfState *MeshlessEOS,
+        bool ghosts=false);
     ~Particles();
 
     int N;
+    EquationOfState *MeshlessEOS = nullptr;
 #if USE_MATID
     int *matId;
 #endif
@@ -58,7 +61,7 @@ public:
     double *az;
     // For SPH:
     // For comparable ICs: This sets the internal energies so that P = 2.5 everywhere
-    void setInternalEnergy(const double Pressure, const double gamma);
+    void setInternalEnergy(const double Pressure, const double hydro_gamma);
 
     // Computes the density via kernel smoothing w/o ghost particles
     void compDensitySPH(const double &kernelSize);
@@ -102,7 +105,7 @@ public:
 
     // Compute speed of sound:
     // No need to update ghost particles after this!
-    void compCs(const double gamma);
+    void compCs(const double hydro_gamma);
 
     // Compute Mu_ij:
     double compMuij(int i, int j, const double &kernelSize);
@@ -140,13 +143,13 @@ public:
     void gradient(double *f, double (*grad)[DIM]);
     void slopeLimiter(const double &kernelSize,
                       Particles *ghostParticles=nullptr);
-    void compPressure(const double &gamma);
+    void compPressure();
     void compEffectiveFace();
 
-    double compGlobalTimestep(const double &gamma, const double &kernelSize);
-    void compRiemannStatesLR(const double &dt, const double &kernelSize, const double &gamma);
+    double compGlobalTimestep(const double &kernelSize);
+    void compRiemannStatesLR(const double &dt, const double &kernelSize);
 
-    void solveRiemannProblems(const double &gamma, const Particles &ghostParticles);
+    void solveRiemannProblems(const Particles &ghostParticles);
 
     void collectFluxes(Helper &helper, const Particles &ghostParticles);
 
@@ -175,7 +178,7 @@ public:
     void compPsijTilde(Helper &helper, const Particles &ghostParticles, const double &kernelSize);
     void gradient(double *f, double (*grad)[DIM], double *fGhost, const Particles &ghostParticles); //TODO: remove ghostParticles argument
     void compEffectiveFace(const Particles &ghostParticles);
-    void compRiemannStatesLR(const double &dt, const double &kernelSize, const double &gamma,
+    void compRiemannStatesLR(const double &dt, const double &kernelSize,
                              const Particles &ghostParticles);
 
     /// functions to copy computed quantities to ghosts needed for further processing
@@ -245,6 +248,8 @@ private:
     double xj[DIM];
     double xjGhost[DIM];
 
+    /* Defines whether or not the particles in this instance are ghosts or not.
+    Not to be confused with whether or not ghost particles exist globally */
     bool ghosts;
 };
 

@@ -9,7 +9,9 @@ MeshlessScheme::MeshlessScheme(Configuration config, Particles *particles,
                                Domain::Cell bounds) : config { config }, particles { particles },
                                                       domain(bounds)
 #if PERIODIC_BOUNDARIES
-                                                      , ghostParticles(DIM*particles->N, true) // TODO: memory optimization
+                                                      , ghostParticles(DIM*(particles->N),
+                                                                        particles->MeshlessEOS,
+                                                                        true) // TODO: memory optimization
 #endif
                                                       {
 
@@ -76,7 +78,7 @@ void MeshlessScheme::run(){
 #endif
 
         Logger(INFO) << "    > Computing pressure";
-        particles->compPressure(config.gamma);
+        particles->compPressure();
         //particles->printDensity(config.gamma);
 
         Logger(DEBUG) << "      SANITY CHECK > V_tot = " << particles->sumVolume();
@@ -90,15 +92,14 @@ void MeshlessScheme::run(){
 
 #if ADAPTIVE_TIMESTEP
         Logger(INFO) << "    > Selecting global timestep ... ";
-        timeStep = particles->compGlobalTimestep(config.gamma, config.kernelSize);
+        timeStep = particles->compGlobalTimestep(config.kernelSize);
         //Logger(INFO) << "Time  > dt = " << timeStep << " selected.";
         if(dumpStep >= numDumpTimes){
             Logger(ERROR) << "Simulation did not abort after reaching timeEnd. Exiting.";
-            exit(9);      
-        }
-	else if((t+timeStep>=dumpTimes[dumpStep+1])&(t<dumpTimes[dumpStep+1]))
-        {
-            // if (step % config.h5DumpInterval != 0) {
+            exit(9);
+        } else if((t+timeStep>=dumpTimes[dumpStep+1])&(t<dumpTimes[dumpStep+1]))
+	{
+
             dumpNext = true;
             timeStep = dumpTimes[dumpStep+1]-t;
             Logger(INFO) << "Shorter timestep for punctual dumping";
@@ -154,11 +155,11 @@ void MeshlessScheme::run(){
         particles->compEffectiveFace(ghostParticles);
 #endif // PERIODIC_BOUNDARIES
         Logger(DEBUG) << "      > Computing fluxes";
-        particles->compRiemannStatesLR(timeStep, config.kernelSize, config.gamma);
+        particles->compRiemannStatesLR(timeStep, config.kernelSize);
 
 #if PERIODIC_BOUNDARIES
         Logger(DEBUG) << "      > Computing ghost fluxes";
-        particles->compRiemannStatesLR(timeStep, config.kernelSize, config.gamma,
+        particles->compRiemannStatesLR(timeStep, config.kernelSize,
                                      ghostParticles);
         //Logger(DEBUG) << "Aborting for debugging.";
         //exit(6);
@@ -209,12 +210,17 @@ void MeshlessScheme::run(){
 
         Logger(INFO) << "    > Solving Riemann problems";
 #if PERIODIC_BOUNDARIES
-        particles->solveRiemannProblems(config.gamma, ghostParticles);
+        particles->solveRiemannProblems(ghostParticles);
 #else
-        Particles ghostParticles { 0, true }; // DUMMY
-        particles->solveRiemannProblems(config.gamma, ghostParticles);
+        Particles ghostParticles { 0, 
+#if EOS == 0
+                        config.gamma
+#elif EOS == 1
+                        config.K0, config.murn_n, config.rho0
 #endif
-        
+                        , true }; // DUMMY
+        particles->solveRiemannProblems(ghostParticles);
+#endif
 #if DEBUG_LVL
         Logger(DEBUG) << "    > Checking flux symmetry";
 #if PERIODIC_BOUNDARIES

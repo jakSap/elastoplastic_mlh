@@ -294,8 +294,15 @@
 // with pressure and momentum components exchange. Flux changes accordingly
 
 void HLLC::solveHLLC1(double *WR, double *WL, double *n,
-    double *totflux, const double *vij, const double &hydro_gamma){
+    double *totflux, const double *vij, EquationOfState &MeshlessEOS){
 
+#if HLLC_general_EOS == 1
+    const double GammaL = MeshlessEOS.EOSGeneralGamma(WL[0], WL[1]);
+    const double GammaR = MeshlessEOS.EOSGeneralGamma(WR[0], WR[1]);
+    const double hydro_gamma = 0.5 * (GammaL + GammaR);
+#else
+    const double hydro_gamma = MeshlessEOS.EOSGetHydroGammaParam();
+#endif // HLLC_general_EOS
 
     const double hydro_gamma_plus_one = hydro_gamma + 1.0d;
     const double hydro_one_over_gamma = 1.0d / hydro_gamma;
@@ -315,8 +322,13 @@ void HLLC::solveHLLC1(double *WR, double *WL, double *n,
     const double rhoLinv = (WL[0] > 0.0d) ? 1.0d / WL[0] : 0.0d;
     const double rhoRinv = (WR[0] > 0.0d) ? 1.0d / WR[0] : 0.0d;
 
+#if HLLC_general_EOS
+    const double aL = MeshlessEOS.EOSAdiabaticSoundSpeed(WL[0], WL[1]);
+    const double aR = MeshlessEOS.EOSAdiabaticSoundSpeed(WR[0], WR[1]);
+#else
     const double aL = sqrtf(hydro_gamma * WL[1] * rhoLinv); //c.f. Toro eq. 1.35
     const double aR = sqrtf(hydro_gamma * WR[1] * rhoRinv);
+#endif // HLLC_general_EOS
 
     /* STEP 1: pressure estimate */
     const double rhobar = WL[0] + WR[0];
