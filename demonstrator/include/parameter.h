@@ -39,6 +39,7 @@
 #define MESHLESS_FINITE_MASS 0
 
 
+#define USE_MATID 0
 // Use HLLC or HLL solver for EOS != ideal gas
 #define USE_HLLC 1
 

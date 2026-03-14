@@ -315,7 +315,7 @@ void HLLC::solveHLLC1(double *WR, double *WL, double *n,
     const double rhoLinv = (WL[0] > 0.0d) ? 1.0d / WL[0] : 0.0d;
     const double rhoRinv = (WR[0] > 0.0d) ? 1.0d / WR[0] : 0.0d;
 
-    const double aL = sqrtf(hydro_gamma * WL[1] * rhoLinv);
+    const double aL = sqrtf(hydro_gamma * WL[1] * rhoLinv); //c.f. Toro eq. 1.35
     const double aR = sqrtf(hydro_gamma * WR[1] * rhoRinv);
 
     /* STEP 1: pressure estimate */

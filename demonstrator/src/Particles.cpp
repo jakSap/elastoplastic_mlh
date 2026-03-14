@@ -66,7 +66,9 @@ double Kernel::dWdh(const double &r, const double &h){
 
 Particles::Particles(int numParticles, bool ghosts) : N { numParticles }, ghosts { ghosts }{
     // allocate memory
+#if USE_MATID
     matId = new int[numParticles];
+#endif
     cell = new int[numParticles];
     m = new double[numParticles];
     u = new double[numParticles];
@@ -150,7 +152,9 @@ Particles::Particles(int numParticles, bool ghosts) : N { numParticles }, ghosts
 }
 
 Particles::~Particles() {
+#if USE_MATID
     delete[] matId;
+#endif
     delete[] cell;
     delete[] m;
     delete[] u;
@@ -1755,8 +1759,10 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize, 
             WijL[iW][2] -= dt/2. * (vz[i]-vFrame[iW][2])*vxGrad[j][2];
             WijR[iW][3] -= dt/2. * (vz[i]-vFrame[iW][2])*vyGrad[i][2];
             WijL[iW][3] -= dt/2. * (vz[i]-vFrame[iW][2])*vyGrad[j][2];
+#if DIM == 3
             WijR[iW][4] -= dt/2. * (PGrad[i][2]/rho[i] + (vx[i]-vFrame[iW][0])*vzGrad[i][0] + (vy[i]-vFrame[iW][1])*vzGrad[i][1] + (vz[i]-vFrame[iW][2])*vzGrad[i][2]);
             WijL[iW][4] -= dt/2. * (PGrad[j][2]/rho[j] + (vx[j]-vFrame[iW][0])*vzGrad[j][0] + (vy[j]-vFrame[iW][1])*vzGrad[j][1] + (vz[j]-vFrame[iW][2])*vzGrad[j][2]);
+#endif
 #endif
 
             //if (i == 46){// && jn == 28){

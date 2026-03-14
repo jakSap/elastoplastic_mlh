@@ -31,7 +31,9 @@ public:
     ~Particles();
 
     int N;
+#if USE_MATID
     int *matId;
+#endif
     int *cell; // cell in which particle at index resides
     double *m, *u, *x, *y, *vx, *vy, *rho, *P;
 
