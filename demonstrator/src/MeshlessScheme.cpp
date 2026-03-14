@@ -94,10 +94,14 @@ void MeshlessScheme::run(){
         //Logger(INFO) << "Time  > dt = " << timeStep << " selected.";
         if(dumpStep >= numDumpTimes){
             Logger(ERROR) << "Simulation did not abort after reaching timeEnd. Exiting.";
-            exit(9);
-        } else if(t+timeStep>=dumpTimes[dumpStep+1]){
+            exit(9);      
+        }
+	else if((t+timeStep>=dumpTimes[dumpStep+1])&(t<dumpTimes[dumpStep+1]))
+        {
+            // if (step % config.h5DumpInterval != 0) {
             dumpNext = true;
             timeStep = dumpTimes[dumpStep+1]-t;
+            Logger(INFO) << "Shorter timestep for punctual dumping";
         }
         Logger(INFO) << "Time  > dt = " << timeStep << " selected.";
 #else // ADAPTIVE_TIMESTEP
