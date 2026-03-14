@@ -2,7 +2,7 @@
 
 ConfigParser::ConfigParser(const std::string &file){
     // Extract the file extension from the filename
-    std::string ext = boost::filesystem::extension(file);
+    std::string ext = boost::filesystem::path(file).extension().string();
 
     if (ext == ".json") {
         // parse json and write into 'tree'
