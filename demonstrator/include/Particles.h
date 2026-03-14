@@ -40,6 +40,7 @@ public:
     void assignParticlesAndCells(Domain &domain);
     void gridNNS(Domain &domain, const double &kernelSize);
 
+
 #if RUNSPH
     // For SPH
     double *dEdt, *dn, *drho;
@@ -91,7 +92,6 @@ public:
     void calcdndrho(const Particles &ghostParticles, const double &kernelSize);
 
     void calcdE(const double &kernelSize);
-
 #endif
 
 #if ARTVISC
@@ -155,8 +155,15 @@ public:
 
     double pairwiseLimiter(double phi_0, double phi_i, double phi_j, double xijxi_abs, double xjxi_abs);
 
+    // For HLLC solver: Calculate norm vector between two particles:
+    // n_unit needs to be pre-allocated
+    void calcNunit(const int i, const int j, double* n_unit);
 
 #if PERIODIC_BOUNDARIES
+    // For HLLC solver: Calculate norm vector between two particles:
+    // n_unit needs to be pre-allocated
+    void calcNunit(const Particles &ghostParticles, const int i, const int j, double* n_unit);
+
     void createGhostParticles(Domain &domain,
                               Particles &ghostParticles, const double &kernelSize);
     void ghostNNS(Domain &domain, const Particles &ghostParticles, const double &kernelSize);

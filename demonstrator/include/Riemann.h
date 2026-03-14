@@ -11,6 +11,7 @@
 #include "Helper.h"
 #include "parameter.h"
 #include "Logger.h"
+#include "HLLC.h"
 
 class Riemann {
 
@@ -25,10 +26,35 @@ public:
      */
     void exact(double *Fij, const double &gamma);
 
+    // HLL approximate Riemann solver, as in Toro, chapter 10.3
+    // For != ideal gas
+    // void HLL();
+
+    // Method solveHLLC: eqivalent to riemann_solve_for_flux in SWIFT, BUT:
+    // Takes velocities in the frame of reference of the interface (already boosted)
+    // Returns the de-boosted fluxes that are not yet rotated to the interface frame
+    // Also, not yet projected onto the faces
+
+    // @param WL the left state vector
+    // @param WR the right state vector
+    // @param nUnit normal vector of the interface
+    // @param vij velocity vector of the interface
+    // @param Fij flux vector to store the solution in
+
+    // void HLLC(const double *WL, const double *WR, const double *nUnit,
+    //                                    const double *vij, const double &gamma, double *Fij);
+#if USE_HLLC
+    void HLLCFlux(double *Fij, const double &gamma);
+#endif
+
 private:
+#if USE_HLLC
+    double *nUnit;
+#endif
+
     int i;
     double *WR, *WL, *vFrame, *Aij;
-    double rhoSol, vSol[DIM], PSol;
+    double rhoSol, vSol[DIM], PSol, AijNorm;
     double hatAij[DIM];
     double unitX[DIM] = { 1, 0
 #if DIM==3

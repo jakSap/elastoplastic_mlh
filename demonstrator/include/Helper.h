@@ -27,6 +27,8 @@ public:
     static double dotProduct(double *a, double *b);
     static void crossProduct(double *a, double *b, double *crossProduct);
 
+
+
     /**
      * good resource for 3D implementation: https://math.stackexchange.com/a/897677
      *
@@ -40,10 +42,12 @@ public:
     static void rotationMatrix3D(double *a, double *b, double *Lambda);
 #endif
 
+
 private:
     double WORK[DIM*DIM];
     int IPIV[DIM];
 
 };
+
 
 #endif //MESHLESSHYDRO_HELPER_H

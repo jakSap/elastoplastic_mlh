@@ -81,6 +81,7 @@ Particles::Particles(int numParticles, bool ghosts) : N { numParticles }, ghosts
     vyGrad = new double[numParticles][DIM];
     PGrad = new double[numParticles][DIM];
 
+
 #if RUNSPH
     ax = new double[numParticles];
     ay = new double[numParticles];
@@ -578,6 +579,8 @@ void Particles::calcdE(const double &kernelSize){
     }
 }
 
+
+
 #if PERIODIC_BOUNDARIES
 
 // Computes the density via kernel smoothing w/ ghost particles
@@ -920,8 +923,9 @@ void Particles::compUiArtVisc(const double &kernelSize){
             dSqr += pow(z[i] - z[iP], 2);
             #endif
             r = sqrt(dSqr);
+            // This is not really needed
             if (r <= 0){
-                Logger(DEBUG) << "DANGER";
+                Logger(DEBUG) << "DANGER, r < 0";
             }
             PIij = compPIij(i, iP, kernelSize);
             dudtArtVisc[i] += .5 * m[iP] * PIij *  Kernel::dWdr(r, kernelSize)
@@ -1034,7 +1038,7 @@ void Particles::compUiArtVisc(const Particles &ghostParticles, const double &ker
 #endif
 
 #endif
-#endif
+#endif // RUNSPH
 // Calculate acceleration for each particle, w/o Ghosts
 // c.f. eq 8 in Monaghan: SPH and its diverse Applications, Annu.Rev. Fluid mechanics, 2012
 
@@ -1146,7 +1150,40 @@ void Particles::compUiArtVisc(const Particles &ghostParticles, const double &ker
 //     }
 // }
 
+// For HLLC solver: Calculate norm vector between two particles:
+// n_unit needs to be pre-allocated
+void Particles::calcNunit(const int i, const int j, double* n_unit){
+    double dSqr = pow(x[j] - x[i], 2)
+                        + pow(y[j] - y[i], 2);
+#if DIM == 3
+    dSqr += pow(z[j] - z[i], 2);
+#endif
+    double r = sqrt(dSqr);
+    n_unit[0] = (x[j] - x[i]) / r;
+    n_unit[1] = (y[j] - y[i]) / r;
+#if DIM == 3
+    n_unit[2] = (z[j] - z[i]) / r;
+#endif
+}
 
+#if PERIODIC_BOUNDARIES
+
+// For HLLC solver: Calculate norm vector between two particles, one of which is a ghost:
+// n_unit needs to be pre-allocated
+void Particles::calcNunit(const Particles &ghostParticles, const int i, const int j, double* n_unit){
+    double dSqr = pow(ghostParticles.x[j] - x[i], 2)
+                        + pow(ghostParticles.y[j] - y[i], 2);
+#if DIM == 3
+    dSqr += pow(ghostParticles.z[j] - z[i], 2);
+#endif
+    double r = sqrt(dSqr);
+    n_unit[0] = (ghostParticles.x[j] - x[i]) / r;
+    n_unit[1] = (ghostParticles.y[j] - y[i]) / r;
+#if DIM == 3
+    n_unit[2] = (ghostParticles.z[j] - z[i]) / r;
+#endif
+}
+#endif // PERIODIC_BOUNDARIES
 
 void Particles::compDensity(const double &kernelSize){
     for(int i=0; i<N; ++i){
@@ -1446,7 +1483,6 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kerne
 double Particles::compGlobalTimestep(const double &gamma, const double &kernelSize){
     double dt_ = std::numeric_limits<double>::max();
     for (int i=0; i<N; ++i){
-
         double vSig = std::numeric_limits<double>::min();
         double ci = sqrt(gamma*P[i]/rho[i]); // soundspeed @i
 
@@ -1568,10 +1604,12 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize, 
             WijL[iW][0] = rho[j];
             WijR[iW][1] = P[i];
             WijL[iW][1] = P[j];
+
             WijR[iW][2] = vx[i] - vFrame[iW][0];
             WijL[iW][2] = vx[j] - vFrame[iW][0];
             WijR[iW][3] = vy[i] - vFrame[iW][1];
             WijL[iW][3] = vy[j] - vFrame[iW][1];
+
 #if DIM == 3
             WijR[iW][4] = vz[i] - vFrame[iW][2];
             WijL[iW][4] = vz[j] - vFrame[iW][2];
@@ -1785,41 +1823,45 @@ double Particles::pairwiseLimiter(double phi0, double phi_i, double phi_j, doubl
 }
 
 void Particles::solveRiemannProblems(const double &gamma, const Particles &ghostParticles){
+#if USE_HLLC
+    double n_unit[DIM];
+#endif
     for (int i=0; i<N; ++i){
 
-        //if (!(i % (N/VERBOSITY_PARTICLES))){
+        // if (!(i % (N/VERBOSITY_PARTICLES))){
         //    Logger(DEBUG) << "        > i = " << i;
-        //}
-        //Logger(DEBUG) << "        > i = " << i << ", V = " << 1./omega[i];
-
+        // }
+        // Logger(DEBUG) << "        > i = " << i << ", V = " << 1./omega[i];
+        
         for (int j=0; j<noi[i]; ++j){
+            // Logger(DEBUG) << "Ok " << j << " "<< i;
             int ii = i*MAX_NUM_INTERACTIONS+j; // interaction index
-            //if (i == 9 && j == 11){
-                //Logger(DEBUG) << "i = " << i << ", ii = " << ii << ", j = " << nnl[ii];
-                //Logger(DEBUG) << "xi = [" << x[i] << ", " << y[i] << "], xj = ["
-                //              << x[nnl[ii]] << ", " << y[nnl[ii]] << "] , vi = ["
-                //              << vx[i] << ", " << vy[i] << "], vj = ["
-                //              << vx[nnl[ii]] << ", " << vy[nnl[ii]] << "]";
-                //Logger(DEBUG) << "vFrame = [" << vFrame[ii][0] << ", " << vFrame[ii][1] << "]";
-                //Logger(DEBUG) << "rhoL = " << WijL[ii][0] << ", rhoR = " << WijR[ii][0]
-                //              << ", uL = " << WijL[ii][2] << ", uR = " << WijR[ii][2]
-                //              << ", PL = " << WijL[ii][1] << ", PR = " << WijR[ii][1]
-                //              << ", Aij = [" << Aij[ii][0] << ", " << Aij[ii][1] << "]";
-            //}
+            // if (i == 9 && j == 11){
+            //     Logger(DEBUG) << "i = " << i << ", ii = " << ii << ", j = " << nnl[ii];
+            //     Logger(DEBUG) << "xi = [" << x[i] << ", " << y[i] << "], xj = ["
+            //                  << x[nnl[ii]] << ", " << y[nnl[ii]] << "] , vi = ["
+            //                  << vx[i] << ", " << vy[i] << "], vj = ["
+            //                  << vx[nnl[ii]] << ", " << vy[nnl[ii]] << "]";
+            //     Logger(DEBUG) << "vFrame = [" << vFrame[ii][0] << ", " << vFrame[ii][1] << "]";
+            //     Logger(DEBUG) << "rhoL = " << WijL[ii][0] << ", rhoR = " << WijR[ii][0]
+            //                  << ", uL = " << WijL[ii][2] << ", uR = " << WijR[ii][2]
+            //                  << ", PL = " << WijL[ii][1] << ", PR = " << WijR[ii][1]
+            //                  << ", Aij = [" << Aij[ii][0] << ", " << Aij[ii][1] << "]";
+            // }
 
-            //Logger(DEBUG) << "*WR = " << WijR[ii] << ", *WL = " << WijL[ii];
-            //Logger(DEBUG) << "i = " << i << ", j = " << nnl[ii] << ", PR = " << WijR[ii][1] << ", PL = " << WijL[ii][1];
-
+            // Logger(DEBUG) << "*WR = " << WijR[ii] << ", *WL = " << WijL[ii];
+            // Logger(DEBUG) << "i = " << i << ", j = " << nnl[ii] << ", PR = " << WijR[ii][1] << ", PL = " << WijL[ii][1];
+            //
             if(WijR[ii][1] < 0. || WijL[ii][1] < 0.){
                 Logger(WARN) << "Negative pressure encountered@(i = " << i << ", j = " << j << ") Very bad :( !!";
-                Logger(DEBUG) << "    > rhoL = " << WijL[ii][0] << ", rhoR = " << WijR[ii][0]
-                              << ", uL = " << WijL[ii][2] << ", uR = " << WijR[ii][2]
-                              << ", PL = " << WijL[ii][1] << ", PR = " << WijR[ii][1]
-                              << ", Aij = [" << Aij[ii][0] << ", " << Aij[ii][1]
-#if DIM ==3
-                              << ", " << Aij[ii][2]
-#endif
-                              << "]";
+//                 Logger(DEBUG) << "    > rhoL = " << WijL[ii][0] << ", rhoR = " << WijR[ii][0]
+//                               << ", uL = " << WijL[ii][2] << ", uR = " << WijR[ii][2]
+//                               << ", PL = " << WijL[ii][1] << ", PR = " << WijR[ii][1]
+//                               << ", Aij = [" << Aij[ii][0] << ", " << Aij[ii][1]
+// #if DIM ==3
+//                               << ", " << Aij[ii][2]
+// #endif
+//                               << "]";
 
 #if DEBUG_LVL > 1
                 Logger(DEBUG) << "Aborting for debugging.";
@@ -1832,7 +1874,6 @@ void Particles::solveRiemannProblems(const double &gamma, const Particles &ghost
                 //    WijL[ii][1] = PRESSURE_FLOOR;
                 //}
             }
-
             bool compute = true;
             int iij;
 #if ENFORCE_FLUX_SYM
@@ -1849,17 +1890,27 @@ void Particles::solveRiemannProblems(const double &gamma, const Particles &ghost
             }
 #endif
             if (compute){
+#if USE_HLLC
+                // Logger(DEBUG) << " i = " << i << " j = " << nnl[ii] << " mF = " << Fij[ii][0];
+
+            //    calcNunit(i, ii, n_unit);
+                // Logger(DEBUG) << "Ok " << j << " "<< i;
+                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i};
+                solver.HLLCFlux(Fij[ii], gamma);
+#else
                 Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii] , i };
                 solver.exact(Fij[ii], gamma);
+#endif
             } else {
+                // Logger(DEBUG) << " i = " << i << " j = " << nnl[ii] << " No compute";
                 for(int d=0; d<DIM+2; ++d){
                     Fij[ii][d] = -Fij[iij][d];
                 }
             }
 
-            //if(i == 6){//&& j==11){
+            // if(i == 6){//&& j==11){
             //    Logger(DEBUG) << "Fluxes = [" << Fij[ii][0] << ", " << Fij[ii][1] << ", " << Fij[ii][2] << ", " << Fij[ii][3] << "]";
-            //}
+            // }
         }
 
 #if PERIODIC_BOUNDARIES
@@ -1872,9 +1923,9 @@ void Particles::solveRiemannProblems(const double &gamma, const Particles &ghost
 
             if(WijRGhosts[ii][1] < 0. || WijLGhosts[ii][1] < 0.){
                 Logger(WARN) << "Negative pressure encountered@(i = " << i << ", jGhost = " << j << ") Very bad :( !!";
-                Logger(DEBUG) << "rhoL = " << WijLGhosts[ii][0] << ", rhoR = " << WijRGhosts[ii][0]
-                              << ", uL = " << WijLGhosts[ii][2] << ", uR = " << WijRGhosts[ii][2]
-                              << ", PL = " << WijLGhosts[ii][1] << ", PR = " << WijRGhosts[ii][1];
+                // Logger(DEBUG) << "rhoL = " << WijLGhosts[ii][0] << ", rhoR = " << WijRGhosts[ii][0]
+                //               << ", uL = " << WijLGhosts[ii][2] << ", uR = " << WijRGhosts[ii][2]
+                //               << ", PL = " << WijLGhosts[ii][1] << ", PR = " << WijRGhosts[ii][1];
 #if DEBUG_LVL
                 Logger(DEBUG) << "Aborting for debugging.";
                 exit(6);
@@ -1898,14 +1949,26 @@ void Particles::solveRiemannProblems(const double &gamma, const Particles &ghost
 #endif
 
             if (compute) {
+#if USE_HLLC
+                // Logger(DEBUG) << " i = " << i << " j = " << nnl[ii] << " mF = " << Fij[ii][0];
+
+                // calcNunit(i, ii, n_unit);
+                Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i};
+
+                solver.HLLCFlux(FijGhosts[ii], gamma);
+#else
                 Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i};
                 solver.exact(FijGhosts[ii], gamma);
+#endif
             } else {
+                // Logger(DEBUG) << " i = " << i << " j = " << nnl[ii] << " No compute";
+
                 for(int d=0; d<DIM+2; ++d){
                     FijGhosts[ii][d] = -FijGhosts[iij][d];
                 }
             }
         }
+        
 #endif
     }
 }
@@ -1925,15 +1988,18 @@ void Particles::collectFluxes(Helper &helper, const Particles &ghostParticles){
 
         for(int j=0; j<noi[i]; ++j){
             int ii = j+i*MAX_NUM_INTERACTIONS;
-            //double AijNorm = sqrt(Helper::dotProduct(Aij[ii], Aij[ii]));
+            double AijNorm = sqrt(Helper::dotProduct(Aij[ii], Aij[ii]));
 
             /// MASS FLUXES
             //mF[i] += AijNorm*Fij[ii][0];
             mF[i] += Fij[ii][0];
 
-            //Logger(DEBUG) << "xi = [" << x[i] << ", " << y[i] << "]"
+            // Logger(DEBUG) << " i: " << i << " xi = [" << x[i] << ", " << y[i] << "]"
             //          << ", xj = [" << x[nnl[ii]] << ", " << y[nnl[ii]] << "]"
             //          << ", mF[ii] = " << Fij[ii][0] << ", AijNorm = " << AijNorm;
+
+            // Debug mF = nan
+            // Logger(DEBUG) << " i: " << i << " j: " << nnl[ii] << " mF[ii] = " << Fij[ii][0];
 
             /// VELOCITY FLUXES
             // add de-boosted velocities
@@ -1956,19 +2022,21 @@ void Particles::collectFluxes(Helper &helper, const Particles &ghostParticles){
 
             eF[i] += Fij[ii][1];
 
-            //if (i == 46){
-            //    Logger(DEBUG) << "  > j = " << nnl[ii] << ", AijNorm = " << AijNorm
-            //              << ", vFrame = [" << vFrame[ii][0] << ", " << vFrame[ii][1] << "]";
-            //    Logger(DEBUG) << "  > Fm = " << mF[i] << ", Fv = [" << vF[i][0] << ", " << vF[i][1]
-            //                  << "], Fe = " << eF[i];
-            //}
+            // if (i == 588){
+            //    // Logger(DEBUG) << "  > j = " << nnl[ii] << ", AijNorm = " << AijNorm
+            //    //           << ", vFrame = [" << vFrame[ii][0] << ", " << vFrame[ii][1] << "]";
+            //    Logger(DEBUG) << "  > j = " << nnl[ii] <<  " > Fm = " << Fij[ii][0] << ", Fv = [" << Fij[ii][2] << ", " << Fij[ii][3]
+            //                  << "], dFe = " << Fij[ii][1]
+            //                 //  << " v_ij = " << vFrame[ii][0] << " " << vFrame[i][1]
+            //                  ;
+            // }
 
         }
 
 #if PERIODIC_BOUNDARIES
         for(int j=0; j<noiGhosts[i]; ++j){
             int ii = j+i*MAX_NUM_GHOST_INTERACTIONS;
-            //double AijNorm = sqrt(Helper::dotProduct(AijGhosts[ii], AijGhosts[ii]));
+            // double AijNorm = sqrt(Helper::dotProduct(AijGhosts[ii], AijGhosts[ii]));
 
             /// MASS FLUXES
             //mF[i] += AijNorm*FijGhosts[ii][0];
@@ -2005,6 +2073,15 @@ void Particles::collectFluxes(Helper &helper, const Particles &ghostParticles){
             //    Logger(DEBUG) << "  > Fm = " << mF[i] << ", Fv = [" << vF[i][0] << ", " << vF[i][1]
             //                  << "], Fe = " << eF[i];
             //}
+
+            if (i == 128){
+               // Logger(DEBUG) << "  > j = " << nnl[ii] << ", AijNorm = " << AijNorm
+               //           << ", vFrame = [" << vFrame[ii][0] << ", " << vFrame[ii][1] << "]";
+               Logger(DEBUG) << "  > j = " << nnl[ii] <<  " > Fm = " << FijGhosts[ii][0] << ", Fv = [" << FijGhosts[ii][2] << ", " << FijGhosts[ii][3]
+                             << "], dFe = " << FijGhosts[ii][1]
+                            //  << " v_ij = " << vFrame[ii][0] << " " << vFrame[i][1]
+                             ;
+            }
         }
 #endif
     }
