@@ -753,7 +753,7 @@ void Particles::calcdndrho(const Particles &ghostParticles, const double &kernel
                 * (DIM *Kernel::cubicSpline(r, kernelSize) + r / kernelSize * Kernel::dWdh(r, kernelSize));
         }
         for (int k = 0; k < noiGhosts[i]; k++){
-            iP = nnl[k+i*MAX_NUM_GHOST_INTERACTIONS];
+            iP = nnlGhosts[k+i*MAX_NUM_GHOST_INTERACTIONS];
             dSqr = pow(x[i] - ghostParticles.x[iP], 2)
             + pow(y[i] - ghostParticles.y[iP], 2);
 #if DIM == 3
