@@ -87,6 +87,25 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     vyGrad = new double[numParticles][DIM];
     PGrad = new double[numParticles][DIM];
 
+#if ELASTIC
+    Sxx = new double[numParticles];
+    Sxy = new double[numParticles];
+    Syy = new double[numParticles];
+
+    SxxGrad = new double[numParticles][DIM];
+    SxyGrad = new double[numParticles][DIM];
+    SyyGrad = new double[numParticles][DIM];
+
+#if DIM == 3
+    Sxz = new double[numParticles];
+    Syz = new double[numParticles];
+    Szz = new double[numParticles];
+
+    SxzGrad = new double[numParticles][DIM];
+    SyzGrad = new double[numParticles][DIM];
+    SzzGrad = new double[numParticles][DIM];
+#endif // DIM == 3
+#endif // ELASTIC
 
 #if RUNSPH
     ax = new double[numParticles];
@@ -157,6 +176,7 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
 }
 
 Particles::~Particles() {
+    // delete &MeshlessEOS;
 #if USE_MATID
     delete[] matId;
 #endif
@@ -175,6 +195,24 @@ Particles::~Particles() {
     delete[] PGrad;
     delete[] omega;
 
+#if ELASTIC
+    delete[] Sxx;
+    delete[] Sxy;
+    delete[] Syy;
+
+    delete[] SxxGrad;
+    delete[] SxyGrad;
+    delete[] SyyGrad;
+#if DIM == 3
+    delete[] Sxz;
+    delete[] Syz;
+    delete[] Szz;
+
+    delete[] SxzGrad;
+    delete[] SyzGrad;
+    delete[] SzzGrad;
+#endif // DIM == 3
+#endif // ELASTIC
 #if RUNSPH
 	//delete[] unimportant;
 	delete[] dEdt;
@@ -233,6 +271,129 @@ Particles::~Particles() {
     }
 #endif
 }
+#if ELASTIC
+void Particles::integrateStressTensor(const double &dt) {
+    const double mu = SHEAR_MODULUS;
+
+    for (int i = 0; i < N; ++i) {
+        // Velocity gradients
+        const double dvx_dx = vxGrad[i][0];
+        const double dvx_dy = vxGrad[i][1];
+        const double dvy_dx = vyGrad[i][0];
+        const double dvy_dy = vyGrad[i][1];
+#if DIM == 3
+        const double dvx_dz = vxGrad[i][2];
+        const double dvy_dz = vyGrad[i][2];
+        const double dvz_dx = vzGrad[i][0];
+        const double dvz_dy = vzGrad[i][1];
+        const double dvz_dz = vzGrad[i][2];
+#endif
+
+        // Velocities
+        const double vxi = vx[i];
+        const double vyi = vy[i];
+#if DIM == 3
+        const double vzi = vz[i];
+#endif
+
+        // Current stress tensor values
+        double sxx = Sxx[i];
+        double syy = Syy[i];
+        double sxy = Sxy[i];
+#if DIM == 3
+        double szz = Szz[i];
+        double sxz = Sxz[i];
+        double syz = Syz[i];
+#endif
+
+        // --- Constant terms (independent of S) ---
+
+        // Traceless viscous strain rate (eq. 36-41, first line each)
+#if DIM == 2
+        const double visc_xx =  (4./3.)*mu*dvx_dx - (2./3.)*mu*dvy_dy;
+        const double visc_yy = -(2./3.)*mu*dvx_dx + (4./3.)*mu*dvy_dy;
+        const double visc_xy = mu * (dvy_dx + dvx_dy);
+#elif DIM == 3
+        const double visc_xx =  (4./3.)*mu*dvx_dx - (2./3.)*mu*dvy_dy - (2./3.)*mu*dvz_dz;
+        const double visc_yy = -(2./3.)*mu*dvx_dx + (4./3.)*mu*dvy_dy - (2./3.)*mu*dvz_dz;
+        const double visc_zz = -(2./3.)*mu*dvx_dx - (2./3.)*mu*dvy_dy + (4./3.)*mu*dvz_dz;
+        const double visc_xy = mu * (dvy_dx + dvx_dy);
+        const double visc_xz = mu * (dvz_dx + dvx_dz);
+        const double visc_yz = mu * (dvz_dy + dvy_dz);
+#endif
+
+        // Advection: -v_gamma * d_gamma S^{alpha beta} (eq. 42)
+#if DIM == 2
+        const double adv_xx = -vxi*SxxGrad[i][0] - vyi*SxxGrad[i][1];
+        const double adv_yy = -vxi*SyyGrad[i][0] - vyi*SyyGrad[i][1];
+        const double adv_xy = -vxi*SxyGrad[i][0] - vyi*SxyGrad[i][1];
+#elif DIM == 3
+        const double adv_xx = -vxi*SxxGrad[i][0] - vyi*SxxGrad[i][1] - vzi*SxxGrad[i][2];
+        const double adv_yy = -vxi*SyyGrad[i][0] - vyi*SyyGrad[i][1] - vzi*SyyGrad[i][2];
+        const double adv_zz = -vxi*SzzGrad[i][0] - vyi*SzzGrad[i][1] - vzi*SzzGrad[i][2];
+        const double adv_xy = -vxi*SxyGrad[i][0] - vyi*SxyGrad[i][1] - vzi*SxyGrad[i][2];
+        const double adv_xz = -vxi*SxzGrad[i][0] - vyi*SxzGrad[i][1] - vzi*SxzGrad[i][2];
+        const double adv_yz = -vxi*SyzGrad[i][0] - vyi*SyzGrad[i][1] - vzi*SyzGrad[i][2];
+#endif
+
+        // Rotation rate components (fixed during integration)
+        const double R_xy = dvy_dx - dvx_dy; // d_x v_y - d_y v_x
+#if DIM == 3
+        const double R_xz = dvz_dx - dvx_dz; // d_x v_z - d_z v_x
+        const double R_yz = dvz_dy - dvy_dz; // d_y v_z - d_z v_y
+#endif
+
+        // --- RK2 midpoint method ---
+        // k1 = f(S^n): Jaumann rotation terms depend on current S
+#if DIM == 2
+        double k1_xx = visc_xx - sxy*R_xy             + adv_xx;
+        double k1_yy = visc_yy + sxy*R_xy             + adv_yy;
+        double k1_xy = visc_xy + 0.5*(sxx-syy)*R_xy   + adv_xy;
+#elif DIM == 3
+        double k1_xx = visc_xx - sxy*R_xy - sxz*R_xz                               + adv_xx;
+        double k1_yy = visc_yy + sxy*R_xy - syz*R_yz                               + adv_yy;
+        double k1_zz = visc_zz + sxz*R_xz + syz*R_yz                               + adv_zz;
+        double k1_xy = visc_xy + 0.5*(sxx-syy)*R_xy - 0.5*syz*R_xz - 0.5*sxz*R_yz + adv_xy;
+        double k1_xz = visc_xz + 0.5*(sxx-szz)*R_xz - 0.5*syz*R_xy + 0.5*sxy*R_yz + adv_xz;
+        double k1_yz = visc_yz + 0.5*(syy-szz)*R_yz + 0.5*sxz*R_xy + 0.5*sxy*R_xz + adv_yz;
+#endif
+
+        // S_mid = S^n + (dt/2) * k1
+        double sxx_m = sxx + 0.5*dt*k1_xx;
+        double syy_m = syy + 0.5*dt*k1_yy;
+        double sxy_m = sxy + 0.5*dt*k1_xy;
+#if DIM == 3
+        double szz_m = szz + 0.5*dt*k1_zz;
+        double sxz_m = sxz + 0.5*dt*k1_xz;
+        double syz_m = syz + 0.5*dt*k1_yz;
+#endif
+
+        // k2 = f(S_mid): re-evaluate Jaumann terms at midpoint
+#if DIM == 2
+        double k2_xx = visc_xx - sxy_m*R_xy               + adv_xx;
+        double k2_yy = visc_yy + sxy_m*R_xy               + adv_yy;
+        double k2_xy = visc_xy + 0.5*(sxx_m-syy_m)*R_xy   + adv_xy;
+#elif DIM == 3
+        double k2_xx = visc_xx - sxy_m*R_xy - sxz_m*R_xz                                   + adv_xx;
+        double k2_yy = visc_yy + sxy_m*R_xy - syz_m*R_yz                                   + adv_yy;
+        double k2_zz = visc_zz + sxz_m*R_xz + syz_m*R_yz                                   + adv_zz;
+        double k2_xy = visc_xy + 0.5*(sxx_m-syy_m)*R_xy - 0.5*syz_m*R_xz - 0.5*sxz_m*R_yz + adv_xy;
+        double k2_xz = visc_xz + 0.5*(sxx_m-szz_m)*R_xz - 0.5*syz_m*R_xy + 0.5*sxy_m*R_yz + adv_xz;
+        double k2_yz = visc_yz + 0.5*(syy_m-szz_m)*R_yz + 0.5*sxz_m*R_xy + 0.5*sxy_m*R_xz + adv_yz;
+#endif
+
+        // S^{n+1} = S^n + dt * k2
+        Sxx[i] = sxx + dt*k2_xx;
+        Syy[i] = syy + dt*k2_yy;
+        Sxy[i] = sxy + dt*k2_xy;
+#if DIM == 3
+        Szz[i] = szz + dt*k2_zz;
+        Sxz[i] = sxz + dt*k2_xz;
+        Syz[i] = syz + dt*k2_yz;
+#endif
+    }
+}
+#endif // ELASTIC
 
 #if !PERIODIC_BOUNDARIES
 void Particles::getDomainLimits(double *domainLimits){
@@ -290,17 +451,23 @@ void Particles::assignParticlesAndCells(Domain &domain){
         int floorY = floor((y[i]-domain.bounds.minY)/domain.cellSizeY);
 
         // This rarely happens when x or y is really close to the domain bounds
-        if (floorX == domain.cellsX){
-            floorX -= 1;
+        if (floorX < 0){
+            floorX = 0;
+        } else if (floorX >= domain.cellsX){
+            floorX = domain.cellsX - 1;
         }
-        if (floorY == domain.cellsY){
-            floorY -= 1;
+        if (floorY < 0){
+            floorY = 0;
+        } else if (floorY >= domain.cellsY){
+            floorY = domain.cellsY - 1;
         }
 
 #if DIM==3
         int floorZ = floor((z[i]-domain.bounds.minZ)/domain.cellSizeZ);
-        if (floorZ == domain.cellsZ){
-            floorZ -= 1;
+        if (floorZ < 0){
+            floorZ = 0;
+        } else if (floorZ >= domain.cellsZ){
+            floorZ = domain.cellsZ - 1;
         }
 #endif
 
@@ -311,13 +478,11 @@ void Particles::assignParticlesAndCells(Domain &domain){
 #endif
         ;
 
-        // if (floorX >= domain.cellsX || floorY >= domain.cellsY){
-        //    Logger(ERROR) << "  > Particle i = " << i << " cannot be properly assigned to search grid.";
-        //    Logger(ERROR) << "    > x = " << x[i] << " -> floorX = " << floorX
-        //                  << ", y = " << y[i] << " -> floorY = " << floorY;
-        // }
-        //
-        // Logger(DEBUG) << "floor x = " << floorX
+        if (floorX < 0 || floorX >= domain.cellsX || floorY < 0 || floorY >= domain.cellsY){
+           Logger(ERROR) << "  > Particle i = " << i << " cannot be properly assigned to search grid.";
+           Logger(ERROR) << "    > x = " << x[i] << " -> floorX = " << floorX
+                         << ", y = " << y[i] << " -> floorY = " << floorY;
+        }
         //          << ", floor y = " << floorY;
 
         //Logger(DEBUG) << "      > Assigning particle@" << i << " = [" << x[i] << ", " << y[i]
@@ -1318,6 +1483,7 @@ void Particles::gradient(double *f, double (*grad)[DIM]){
 void Particles::compPressure(){
     for (int i=0; i<N; ++i){
         // if (i % 1 == 0){
+        P[i] = MeshlessEOS->EOSPressure(rho[i], u[i]);
         //     Logger(DEBUG) << "Paricle " << i << " has density " << rho[i] << " and u[i] " << u[i];
         // }
         // P[i] = (MeshlessEOS->hydro_gamma-1.)*rho[i]*u[i]
@@ -1329,9 +1495,12 @@ void Particles::compPressure(){
 //#else
 //        P[i] = (gamma-1.)*rho[i]*(u[i]+.5*(vx[i]*vx[i]+vy[i]*vy[i]));
 //#endif
+#if EOS == 0
         if(P[i] <= 0.){
             Logger(WARN) << "Zero or negative pressure @" << i;
+            Logger(WARN) << "Paricle " << i << " has density " << rho[i] << " and u[i] " << u[i] << " and pressure " << P[i];
         }
+#endif
     }
 }
 
@@ -1386,15 +1555,42 @@ void Particles::slopeLimiter(const double &kernelSize,
     slopeLimiter(P, PGrad, kernelSize, ghostParticles, PGhost);
 }
 
+#if ELASTIC
+void Particles::slopeLimiterStress(const double &kernelSize,
+                                    Particles *ghostParticles){
+    double *SxxGhost = nullptr, *SxyGhost = nullptr, *SyyGhost = nullptr;
+#if DIM==3
+    double *SxzGhost = nullptr, *SyzGhost = nullptr, *SzzGhost = nullptr;
+#endif
+#if PERIODIC_BOUNDARIES
+    SxxGhost = ghostParticles->Sxx;
+    SxyGhost = ghostParticles->Sxy;
+    SyyGhost = ghostParticles->Syy;
+#if DIM==3
+    SxzGhost = ghostParticles->Sxz;
+    SyzGhost = ghostParticles->Syz;
+    SzzGhost = ghostParticles->Szz;
+#endif
+#endif
+    slopeLimiter(Sxx, SxxGrad, kernelSize, ghostParticles, SxxGhost);
+    slopeLimiter(Sxy, SxyGrad, kernelSize, ghostParticles, SxyGhost);
+    slopeLimiter(Syy, SyyGrad, kernelSize, ghostParticles, SyyGhost);
+#if DIM==3
+    slopeLimiter(Sxz, SxzGrad, kernelSize, ghostParticles, SxzGhost);
+    slopeLimiter(Syz, SyzGrad, kernelSize, ghostParticles, SyzGhost);
+    slopeLimiter(Szz, SzzGrad, kernelSize, ghostParticles, SzzGhost);
+#endif
+}
+#endif // ELASTIC
 void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kernelSize,
                              Particles *ghostParticles, double *fGhost){
     double xij[DIM], xijxi[DIM];
     //Logger(DEBUG) << "#################### NEXT GRADIENT ####################";
 
     for (int i=0; i<N; ++i){
-        double psiMaxNgb { std::numeric_limits<double>::min() };
+        double psiMaxNgb { std::numeric_limits<double>::lowest() };
         double psiMinNgb { std::numeric_limits<double>::max() };
-        double psiMaxMid { std::numeric_limits<double>::min() };
+        double psiMaxMid { std::numeric_limits<double>::lowest() };
         double psiMinMid { std::numeric_limits<double>::max() };
 
         for (int jn=0; jn<noi[i]; ++jn) {
@@ -1464,8 +1660,10 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kerne
         }
 #endif
         // update gradients if necessary
-        double alphaMax = abs((psiMaxNgb - f[i]) / (psiMaxMid - f[i]));
-        double alphaMin = abs((f[i] - psiMinNgb) / (f[i] - psiMinMid));
+        double denomMax = psiMaxMid - f[i];
+        double denomMin = f[i] - psiMinMid;
+        double alphaMax = (std::fabs(denomMax) > 1e-30) ? std::fabs((psiMaxNgb - f[i]) / denomMax) : 1.0;
+        double alphaMin = (std::fabs(denomMin) > 1e-30) ? std::fabs((f[i] - psiMinNgb) / denomMin) : 1.0;
 
         //if(i==6){
         //    Logger(DEBUG) << "alphaMin = " << alphaMin << ", alphaMax = " << alphaMax
@@ -1474,6 +1672,15 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kerne
         //                << ", f[i] = " << f[i];
         //}
 
+#if DEBUG_LVL
+        if(i == 2){
+            Logger(DEBUG) << "slopeLimiter i=2: f[i]=" << f[i]
+                          << " grad=[" << grad[i][0] << ", " << grad[i][1] << "]"
+                          << " alphaMin=" << alphaMin << " alphaMax=" << alphaMax
+                          << " psiMinNgb=" << psiMinNgb << " psiMaxNgb=" << psiMaxNgb
+                          << " psiMinMid=" << psiMinMid << " psiMaxMid=" << psiMaxMid;
+        }
+#endif
         if (alphaMin <= alphaMax && BETA*alphaMin < 1.){
             //Logger(DEBUG) << "        > Limiting gradient with alphaMin@" << i << ", alpha = "
             //              << alphaMin << ", grad[0] = " << grad[i][0] << ", grad[1] = " << grad[i][1];
@@ -1536,6 +1743,44 @@ double Particles::compGlobalTimestep(const double &kernelSize){
     return dt_;
 }
 
+#if ELASTIC
+double Particles::compElasticTimestep(const double &kernelSize){
+    double dt_ = std::numeric_limits<double>::max();
+    for (int i=0; i<N; ++i){
+        double vSig = std::numeric_limits<double>::min();
+
+        // Elastic longitudinal wave speed (eq. 92)
+        double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
+        double ci = sqrt((Ki + 4.0/3.0 * SHEAR_MODULUS) / rho[i]);
+
+        for (int jn=0; jn<noi[i]; ++jn){
+            int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
+
+            double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j]);
+            double cj = sqrt((Kj + 4.0/3.0 * SHEAR_MODULUS) / rho[j]);
+
+            double xij[DIM], vij[DIM];
+            xij[0] = x[i] - x[j];
+            xij[1] = y[i] - y[j];
+            vij[0] = vx[i] - vx[j];
+            vij[1] = vy[i] - vy[j];
+#if DIM == 3
+            xij[2] = z[i] - z[j];
+            vij[2] = vz[i] - vz[j];
+#endif
+            double vijxij = Helper::dotProduct(vij, xij)/sqrt(Helper::dotProduct(xij, xij));
+            vijxij = vijxij < 0. ? vijxij : 0.;
+
+            double vSig_i = ci + cj - vijxij;
+            vSig = vSig_i > vSig ? vSig_i : vSig;
+        }
+
+        double dt = CFL*kernelSize/vSig;
+        dt_ = dt < dt_ ? dt : dt_;
+    }
+    return dt_;
+}
+#endif // ELASTIC
 
 void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
     for (int i=0; i<N; ++i){
@@ -1563,7 +1808,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
             xijxi[0] = .5*(x[j] - x[i]);
             xijxi[1] = .5*(y[j] - y[i]);
 
-#else
+#else // !FIRST_ORDER_QUAD_POINT
             xij[0] = x[i] + kernelSize/4. * xjxi[0];
             xij[1] = y[i] + kernelSize/4. * xjxi[1];
 
@@ -1572,14 +1817,14 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
 
             xijxj[0] = xij[0] - x[j];
             xijxj[1] = xij[1] - y[j];
-#endif
+#endif // FIRST_ORDER_QUAD_POINT
 
 #if DIM==3
 #if FIRST_ORDER_QUAD_POINT
             xij[2] = (z[i] + z[j])/2.;
             xijxj[2] = .5*(z[i] - z[j]);
             xijxi[2] = .5*(z[j] - z[i]);
-#else
+#else // !FIRST_ORDER_QUAD_POINT
             xjxi[2] = z[j] - z[i];
             //xij[2] = z[i] + kernelSize/2. * xjxi[2];
 
@@ -1587,8 +1832,8 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
 
             xijxi[2] = xij[2] - z[i];
             xijxj[2] = xij[2] - z[j];
-#endif
-#endif
+#endif // FIRST_ORDER_QUAD_POINT
+#endif // DIM == 3
 
             int iW = i*MAX_NUM_INTERACTIONS+jn;
 #if !MOVE_PARTICLES
@@ -1596,15 +1841,15 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
             vFrame[iW][1] = 0.;
 #if DIM==3
             vFrame[iW][2] = 0.;
-#endif
+#endif // DIM == 3
 #else // MOVE_PARTICLES
 #if FIRST_ORDER_QUAD_POINT
             vFrame[iW][0] = (vx[i] + vx[j])/2.;
             vFrame[iW][1] = (vy[i] + vy[j])/2.;
 #if DIM==3
             vFrame[iW][2] = (vz[i] + vz[j])/2.;
-#endif
-#else
+#endif // DIM == 3
+#else // !FIRST_ORDER_QUAD_POINT
             double dotProd = Helper::dotProduct(xijxi, xjxi);
             double dSqr = Helper::dotProduct(xjxi, xjxi);
 
@@ -1612,10 +1857,27 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
             vFrame[iW][1] = vy[i] + (vy[j]-vy[i]) * dotProd/dSqr;
 #if DIM==3
             vFrame[iW][2] = vz[i] + (vz[j]-vz[i]) * dotProd/dSqr;
-#endif
+#endif // DIM == 3
 #endif // FIRST_ORDER_QUAD_POINT
 #endif // MOVE_PARTICLES
             // boost frame to effective face
+#if DEBUG_LVL
+            if(i == 2 && jn == 0){
+                Logger(DEBUG) << "compRiemannStatesLR i=2, j=" << j
+                              << " RAW: vx[i]=" << vx[i] << ", vy[i]=" << vy[i]
+                              << ", vFrame=[" << vFrame[iW][0] << ", " << vFrame[iW][1] << "]";
+                Logger(DEBUG) << "  vxGrad[i]=[" << vxGrad[i][0] << ", " << vxGrad[i][1]
+                              << "], vyGrad[i]=[" << vyGrad[i][0] << ", " << vyGrad[i][1] << "]";
+                Logger(DEBUG) << "  PGrad[i]=[" << PGrad[i][0] << ", " << PGrad[i][1]
+                              << "], rho[i]=" << rho[i];
+                Logger(DEBUG) << "  xijxi=[" << xijxi[0] << ", " << xijxi[1] << "]";
+#if ELASTIC
+                Logger(DEBUG) << "  SxxGrad[i]=[" << SxxGrad[i][0] << ", " << SxxGrad[i][1]
+                              << "], SxyGrad[i]=[" << SxyGrad[i][0] << ", " << SxyGrad[i][1]
+                              << "], SyyGrad[i]=[" << SyyGrad[i][0] << ", " << SyyGrad[i][1] << "]";
+#endif
+            }
+#endif
             WijR[iW][0] = rho[i];
             WijL[iW][0] = rho[j];
             WijR[iW][1] = P[i];
@@ -1629,7 +1891,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
 #if DIM == 3
             WijR[iW][4] = vz[i] - vFrame[iW][2];
             WijL[iW][4] = vz[j] - vFrame[iW][2];
-#endif
+#endif // DIM == 3
 
 #if PAIRWISE_LIMITER
             double WijR_buf[DIM+2], WijL_buf[DIM+2];
@@ -1671,6 +1933,13 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
 #if DIM==3
             WijR[iW][4] += Helper::dotProduct(vzGrad[i], xijxi);
             WijL[iW][4] += Helper::dotProduct(vzGrad[j], xijxj);
+#endif // DIM == 3
+
+#if DEBUG_LVL
+            if(i == 2 && jn == 0){
+                Logger(DEBUG) << "  AFTER GRAD EXTRAP: vxR=" << WijR[iW][2]
+                              << ", vyR=" << WijR[iW][3];
+            }
 #endif
 
 #if PAIRWISE_LIMITER
@@ -1688,9 +1957,14 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
                 WijR[iW][nu] = pairwiseLimiter(WijR[iW][nu], WijR_buf[nu], WijL_buf[nu], xijxi_abs, xjxi_abs);
                 WijL[iW][nu] = pairwiseLimiter(WijL[iW][nu], WijL_buf[nu], WijR_buf[nu], xijxj_abs, xjxi_abs);
             }
-#endif
+#endif // PAIRWISE_LIMITER
 
 #if DEBUG_LVL
+            if(i == 2 && jn == 0){
+                Logger(DEBUG) << "  AFTER PAIRWISE LIM: vxR=" << WijR[iW][2]
+                              << ", vyR=" << WijR[iW][3];
+            }
+#if EOS == 0
             if(WijR[iW][1] < 0. || WijL[iW][1] < 0.) {
                 Logger(WARN) << "FACE RECONSTRUCTION > Negative pressure encountered@(i = " << i << ", j = " << j << ")";
                 Logger(DEBUG) << "rhoL = " << WijL[iW][0] << ", rhoR = " << WijR[iW][0]
@@ -1699,14 +1973,15 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
                               << ", PGrad[i] = [" << PGrad[i][0] << ", " << PGrad[i][1]
 #if DIM == 3
                               << ", " << PGrad[i][2]
-#endif
+#endif // DIM == 3
                               << "] , PGrad[j] = [" << PGrad[j][0] << ", " << PGrad[j][1]
 #if DIM == 3
                               << ", " << PGrad[j][2]
-#endif
+#endif // DIM == 3
                               << "]";
             }
-#endif
+#endif // EOS == 0
+#endif // DEBUG_LVL
             //if (i == 46){
             //    Logger(DEBUG) << "        j = " << j
             //                  << ", rhoL = " << WijL[iW][0] << ", rhoR = " << WijR[iW][0]
@@ -1720,7 +1995,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
 #if DIM==3
             viDiv += vzGrad[i][2];
             vjDiv += vzGrad[j][2];
-#endif
+#endif // DIM == 3
             // density
             WijR[iW][0] -= dt/2. * (rho[i] * viDiv + (vx[i]-vFrame[iW][0])*rhoGrad[i][0] + (vy[i]-vFrame[iW][1])*rhoGrad[i][1]);
             WijL[iW][0] -= dt/2. * (rho[j] * vjDiv + (vx[j]-vFrame[iW][0])*rhoGrad[j][0] + (vy[j]-vFrame[iW][1])*rhoGrad[j][1]);
@@ -1741,6 +2016,19 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
             WijL[iW][2] -= dt/2. * (PGrad[j][0]/rho[j] + (vx[j]-vFrame[iW][0])*vxGrad[j][0] + (vy[j]-vFrame[iW][1])*vxGrad[j][1]);
             WijR[iW][3] -= dt/2. * (PGrad[i][1]/rho[i] + (vx[i]-vFrame[iW][0])*vyGrad[i][0] + (vy[i]-vFrame[iW][1])*vyGrad[i][1]);
             WijL[iW][3] -= dt/2. * (PGrad[j][1]/rho[j] + (vx[j]-vFrame[iW][0])*vyGrad[j][0] + (vy[j]-vFrame[iW][1])*vyGrad[j][1]);
+#if ELASTIC
+            // Elastic source: dv/dt += (1/ρ) ∇·S
+            WijR[iW][2] += dt/2. * (SxxGrad[i][0] + SxyGrad[i][1]) / rho[i];
+            WijL[iW][2] += dt/2. * (SxxGrad[j][0] + SxyGrad[j][1]) / rho[j];
+            WijR[iW][3] += dt/2. * (SxyGrad[i][0] + SyyGrad[i][1]) / rho[i];
+            WijL[iW][3] += dt/2. * (SxyGrad[j][0] + SyyGrad[j][1]) / rho[j];
+#endif // ELASTIC
+#if DEBUG_LVL
+            if(i == 2 && jn == 0){
+                Logger(DEBUG) << "  AFTER TIME PRED+ELASTIC: vxR=" << WijR[iW][2]
+                              << ", vyR=" << WijR[iW][3];
+            }
+#endif
 #if DIM==3
             // density
             WijR[iW][0] -= dt/2. * (vz[i]-vFrame[iW][2])*rhoGrad[i][2];
@@ -1751,6 +2039,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
             WijL[iW][1] -= dt/2. * (vz[j]-vFrame[iW][2])*PGrad[j][2];
 
 #if DEBUG_LVL
+#if EOS == 0
             if(WijR[iW][1] < 0. || WijL[iW][1] < 0.) {
                 Logger(WARN) << "TIME PREDICTION > Negative pressure encountered@(i = " << i << ", j = " << j << ")";
 
@@ -1758,7 +2047,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
                                                 (vy[i] - vFrame[iW][1]) * PGrad[i][1]
 #if DIM == 3
                                                 + (vz[i] - vFrame[iW][2]) * PGrad[i][2]
-#endif
+#endif // DIM == 3
                 );
                 Logger(DEBUG) << "Pressure timestep prediction term @i: " << timePredP_i;
 
@@ -1766,11 +2055,12 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
                                                 (vy[j] - vFrame[iW][1]) * PGrad[j][1]
 #if DIM == 3
                                                 + (vz[j] - vFrame[iW][2]) * PGrad[j][2]
-#endif
+#endif // DIM == 3
                 );
                 Logger(DEBUG) << "Pressure timestep prediction term @j: " << timePredP_j;
             }
-#endif
+#endif // EOS == 0
+#endif // DEBUG_LVL
 
             // velocities
             WijR[iW][2] -= dt/2. * (vz[i]-vFrame[iW][2])*vxGrad[i][2];
@@ -1780,8 +2070,17 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
 #if DIM == 3
             WijR[iW][4] -= dt/2. * (PGrad[i][2]/rho[i] + (vx[i]-vFrame[iW][0])*vzGrad[i][0] + (vy[i]-vFrame[iW][1])*vzGrad[i][1] + (vz[i]-vFrame[iW][2])*vzGrad[i][2]);
             WijL[iW][4] -= dt/2. * (PGrad[j][2]/rho[j] + (vx[j]-vFrame[iW][0])*vzGrad[j][0] + (vy[j]-vFrame[iW][1])*vzGrad[j][1] + (vz[j]-vFrame[iW][2])*vzGrad[j][2]);
-#endif
-#endif
+#endif // DIM == 3
+#if ELASTIC
+            // Elastic 3D source terms for velocity prediction
+            WijR[iW][2] += dt/2. * SxzGrad[i][2] / rho[i];
+            WijL[iW][2] += dt/2. * SxzGrad[j][2] / rho[j];
+            WijR[iW][3] += dt/2. * SyzGrad[i][2] / rho[i];
+            WijL[iW][3] += dt/2. * SyzGrad[j][2] / rho[j];
+            WijR[iW][4] += dt/2. * (SxzGrad[i][0] + SyzGrad[i][1] + SzzGrad[i][2]) / rho[i];
+            WijL[iW][4] += dt/2. * (SxzGrad[j][0] + SyzGrad[j][1] + SzzGrad[j][2]) / rho[j];
+#endif // ELASTIC
+#endif // DIM == 3
 
             //if (i == 46){// && jn == 28){
             //    Logger(DEBUG) << "        j = " << j
@@ -1875,7 +2174,7 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 
             // Logger(DEBUG) << "*WR = " << WijR[ii] << ", *WL = " << WijL[ii];
             // Logger(DEBUG) << "i = " << i << ", j = " << nnl[ii] << ", PR = " << WijR[ii][1] << ", PL = " << WijL[ii][1];
-            //
+#if EOS == 0
             if(WijR[ii][1] < 0. || WijL[ii][1] < 0.){
                 Logger(WARN) << "Negative pressure encountered@(i = " << i << ", j = " << j << ") Very bad :( !!";
 //                 Logger(DEBUG) << "    > rhoL = " << WijL[ii][0] << ", rhoR = " << WijR[ii][0]
@@ -1898,6 +2197,7 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 //    WijL[ii][1] = PRESSURE_FLOOR;
                 //}
             }
+#endif // EOS == 0
             bool compute = true;
             int iij;
 #if ENFORCE_FLUX_SYM
@@ -1919,10 +2219,46 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 
             //    calcNunit(i, ii, n_unit);
                 // Logger(DEBUG) << "Ok " << j << " "<< i;
-                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i, *MeshlessEOS};
+#if ELASTIC
+                // Extrapolate stress to face midpoints
+                int jj = nnl[ii];
+                double xijxi_loc[DIM], xijxj_loc[DIM];
+                xijxi_loc[0] = .5*(x[jj] - x[i]);
+                xijxi_loc[1] = .5*(y[jj] - y[i]);
+                xijxj_loc[0] = -xijxi_loc[0];
+                xijxj_loc[1] = -xijxi_loc[1];
+#if DIM == 3
+                xijxi_loc[2] = .5*(z[jj] - z[i]);
+                xijxj_loc[2] = -xijxi_loc[2];
+#endif
+                double fSxxR = Sxx[i]  + Helper::dotProduct(SxxGrad[i], xijxi_loc);
+                double fSxyR = Sxy[i]  + Helper::dotProduct(SxyGrad[i], xijxi_loc);
+                double fSyyR = Syy[i]  + Helper::dotProduct(SyyGrad[i], xijxi_loc);
+                double fSxxL = Sxx[jj] + Helper::dotProduct(SxxGrad[jj], xijxj_loc);
+                double fSxyL = Sxy[jj] + Helper::dotProduct(SxyGrad[jj], xijxj_loc);
+                double fSyyL = Syy[jj] + Helper::dotProduct(SyyGrad[jj], xijxj_loc);
+#if DIM == 3
+                double fSxzR = Sxz[i]  + Helper::dotProduct(SxzGrad[i], xijxi_loc);
+                double fSyzR = Syz[i]  + Helper::dotProduct(SyzGrad[i], xijxi_loc);
+                double fSzzR = Szz[i]  + Helper::dotProduct(SzzGrad[i], xijxi_loc);
+                double fSxzL = Sxz[jj] + Helper::dotProduct(SxzGrad[jj], xijxj_loc);
+                double fSyzL = Syz[jj] + Helper::dotProduct(SyzGrad[jj], xijxj_loc);
+                double fSzzL = Szz[jj] + Helper::dotProduct(SzzGrad[jj], xijxj_loc);
+#endif
+#endif
+                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i, *MeshlessEOS
+#if ELASTIC
+                                 , fSxxR, fSxyR, fSyyR
+                                 , fSxxL, fSxyL, fSyyL
+#if DIM == 3
+                                 , fSxzR, fSyzR, fSzzR
+                                 , fSxzL, fSyzL, fSzzL
+#endif
+#endif
+                };
                 solver.HLLCFlux(Fij[ii]);
 #else
-                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii] , i, *MeshlessEOS};
+                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i, *MeshlessEOS};
                 solver.exact(Fij[ii]);
 #endif
             } else {
@@ -1945,6 +2281,7 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
             //              << ghostParticles.x[nnlGhosts[ii]] << ", " << ghostParticles.y[nnlGhosts[ii]] << "]";
             //Logger(DEBUG) << "vFrameGhosts = [" << vFrameGhosts[ii][0] << ", " << vFrameGhosts[ii][1] << "]";
 
+#if EOS == 0
             if(WijRGhosts[ii][1] < 0. || WijLGhosts[ii][1] < 0.){
                 Logger(WARN) << "Negative pressure encountered@(i = " << i << ", jGhost = " << j << ") Very bad :( !!";
                 Logger(DEBUG) << "rhoL = " << WijLGhosts[ii][0] << ", rhoR = " << WijRGhosts[ii][0]
@@ -1956,6 +2293,7 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #endif
             }
 
+#endif // EOS == 0
             bool compute = true;
             int iij;
 #if ENFORCE_FLUX_SYM
@@ -1977,8 +2315,44 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 // Logger(DEBUG) << " i = " << i << " j = " << nnl[ii] << " mF = " << Fij[ii][0];
 
                 // calcNunit(i, ii, n_unit);
-                Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i, *MeshlessEOS};
 
+#if ELASTIC
+                // Extrapolate stress to face midpoints (ghost interactions)
+                int jj = nnlGhosts[ii];
+                double xijxi_loc[DIM], xijxj_loc[DIM];
+                xijxi_loc[0] = .5*(ghostParticles.x[jj] - x[i]);
+                xijxi_loc[1] = .5*(ghostParticles.y[jj] - y[i]);
+                xijxj_loc[0] = -xijxi_loc[0];
+                xijxj_loc[1] = -xijxi_loc[1];
+#if DIM == 3
+                xijxi_loc[2] = .5*(ghostParticles.z[jj] - z[i]);
+                xijxj_loc[2] = -xijxi_loc[2];
+#endif
+                double fSxxR = Sxx[i] + Helper::dotProduct(SxxGrad[i], xijxi_loc);
+                double fSxyR = Sxy[i] + Helper::dotProduct(SxyGrad[i], xijxi_loc);
+                double fSyyR = Syy[i] + Helper::dotProduct(SyyGrad[i], xijxi_loc);
+                double fSxxL = ghostParticles.Sxx[jj] + Helper::dotProduct(ghostParticles.SxxGrad[jj], xijxj_loc);
+                double fSxyL = ghostParticles.Sxy[jj] + Helper::dotProduct(ghostParticles.SxyGrad[jj], xijxj_loc);
+                double fSyyL = ghostParticles.Syy[jj] + Helper::dotProduct(ghostParticles.SyyGrad[jj], xijxj_loc);
+#if DIM == 3
+                double fSxzR = Sxz[i] + Helper::dotProduct(SxzGrad[i], xijxi_loc);
+                double fSyzR = Syz[i] + Helper::dotProduct(SyzGrad[i], xijxi_loc);
+                double fSzzR = Szz[i] + Helper::dotProduct(SzzGrad[i], xijxi_loc);
+                double fSxzL = ghostParticles.Sxz[jj] + Helper::dotProduct(ghostParticles.SxzGrad[jj], xijxj_loc);
+                double fSyzL = ghostParticles.Syz[jj] + Helper::dotProduct(ghostParticles.SyzGrad[jj], xijxj_loc);
+                double fSzzL = ghostParticles.Szz[jj] + Helper::dotProduct(ghostParticles.SzzGrad[jj], xijxj_loc);
+#endif
+#endif
+                Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i, *MeshlessEOS
+#if ELASTIC
+                               , fSxxR, fSxyR, fSyyR
+                               , fSxxL, fSxyL, fSyyL
+#if DIM == 3
+                               , fSxzR, fSyzR, fSzzR
+                               , fSxzL, fSyzL, fSzzL
+#endif
+#endif
+                };
                 solver.HLLCFlux(FijGhosts[ii]);
 #else
                 Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i, *MeshlessEOS};
@@ -1997,7 +2371,7 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
     }
 }
 
-void Particles::collectFluxes(Helper &helper, const Particles &ghostParticles){
+void Particles::collectFluxes(Helper &helper){
     for (int i=0; i<N; ++i){
         mF[i] = 0.;
 
@@ -2210,13 +2584,94 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
     }
 }
 
+void Particles::updateState(const double &dt){
+    for(int i=0; i<N; ++i){
+        double vxi = vx[i], vyi = vy[i];
+#if DIM==3
+        double vzi = vz[i];
+#endif
+        double Q[DIM+1];
+#if DIM==3
+        Q[0] = m[i]*(u[i] + .5*(vxi*vxi+vyi*vyi+vzi*vzi));
+#else
+        Q[0] = m[i]*(u[i] + .5*(vxi*vxi+vyi*vyi));
+#endif
+        Q[1] = m[i]*vxi;
+        Q[2] = m[i]*vyi;
+#if DIM==3
+        Q[3] = m[i]*vzi;
+#endif
+
+#if !MESHLESS_FINITE_MASS
+        m[i] -= dt*mF[i];
+#endif
+        if (m[i] <= 0.){
+            Logger(ERROR) << "Negative mass. m[" << i << "] =" << m[i] << ", mF = " << mF[i];
+        }
+
+        Q[1] -= dt*vF[i][0];
+        Q[2] -= dt*vF[i][1];
+#if DIM == 3
+        Q[3] -= dt*vF[i][2];
+#endif
+        vx[i] = Q[1]/m[i];
+        vy[i] = Q[2]/m[i];
+#if DIM==3
+        vz[i] = Q[3]/m[i];
+#endif
+
+        Q[0] -= dt*eF[i];
+#if DIM==3
+        u[i] = Q[0]/m[i]-.5*(vx[i]*vx[i]+vy[i]*vy[i]+vz[i]*vz[i]);
+#else
+        u[i] = Q[0]/m[i]-.5*(vx[i]*vx[i]+vy[i]*vy[i]);
+#endif
+        if (u[i] <= 0.){
+            Logger(ERROR) << "Negative internal energy. u[" << i << "] =" << u[i] << ", eF = " << eF[i];
+        }
+    }
+}
+
+void Particles::moveParticles(const double &dt, const Domain &domain){
+#if MOVE_PARTICLES
+    for(int i=0; i<N; ++i){
+        x[i] += vx[i]*dt;
+        y[i] += vy[i]*dt;
+#if DIM==3
+        z[i] += vz[i]*dt;
+#endif
+#if PERIODIC_BOUNDARIES
+        if (x[i] < domain.bounds.minX) {
+            x[i] = domain.bounds.maxX - (domain.bounds.minX - x[i]);
+        } else if (domain.bounds.maxX <= x[i]) {
+            x[i] = domain.bounds.minX + (x[i] - domain.bounds.maxX);
+        }
+        if (y[i] < domain.bounds.minY) {
+            y[i] = domain.bounds.maxY - (domain.bounds.minY - y[i]);
+        } else if (domain.bounds.maxY <= y[i]) {
+            y[i] = domain.bounds.minY + (y[i] - domain.bounds.maxY);
+        }
+#if DIM==3
+        if (z[i] < domain.bounds.minZ) {
+            z[i] = domain.bounds.maxZ - (domain.bounds.minZ - z[i]);
+        } else if (domain.bounds.maxZ <= z[i]) {
+            z[i] = domain.bounds.minZ + (z[i] - domain.bounds.maxZ);
+        }
+#endif
+#endif // PERIODIC_BOUNDARIES
+    }
+#endif // MOVE_PARTICLES
+}
 #if PERIODIC_BOUNDARIES
 void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
                                      const double &kernelSize){
     int iGhost = 0;
+    Logger(DEBUG) << "N = " << N;
     for(int i=0; i<N; ++i) {
+        // Logger(DEBUG) << "i = " << i << ", N = "<< N;
         bool foundGhostX = false, foundGhostY = false;
         ghostMap[i*(DIM+1)] = -1;
+        Logger(DEBUG) << "_";
         ghostMap[i*(DIM+1)+1] = -1;
         ghostMap[i*(DIM+1)+2] = -1;
 
@@ -2241,6 +2696,7 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
         } else {
             ghostParticles.y[iGhost] = y[i];
         }
+        Logger(DEBUG) << "corner-direction:";
 
         // 'corner' particle first if both are true
         if (foundGhostX || foundGhostY) {
@@ -2251,6 +2707,7 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
             //          << ghostParticles.y[iGhost] << "]";
             ++iGhost;
         }
+        Logger(DEBUG) << "corner ok";
 
         // create DIM extra normal particles
         if (foundGhostX && foundGhostY){
@@ -2302,6 +2759,16 @@ void Particles::updateGhostState(Particles &ghostParticles){
 #if DIM==3
             ghostParticles.vz[ghostMap[i]] = vz[i/(DIM+1)];
 #endif
+#if ELASTIC
+            ghostParticles.Sxx[ghostMap[i]] = Sxx[i/(DIM+1)];
+            ghostParticles.Sxy[ghostMap[i]] = Sxy[i/(DIM+1)];
+            ghostParticles.Syy[ghostMap[i]] = Syy[i/(DIM+1)];
+#if DIM == 3
+            ghostParticles.Sxz[ghostMap[i]] = Sxz[i/(DIM+1)];
+            ghostParticles.Syz[ghostMap[i]] = Syz[i/(DIM+1)];
+            ghostParticles.Szz[ghostMap[i]] = Szz[i/(DIM+1)];
+#endif // DIM == 3
+#endif // ELASTIC
         }
     }
 }
@@ -2317,6 +2784,16 @@ void Particles::updateGhostGradients(Particles &ghostParticles){
                 ghostParticles.vzGrad[ghostMap[i]][alpha] = vzGrad[i/(DIM+1)][alpha];
 #endif
                 ghostParticles.PGrad[ghostMap[i]][alpha] = PGrad[i/(DIM+1)][alpha];
+#if ELASTIC
+                ghostParticles.SxxGrad[ghostMap[i]][alpha] = SxxGrad[i/(DIM+1)][alpha];
+                ghostParticles.SxyGrad[ghostMap[i]][alpha] = SxyGrad[i/(DIM+1)][alpha];
+                ghostParticles.SyyGrad[ghostMap[i]][alpha] = SyyGrad[i/(DIM+1)][alpha];
+#if DIM == 3
+                ghostParticles.SxzGrad[ghostMap[i]][alpha] = SxzGrad[i/(DIM+1)][alpha];
+                ghostParticles.SyzGrad[ghostMap[i]][alpha] = SyzGrad[i/(DIM+1)][alpha];
+                ghostParticles.SzzGrad[ghostMap[i]][alpha] = SzzGrad[i/(DIM+1)][alpha];
+#endif // DIM == 3
+#endif // ELASTIC
             }
         }
     }
@@ -2661,7 +3138,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
             xijxi[0] = .5*(ghostParticles.x[j] - x[i]);
             xijxi[1] = .5*(ghostParticles.y[j] - y[i]);
 
-#else
+#else // !FIRST_ORDER_QUAD_POINT
             xij[0] = x[i] + kernelSize/4. * xjxi[0];
             xij[1] = y[i] + kernelSize/4. * xjxi[1];
             xijxi[0] = xij[0] - x[i];
@@ -2669,7 +3146,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
 
             xijxj[0] = xij[0] - ghostParticles.x[j];
             xijxj[1] = xij[1] - ghostParticles.y[j];
-#endif
+#endif // FIRST_ORDER_QUAD_POINT
 
 #if DIM==3
             xjxi[2] = ghostParticles.z[j] - z[i];
@@ -2678,7 +3155,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
             xijxi[2] = xij[2] - z[i];
             xijxj[2] = xij[2] - ghostParticles.z[j];
             // TODO: add FIRST_ORDER_QUAD_POINT
-#endif
+#endif // DIM == 3
 
             int iW = i*MAX_NUM_GHOST_INTERACTIONS+jn;
 #if !MOVE_PARTICLES
@@ -2686,15 +3163,15 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
             vFrameGhosts[iW][1] = 0.;
 #if DIM==3
             vFrameGhosts[iW][2] = 0.;
-#endif
+#endif // DIM == 3
 #else // !MOVE_PARTICLES
 #if FIRST_ORDER_QUAD_POINT
             vFrameGhosts[iW][0] = (vx[i] + ghostParticles.vx[j])/2.;
             vFrameGhosts[iW][1] = (vy[i] + ghostParticles.vy[j])/2.;
 #if DIM==3
             vFrameGhosts[iW][2] = (vz[i] + ghostParticles.vz[j])/2.;
-#endif
-#else
+#endif // DIM == 3
+#else // !FIRST_ORDER_QUAD_POINT
             double dotProd = Helper::dotProduct(xijxi, xjxi);
             double dSqr = Helper::dotProduct(xjxi, xjxi);
 
@@ -2702,8 +3179,8 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
             vFrameGhosts[iW][1] = vy[i] + (ghostParticles.vy[j]-vy[i]) * dotProd/dSqr;
 #if DIM==3
             vFrameGhosts[iW][2] = vz[i] + (ghostParticles.vz[j]-vz[i]) * dotProd/dSqr;
-#endif
-#endif
+#endif // DIM == 3
+#endif // FIRST_ORDER_QUAD_POINT
 #endif // !MOVE_PARTICLES
             /*if(i == 394){
                 Logger(DEBUG) << "vFrame[0] = " << vFrameGhosts[iW][0]
@@ -2728,7 +3205,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
 #if DIM == 3
             WijRGhosts[iW][4] = vz[i] - vFrameGhosts[iW][2];
             WijLGhosts[iW][4] = ghostParticles.vz[j] - vFrameGhosts[iW][2];
-#endif
+#endif // DIM == 3
 
             // reconstruction at effective face
             WijRGhosts[iW][0] += Helper::dotProduct(rhoGrad[i], xijxi);
@@ -2757,7 +3234,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
 #if DIM==3
             viDiv += vzGrad[i][2];
             vjDiv += ghostParticles.vzGrad[j][2];
-#endif
+#endif // DIM == 3
             double EnergyFluxhydro_gammai = MeshlessEOS->EOSEnergyFluxGamma(rho[i], P[i], u[i]);
             double EnergyFluxhydro_gammaj = MeshlessEOS->EOSEnergyFluxGamma(ghostParticles.rho[j], ghostParticles.P[j], ghostParticles.u[j]);
             WijRGhosts[iW][0] -= dt/2. * (rho[i] * viDiv + (vx[i]-vFrameGhosts[iW][0])*rhoGrad[i][0] + (vy[i]-vFrameGhosts[iW][1])*rhoGrad[i][1]);
@@ -2768,11 +3245,26 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
             WijLGhosts[iW][2] -= dt/2. * (ghostParticles.PGrad[j][0]/ghostParticles.rho[j] + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.vxGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.vxGrad[j][1]);
             WijRGhosts[iW][3] -= dt/2. * (PGrad[i][1]/rho[i] + (vx[i] - vFrameGhosts[iW][0])*vyGrad[i][0] + (vy[i] - vFrameGhosts[iW][1])*vyGrad[i][1]);
             WijLGhosts[iW][3] -= dt/2. * (ghostParticles.PGrad[j][1]/ghostParticles.rho[j] + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.vyGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.vyGrad[j][1]);
+#if ELASTIC
+            // Elastic source: dv/dt += (1/ρ) ∇·S
+            WijRGhosts[iW][2] += dt/2. * (SxxGrad[i][0] + SxyGrad[i][1]) / rho[i];
+            WijLGhosts[iW][2] += dt/2. * (ghostParticles.SxxGrad[j][0] + ghostParticles.SxyGrad[j][1]) / ghostParticles.rho[j];
+            WijRGhosts[iW][3] += dt/2. * (SxyGrad[i][0] + SyyGrad[i][1]) / rho[i];
+            WijLGhosts[iW][3] += dt/2. * (ghostParticles.SxyGrad[j][0] + ghostParticles.SyyGrad[j][1]) / ghostParticles.rho[j];
+#endif // ELASTIC
 #if DIM==3
             // TODO: update below for 3D
             WijRGhosts[iW][4] -= dt/2. * PGrad[i][2]/rho[i];
             WijLGhosts[iW][4] -= dt/2. * ghostParticles.PGrad[j][2]/ghostParticles.rho[j];
-#endif
+#if ELASTIC
+            WijRGhosts[iW][2] += dt/2. * SxzGrad[i][2] / rho[i];
+            WijLGhosts[iW][2] += dt/2. * ghostParticles.SxzGrad[j][2] / ghostParticles.rho[j];
+            WijRGhosts[iW][3] += dt/2. * SyzGrad[i][2] / rho[i];
+            WijLGhosts[iW][3] += dt/2. * ghostParticles.SyzGrad[j][2] / ghostParticles.rho[j];
+            WijRGhosts[iW][4] += dt/2. * (SxzGrad[i][0] + SyzGrad[i][1] + SzzGrad[i][2]) / rho[i];
+            WijLGhosts[iW][4] += dt/2. * (ghostParticles.SxzGrad[j][0] + ghostParticles.SyzGrad[j][1] + ghostParticles.SzzGrad[j][2]) / ghostParticles.rho[j];
+#endif // ELASTIC
+#endif // DIM == 3
 
            //if (i == 46) // && iW == 28){
            //     Logger(DEBUG) << "        j = " << j
@@ -2891,6 +3383,68 @@ void Particles::dumpNNL(std::string filename, const Particles &ghostParticles){
     }
 }
 #endif
+void Particles::dumpNNL(std::string filename){
+    HighFive::File h5File { filename, HighFive::File::ReadWrite |
+                                      HighFive::File::Create |
+                                      HighFive::File::Truncate };
+
+    for (int i=0; i<N; ++i){
+
+        std::vector<int> nnList(noi[i]);
+
+        std::vector<std::vector<double>> nnlPrtcls {};
+        std::vector<std::vector<double>> nnlAij {};
+        std::vector<std::vector<double>> nnl_vFrame {};
+
+        std::vector<size_t> dataSpaceDims(2);
+        dataSpaceDims[0] = std::size_t(noi[i]);
+        dataSpaceDims[1] = DIM;
+
+        for (int j=0; j<noi[i]; ++j){
+
+            int ii = j+i*MAX_NUM_INTERACTIONS;
+
+            nnList[j] = nnl[ii];
+
+            nnlPrtcls.push_back(std::vector<double>(DIM));
+            nnlPrtcls[j][0] = x[nnl[ii]];
+            nnlPrtcls[j][1] = y[nnl[ii]];
+#if DIM == 3
+            nnlPrtcls[j][2] = z[nnl[ii]];
+#endif
+            nnlAij.push_back(std::vector<double>(DIM));
+            nnlAij[j][0] = Aij[ii][0];
+            nnlAij[j][1] = Aij[ii][1];
+#if DIM == 3
+            nnlAij[j][2] = Aij[ii][2];
+#endif
+
+            nnl_vFrame.push_back(std::vector<double>(DIM));
+            nnl_vFrame[j][0] = vFrame[ii][0];
+            nnl_vFrame[j][1] = vFrame[ii][1];
+#if DIM == 3
+            nnl_vFrame[j][2] = vFrame[ii][2];
+#endif
+        }
+
+        HighFive::DataSet nnListDataSet = h5File.createDataSet<int>("/nnl" +std::to_string(i),
+                                                                    HighFive::DataSpace(noi[i]));
+        nnListDataSet.write(nnList);
+
+        HighFive::DataSet nnlDataSet = h5File.createDataSet<double>("/nnlPrtcls" + std::to_string(i),
+                                                                    HighFive::DataSpace(dataSpaceDims));
+        nnlDataSet.write(nnlPrtcls);
+
+        HighFive::DataSet AijDataSet = h5File.createDataSet<double>("/Aij" + std::to_string(i),
+                                                                    HighFive::DataSpace(dataSpaceDims));
+        AijDataSet.write(nnlAij);
+
+        HighFive::DataSet vFrameDataSet = h5File.createDataSet<double>("/vFrame" + std::to_string(i),
+                                                                    HighFive::DataSpace(dataSpaceDims));
+        vFrameDataSet.write(nnl_vFrame);
+
+    }
+}
 
 // TODO: remove below
 //void Particles::move(const double &dt, Domain &domain){
@@ -2943,6 +3497,9 @@ double Particles::sumMass(){
     for (int i=0; i<N; ++i){
         if (std::isnan(m[i])){
             Logger(WARN) << "!! m[" << i <<"] " << "is nan. !!";
+#if DEBUG_LVL
+            exit(6);
+#endif
         }
         M += m[i];
     }

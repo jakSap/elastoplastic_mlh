@@ -38,6 +38,17 @@ void Helper::crossProduct(double *a, double *b, double *crossProduct){
 #endif
 }
 
+void Helper::matMul(double *A, double *B, double *C){
+    for (int i=0; i<DIM; ++i){
+        for (int j=0; j<DIM; ++j){
+            C[j + DIM*i] = 0.;
+            for (int k=0; k<DIM; ++k){
+                C[j + DIM*i] += A[k + DIM*i] * B[j + DIM*k];
+            }
+        }
+    }
+}
+
 void Helper::rotationMatrix2D(double *a, double *b, double *Lambda){
     Lambda[0] = a[0]*b[0] + a[1]*b[1];
     Lambda[1] = -(a[0]*b[1] - a[1]*b[0]);

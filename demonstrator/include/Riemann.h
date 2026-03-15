@@ -18,7 +18,16 @@ class Riemann {
 
 public:
     /// WR, WL and Aij must be pre-allocated
-    Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i, EquationOfState &MeshlessEOS);
+    Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i, EquationOfState &MeshlessEOS
+#if USE_HLLC && ELASTIC
+            , double SxxR, double SxyR, double SyyR
+            , double SxxL, double SxyL, double SyyL
+#if DIM == 3
+            , double SxzR, double SyzR, double SzzR
+            , double SxzL, double SyzL, double SzzL
+#endif
+#endif
+    );
 
     /**
      * Solving a one-dimensional Riemann problem for an ideal gas
@@ -63,6 +72,13 @@ private:
             ,0
 #endif
     };
+#if USE_HLLC
+#if ELASTIC
+    double SijRotR[DIM*DIM]; ///< rotated stress tensor, right state
+    double SijRotL[DIM*DIM]; ///< rotated stress tensor, left state
+    double Lambda_[DIM*DIM]; ///< rotation matrix, stored for flux back-rotation
+#endif
+#endif
 #if DIM==2
     void rotateAndProjectFluxes2D(double *Fij);
 #else

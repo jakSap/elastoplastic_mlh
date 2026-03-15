@@ -51,6 +51,8 @@ double EquationOfState::EOSSoundSpeed(const double &rho, const double &u,
     return sqrt(hydro_gamma * p / rho);
 #elif EOS == 1 // Murnaghan
     return K0 / rho0 * pow(rho / rho0, murn_n - 1);
+#elif EOS == 2 // Tillotson
+    return -1; // TODO
 #endif // EOS
 }
 
@@ -81,6 +83,14 @@ double EquationOfState::EOSAdiabaticSoundSpeed(const double &rho, const double &
     assert(cs >= 0 && "Negative sound speed encountered");
     assert(cs > 0 && "Zero sound speed encountered");
     return cs;
+}
+
+double EquationOfState::EOSBulkModulus(const double &rho, const double &p){
+#if EOS == 0
+    return hydro_gamma * p;
+#elif EOS == 1
+    return K0 * pow(rho / rho0, murn_n);
+#endif
 }
 
 // For general EOS: Compute Gamma = \partial ln(P) / \partial ln(rho)

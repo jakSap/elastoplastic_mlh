@@ -42,6 +42,16 @@ public:
 
     double (*rhoGrad)[DIM], (*vxGrad)[DIM], (*vyGrad)[DIM], (*vzGrad)[DIM], (*PGrad)[DIM];
 
+#if ELASTIC
+    double *Sxx, *Sxy, *Syy;
+    double (*SxxGrad)[DIM], (*SxyGrad)[DIM], (*SyyGrad)[DIM];
+#if DIM == 3
+    double *Sxz, *Syz, *Szz;
+    double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
+#endif // DIM == 3
+
+    void integrateStressTensor(const double &dt);
+#endif // ELASTIC
     void assignParticlesAndCells(Domain &domain);
     void gridNNS(Domain &domain, const double &kernelSize);
 
@@ -151,9 +161,16 @@ public:
 
     void solveRiemannProblems(const Particles &ghostParticles);
 
-    void collectFluxes(Helper &helper, const Particles &ghostParticles);
+    void collectFluxes(Helper &helper);
 
     void updateStateAndPosition(const double &dt, const Domain &domain);
+    void updateState(const double &dt);
+    void moveParticles(const double &dt, const Domain &domain);
+
+#if ELASTIC
+    void slopeLimiterStress(const double &kernelSize, Particles *ghostParticles=nullptr);
+    double compElasticTimestep(const double &kernelSize);
+#endif
 
 // //For DEBUGGING:
 //    void printDensity(const double &gamma);
@@ -192,6 +209,7 @@ public:
 #else
     void getDomainLimits(double *domainLimits);
 #endif
+    void dumpNNL(std::string filename);
 
     /// function to move particles for testing purposes
     //void move(const double &dt, Domain &domain); // TODO: remove

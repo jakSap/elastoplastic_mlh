@@ -39,6 +39,13 @@ public:
     
     
 
+    // States WR, WL must be pre-rotated (vx = normal) and pre-boosted
+    // SijRotR, SijRotL are rotated stress tensors [DIM*DIM], row-major
+    static void xSplitElasticHLLC(double *WR, double *WL,
+            double *SijRotR, double *SijRotL,
+            double *totflux,
+            EquationOfState &MeshlessEOS);
+    
     // HLL Solver
     static void HLL(double *WL, double *WR, double *totflux, const double &hydro_gamma);
     

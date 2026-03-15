@@ -123,6 +123,17 @@ void MeshlessScheme::run(){
         particles->gradient(particles->vz, particles->vzGrad, ghostParticles.vz, ghostParticles);
 #endif
         particles->gradient(particles->P, particles->PGrad, ghostParticles.P, ghostParticles);
+#if ELASTIC
+        // Stress tensor gradients
+        particles->gradient(particles->Sxx, particles->SxxGrad, ghostParticles.Sxx, ghostParticles);
+        particles->gradient(particles->Sxy, particles->SxyGrad, ghostParticles.Sxy, ghostParticles);
+        particles->gradient(particles->Syy, particles->SyyGrad, ghostParticles.Syy, ghostParticles);
+#if DIM == 3
+        particles->gradient(particles->Sxz, particles->SxzGrad, ghostParticles.Sxz, ghostParticles);
+        particles->gradient(particles->Syz, particles->SyzGrad, ghostParticles.Syz, ghostParticles);
+        particles->gradient(particles->Szz, particles->SzzGrad, ghostParticles.Szz, ghostParticles);
+#endif // DIM == 3
+#endif // ELASTIC
         Logger(DEBUG) << "      > Update ghost gradients";
         particles->updateGhostGradients(ghostParticles);
 
@@ -130,6 +141,9 @@ void MeshlessScheme::run(){
         // TODO: Check slope limiter
         Logger(DEBUG) << "      > Limiting slopes";
         particles->slopeLimiter(config.kernelSize, &ghostParticles);
+#if ELASTIC
+        particles->slopeLimiterStress(config.kernelSize, &ghostParticles);
+#endif
         Logger(DEBUG) << "      > Update limited ghost gradients";
         particles->updateGhostGradients(ghostParticles);
 #endif // SLOPE_LIMITING
@@ -142,12 +156,33 @@ void MeshlessScheme::run(){
         particles->gradient(particles->vz, particles->vzGrad);
 #endif
         particles->gradient(particles->P, particles->PGrad);
+#if ELASTIC
+        particles->gradient(particles->Sxx, particles->SxxGrad);
+        particles->gradient(particles->Sxy, particles->SxyGrad);
+        particles->gradient(particles->Syy, particles->SyyGrad);
+#if DIM == 3
+        particles->gradient(particles->Sxz, particles->SxzGrad);
+        particles->gradient(particles->Syz, particles->SyzGrad);
+        particles->gradient(particles->Szz, particles->SzzGrad);
+#endif
+#endif // ELASTIC
 #if SLOPE_LIMITING
         // TODO: check how to properly limit gradiens
         Logger(DEBUG) << "      > Limiting slopes";
         particles->slopeLimiter(config.kernelSize);
+#if ELASTIC
+        particles->slopeLimiterStress(config.kernelSize);
+#endif // ELASTIC
 #endif // SLOPE_LIMITING
 #endif
+#if ELASTIC
+	Logger(INFO) << "    > Performing stress integration 1 / 2";
+        particles->integrateStressTensor(timeStep / 2.0);
+#if PERIODIC_BOUNDARIES
+        Logger(DEBUG) << "      > Update ghost state after stress integration";
+        particles->updateGhostState(ghostParticles);
+#endif
+#endif // ELASTIC
         Logger(INFO) << "    > Preparing Riemann solver";
         Logger(DEBUG) << "      > Computing effective faces";
         particles->compEffectiveFace();
@@ -199,6 +234,9 @@ void MeshlessScheme::run(){
             ghostParticles.dump2file(config.outDir + "/" + stepss.str() + std::string("Ghosts.h5"), t);
             Logger(INFO) << "      > Dump NNL to file";
             particles->dumpNNL(config.outDir + "/" + stepss.str() + std::string("NNL.h5"), ghostParticles);
+#else
+            Logger(INFO) << "      > Dump NNL to file";
+            particles->dumpNNL(config.outDir + "/" + stepss.str() + std::string("NNL.h5"));
 #endif // PERIODIC_BOUNDARIES
 #endif // DEBUG_LVL
         }
@@ -212,15 +250,10 @@ void MeshlessScheme::run(){
 #if PERIODIC_BOUNDARIES
         particles->solveRiemannProblems(ghostParticles);
 #else
-        Particles ghostParticles { 0, 
-#if EOS == 0
-                        config.gamma
-#elif EOS == 1
-                        config.K0, config.murn_n, config.rho0
+        Particles ghostParticlesDummy { 0, particles->MeshlessEOS, true };
+        particles->solveRiemannProblems(ghostParticlesDummy);
 #endif
-                        , true }; // DUMMY
-        particles->solveRiemannProblems(ghostParticles);
-#endif
+
 #if DEBUG_LVL
         Logger(DEBUG) << "    > Checking flux symmetry";
 #if PERIODIC_BOUNDARIES
@@ -232,13 +265,66 @@ void MeshlessScheme::run(){
 
         Logger(INFO) << "    > Collecting fluxes";
 
-        particles->collectFluxes(helper, ghostParticles);
+        particles->collectFluxes(helper);
+#if !ELASTIC
+	Logger(INFO) << "    > Updating state and position";
+        particles->updateStateAndPosition(timeStep, domain);
+#else // !ELASTIC
 
         Logger(INFO) << "    > Updating state";
-        particles->updateStateAndPosition(timeStep, domain);
+        particles->updateState(timeStep);
+        Logger(INFO) << "    > Recomputing velocity and stress gradients";
+#if PERIODIC_BOUNDARIES
+        particles->updateGhostState(ghostParticles);
+
+        particles->gradient(particles->vx, particles->vxGrad, ghostParticles.vx, ghostParticles);
+        particles->gradient(particles->vy, particles->vyGrad, ghostParticles.vy, ghostParticles);
+#if DIM == 3
+        particles->gradient(particles->vz, particles->vzGrad, ghostParticles.vz, ghostParticles);
+#endif
+        particles->gradient(particles->Sxx, particles->SxxGrad, ghostParticles.Sxx, ghostParticles);
+        particles->gradient(particles->Sxy, particles->SxyGrad, ghostParticles.Sxy, ghostParticles);
+        particles->gradient(particles->Syy, particles->SyyGrad, ghostParticles.Syy, ghostParticles);
+#if DIM == 3
+        particles->gradient(particles->Sxz, particles->SxzGrad, ghostParticles.Sxz, ghostParticles);
+        particles->gradient(particles->Syz, particles->SyzGrad, ghostParticles.Syz, ghostParticles);
+        particles->gradient(particles->Szz, particles->SzzGrad, ghostParticles.Szz, ghostParticles);
+#endif
+
+        particles->updateGhostGradients(ghostParticles);
+
+#if SLOPE_LIMITING
+        Logger(DEBUG) << "      > Limiting new gradients";
+        particles->slopeLimiterStress(config.kernelSize, &ghostParticles);
+        particles->updateGhostGradients(ghostParticles);
+#endif // SLOPE_LIMITING
+
+#else // !PERIODIC_BOUNDARIES
+        particles->gradient(particles->vx, particles->vxGrad);
+        particles->gradient(particles->vy, particles->vyGrad);
+#if DIM == 3
+        particles->gradient(particles->vz, particles->vzGrad);
+#endif
+        particles->gradient(particles->Sxx, particles->SxxGrad);
+        particles->gradient(particles->Sxy, particles->SxyGrad);
+        particles->gradient(particles->Syy, particles->SyyGrad);
+#if DIM == 3
+        particles->gradient(particles->Sxz, particles->SxzGrad);
+        particles->gradient(particles->Syz, particles->SyzGrad);
+        particles->gradient(particles->Szz, particles->SzzGrad);
+#endif
+#if SLOPE_LIMITING
+        particles->slopeLimiterStress(config.kernelSize);
+#endif
+#endif // PERIODIC_BOUNDARIES
+
+        Logger(INFO) << "    > Performing stress integration 2 / 2";
+        particles->integrateStressTensor(timeStep / 2.0);
 
         //Logger(INFO) << "    > Moving particles";
-        //particles->move(config.timeStep, domain);
+        Logger(INFO) << "    > Moving particles";
+        particles->moveParticles(timeStep, domain);
+#endif // !ELASTIC
 
         t += timeStep;
         ++step;

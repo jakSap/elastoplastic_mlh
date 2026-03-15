@@ -28,6 +28,15 @@ public:
     static void crossProduct(double *a, double *b, double *crossProduct);
 
 
+    /**
+     * @brief Matrix-matrix multiplication C = A * B for DIM x DIM matrices
+     *
+     * @param[in] A left matrix, row-major [DIM*DIM]
+     * @param[in] B right matrix, row-major [DIM*DIM]
+     * @param[out] C result matrix, row-major [DIM*DIM], must be pre-allocated
+     *             C may NOT alias A or B
+     */
+    static void matMul(double *A, double *B, double *C);
 
     /**
      * good resource for 3D implementation: https://math.stackexchange.com/a/897677

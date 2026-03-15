@@ -575,6 +575,167 @@ void HLLC::solveHLLC1(double *WR, double *WL, double *n,
 
 }
 
+void HLLC::xSplitElasticHLLC(double *WR, double *WL,
+        double *SijRotR, double *SijRotL,
+        double *totflux,
+        EquationOfState &MeshlessEOS){
+
+    // Step 0: EOS parameters (same pattern as solveHLLC1)
+#if HLLC_general_EOS == 1
+    const double GammaL = MeshlessEOS.EOSGeneralGamma(WL[0], WL[1]);
+    const double GammaR = MeshlessEOS.EOSGeneralGamma(WR[0], WR[1]);
+    const double hydro_gamma = 0.5 * (GammaL + GammaR);
+#else
+    const double hydro_gamma = MeshlessEOS.EOSGetHydroGammaParam();
+#endif // HLLC_general_EOS
+
+    const double hydro_gamma_plus_one = hydro_gamma + 1.0d;
+    const double hydro_one_over_gamma = 1.0d / hydro_gamma;
+    const double hydro_one_over_gamma_minus_one = hydro_one_over_gamma - 1.0d;
+
+    // Step 1: x-split normal velocity (no projection onto n needed)
+    const double vL = WL[2];
+    const double vR = WR[2];
+
+    // Step 2: Extract stress components and compute normal tractions
+    const double SxxL = SijRotL[0], SxyL = SijRotL[1];
+    const double SxxR = SijRotR[0], SxyR = SijRotR[1];
+#if DIM == 3
+    const double SxzL = SijRotL[2];
+    const double SxzR = SijRotR[2];
+#endif
+    const double tL = WL[1] - SxxL;  // normal traction left  (p - Sxx)
+    const double tR = WR[1] - SxxR;  // normal traction right (p - Sxx)
+
+    // Step 3: Elastic longitudinal wave speed (eq. 92)
+#if ELASTIC
+    const double KL = MeshlessEOS.EOSBulkModulus(WL[0], WL[1]);
+    const double KR = MeshlessEOS.EOSBulkModulus(WR[0], WR[1]);
+    const double aL = sqrt((KL + 4.0/3.0 * SHEAR_MODULUS) / WL[0]);
+    const double aR = sqrt((KR + 4.0/3.0 * SHEAR_MODULUS) / WR[0]);
+#else
+    const double aL = MeshlessEOS.EOSAdiabaticSoundSpeed(WL[0], WL[1]);
+    const double aR = MeshlessEOS.EOSAdiabaticSoundSpeed(WR[0], WR[1]);
+#endif
+
+    // Step 4: PVRS traction estimate (pK -> tK = pK - SxxK, cf. Section 4.5)
+    const double rhobar = WL[0] + WR[0];
+    const double abar = aL + aR;
+    const double tPVRS = 0.5 * ((tL + tR) - 0.25 * (vR - vL) * rhobar * abar);
+    const double tstar = std::max(0.0, tPVRS);
+
+    // Step 5: Wave speed estimates (same q-factor pattern as solveHLLC1, with traction)
+    double qL = 1.0;
+    if (tstar > tL && tL > 0.0){
+        qL = sqrt(1.0 + 0.5 * hydro_gamma_plus_one * hydro_one_over_gamma
+                  * (tstar / tL - 1.0));
+    }
+    double qR = 1.0;
+    if (tstar > tR && tR > 0.0){
+        qR = sqrt(1.0 + 0.5 * hydro_gamma_plus_one * hydro_one_over_gamma
+                  * (tstar / tR - 1.0));
+    }
+    const double SLmvL = -aL * qL;   // SL - vL
+    const double SRmvR =  aR * qR;   // SR - vR
+
+    // Step 6: Elastic contact wave speed S* (eq. 58, traction continuity)
+    const double Sstar = (tR - tL + WL[0] * vL * SLmvL - WR[0] * vR * SRmvR)
+                       / (WL[0] * SLmvL - WR[0] * SRmvR);
+
+    // Step 7: HLLC flux computation (eqs. 43, 94-98)
+    // Flux layout: [mass, energy, vx-mom, vy-mom [, vz-mom]]
+    const double rhoLinv = (WL[0] > 0.0) ? 1.0 / WL[0] : 0.0;
+    const double rhoRinv = (WR[0] > 0.0) ? 1.0 / WR[0] : 0.0;
+    if (WL[0] < 0 | WL[0] < 0){
+        Logger(DEBUG) << "Negative density encountered. Aborting for debugging.";
+        exit(6);
+    }
+
+    if (Sstar >= 0.0){
+        // Left state sampled
+        const double rhoLvL = WL[0] * vL;
+#if DIM == 3
+        const double v2L = WL[2]*WL[2] + WL[3]*WL[3] + WL[4]*WL[4];
+#else
+        const double v2L = WL[2]*WL[2] + WL[3]*WL[3];
+#endif
+        const double eL = WL[1] * rhoLinv * hydro_one_over_gamma_minus_one + 0.5 * v2L;
+        const double SL = SLmvL + vL;
+
+        // Physical flux FL (eq. 43)
+        totflux[0] = rhoLvL;
+        totflux[2] = rhoLvL * vL + tL;
+        totflux[3] = rhoLvL * WL[3] - SxyL;
+#if DIM == 3
+        totflux[4] = rhoLvL * WL[4] - SxzL;
+        totflux[1] = vL * (WL[1] + WL[0] * eL) - vL * SxxL - WL[3] * SxyL - WL[4] * SxzL;
+#else
+        totflux[1] = vL * (WL[1] + WL[0] * eL) - vL * SxxL - WL[3] * SxyL;
+#endif
+
+        // Star-state correction if SL < 0
+        if (SL < 0.0){
+            const double starfac = SLmvL / (SL - Sstar);
+            const double rhoLSL = WL[0] * SL;
+            const double SstarmvL = Sstar - vL;
+            const double rhoLSLstarfac = rhoLSL * (starfac - 1.0);
+            const double rhoLSLSstarmvL = rhoLSL * SstarmvL * starfac;
+
+            // F*L = FL + SL*(U*L - UL)
+            totflux[0] += rhoLSLstarfac;
+            totflux[2] += rhoLSLstarfac * vL + rhoLSLSstarmvL;
+            totflux[3] += rhoLSLstarfac * WL[3];
+#if DIM == 3
+            totflux[4] += rhoLSLstarfac * WL[4];
+#endif
+            // Energy: F*K^(5) = FK^(5) + SK*(ρ*K*ε*K - ρK*εK) (eq. 98)
+            // with ε*K = εK + (S* - vK) * [S* + tK/(ρK*(SK-vK))] (eq. 73)
+            totflux[1] += rhoLSLstarfac * eL
+                        + rhoLSLSstarmvL * (Sstar + tL / (WL[0] * SLmvL));
+        }
+    } else {
+        // Right state sampled
+        const double rhoRvR = WR[0] * vR;
+#if DIM == 3
+        const double v2R = WR[2]*WR[2] + WR[3]*WR[3] + WR[4]*WR[4];
+#else
+        const double v2R = WR[2]*WR[2] + WR[3]*WR[3];
+#endif
+        const double eR = WR[1] * rhoRinv * hydro_one_over_gamma_minus_one + 0.5 * v2R;
+        const double SR = SRmvR + vR;
+
+        // Physical flux FR (eq. 43)
+        totflux[0] = rhoRvR;
+        totflux[2] = rhoRvR * vR + tR;
+        totflux[3] = rhoRvR * WR[3] - SxyR;
+#if DIM == 3
+        totflux[4] = rhoRvR * WR[4] - SxzR;
+        totflux[1] = vR * (WR[1] + WR[0] * eR) - vR * SxxR - WR[3] * SxyR - WR[4] * SxzR;
+#else
+        totflux[1] = vR * (WR[1] + WR[0] * eR) - vR * SxxR - WR[3] * SxyR;
+#endif
+
+        // Star-state correction if SR > 0
+        if (SR > 0.0){
+            const double starfac = SRmvR / (SR - Sstar);
+            const double rhoRSR = WR[0] * SR;
+            const double SstarmvR = Sstar - vR;
+            const double rhoRSRstarfac = rhoRSR * (starfac - 1.0);
+            const double rhoRSRSstarmvR = rhoRSR * SstarmvR * starfac;
+
+            // F*R = FR + SR*(U*R - UR)
+            totflux[0] += rhoRSRstarfac;
+            totflux[2] += rhoRSRstarfac * vR + rhoRSRSstarmvR;
+            totflux[3] += rhoRSRstarfac * WR[3];
+#if DIM == 3
+            totflux[4] += rhoRSRstarfac * WR[4];
+#endif
+            totflux[1] += rhoRSRstarfac * eR
+                        + rhoRSRSstarmvR * (Sstar + tR / (WR[0] * SRmvR));
+        }
+    }
+
+}
 
 
 

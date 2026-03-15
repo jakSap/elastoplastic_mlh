@@ -31,6 +31,7 @@ public:
 // For general EOS HLLC solver:
     double EOSAdiabaticSoundSpeed(const double &rho, const double &p);
     double EOSGeneralGamma(const double &rho, const double &p);
+    double EOSBulkModulus(const double &rho, const double &p);
 #if EOS == 0
     double EOSGetHydroGammaParam();
 #elif EOS == 1
