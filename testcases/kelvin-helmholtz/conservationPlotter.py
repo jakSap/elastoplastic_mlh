@@ -16,6 +16,7 @@ if __name__ == "__main__":
     parser.add_argument("--simOutputDir2", "-d2", metavar="string", type=str, help="output directory of second simulation (optional)", default=None)
     parser.add_argument("--legend1", "-L1", metavar="string", type=str, help="legend label for sim 1 (used only with -d2)", default="Sim 1")
     parser.add_argument("--legend2", "-L2", metavar="string", type=str, help="legend label for sim 2 (used only with -d2)", default="Sim 2")
+    parser.add_argument("--markerSize", "-ms", metavar="float", type=float, help="marker size", default=4)
     args = parser.parse_args()
 
     plt.rc('text', usetex=True)
@@ -59,13 +60,15 @@ if __name__ == "__main__":
     print("pY_tot =", momY)
     print("E_tot =", energy)
 
+    kw = dict(linestyle='none', markersize=args.markerSize)
+
     if args.simOutputDir2 is None:
-        # Single-sim mode — identical to original behaviour
+        # Single-sim mode
         if not args.MFM:
-            plt.plot(time, mass,   'ro', label=r'$\Delta M_\text{tot}$')
-        plt.plot(time, momX,   'bv', label=r'$\Delta p_{x, \text{tot}}$')
-        plt.plot(time, momY,   'g^', label=r'$\Delta p_{y, \text{tot}}$')
-        plt.plot(time, energy, 'kx', label=r'$\Delta E_\text{tot}$')
+            plt.plot(time, mass,   color='tab:red',    marker='o', label=r'$\Delta M_\text{tot}$',      **kw)
+        plt.plot(time, momX,   color='tab:blue',   marker='v', label=r'$\Delta p_{x, \text{tot}}$', **kw)
+        plt.plot(time, momY,   color='tab:orange', marker='^', label=r'$\Delta p_{y, \text{tot}}$', **kw)
+        plt.plot(time, energy, color='tab:purple', marker='x', label=r'$\Delta E_\text{tot}$',      **kw)
     else:
         # Comparison mode
         print("Examining files in", args.simOutputDir2, "...")
@@ -79,14 +82,14 @@ if __name__ == "__main__":
         L2 = args.legend2
 
         if not args.MFM:
-            plt.plot(time,  mass,   'ro', label=L1 + r': $\Delta M_\text{tot}$')
-            plt.plot(time2, mass2,  'rs', label=L2 + r': $\Delta M_\text{tot}$')
-        plt.plot(time,  momX,   'bv', label=L1 + r': $\Delta p_{x, \text{tot}}$')
-        plt.plot(time2, momX2,  'b^', label=L2 + r': $\Delta p_{x, \text{tot}}$')
-        plt.plot(time,  momY,   'g^', label=L1 + r': $\Delta p_{y, \text{tot}}$')
-        plt.plot(time2, momY2,  'gv', label=L2 + r': $\Delta p_{y, \text{tot}}$')
-        plt.plot(time,  energy, 'kx', label=L1 + r': $\Delta E_\text{tot}$')
-        plt.plot(time2, energy2,'k+', label=L2 + r': $\Delta E_\text{tot}$')
+            plt.plot(time,  mass,   color='tab:red',      marker='o', label=L1 + r': $\Delta M_\text{tot}$',      **kw)
+            plt.plot(time2, mass2,  color='lightcoral',   marker='s', label=L2 + r': $\Delta M_\text{tot}$',      **kw)
+        plt.plot(time,  momX,   color='tab:blue',     marker='v', label=L1 + r': $\Delta p_{x, \text{tot}}$', **kw)
+        plt.plot(time2, momX2,  color='cornflowerblue',marker='^', label=L2 + r': $\Delta p_{x, \text{tot}}$', **kw)
+        plt.plot(time,  momY,   color='tab:orange',   marker='^', label=L1 + r': $\Delta p_{y, \text{tot}}$', **kw)
+        plt.plot(time2, momY2,  color='gold',         marker='v', label=L2 + r': $\Delta p_{y, \text{tot}}$', **kw)
+        plt.plot(time,  energy, color='tab:purple',   marker='x', label=L1 + r': $\Delta E_\text{tot}$',      **kw)
+        plt.plot(time2, energy2,color='mediumpurple', marker='+', label=L2 + r': $\Delta E_\text{tot}$',      **kw)
 
     plt.yscale('log')
 
