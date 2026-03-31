@@ -17,9 +17,13 @@ pref = 'S'
 def setDomainLimits(ax, pos, h5File, openBorders):
     if openBorders:
         margin = 0.05 * max(pos[:,0].max() - pos[:,0].min(), pos[:,1].max() - pos[:,1].min())
-        # if (np.isnan(pos[:,0].min()) || (pos[:,0].max()) np.isnan)
-        ax.set_xlim((pos[:,0].min() - margin, pos[:,0].max() + margin))
-        ax.set_ylim((pos[:,1].min() - margin, pos[:,1].max() + margin))
+        if (np.isnan(pos[:,0].min())):
+            # | (np.isnan(pos[:,0].max()))):
+            ax.set_xlim((-8, 8))
+            ax.set_ylim((-4.5, 4.5))
+        else:
+            ax.set_xlim((pos[:,0].min() - margin, pos[:,0].max() + margin))
+            ax.set_ylim((pos[:,1].min() - margin, pos[:,1].max() + margin))
     elif "Ghosts" not in str(h5File):
         ax.set_xlim((0., 1.))
         ax.set_ylim((0., 1.))
