@@ -659,7 +659,12 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
 #else
         const double v2L = WL[2]*WL[2] + WL[3]*WL[3];
 #endif
-        const double eL = WL[1] * rhoLinv * hydro_one_over_gamma_minus_one + 0.5 * v2L;
+        // Elastic energy contribution
+        const double S2L = SijRotL[0]*SijRotL[0] + 2.0*SijRotL[1]*SijRotL[1]
+                + SijRotL[DIM*DIM-1]*SijRotL[DIM*DIM-1];
+        const double eL = MeshlessEOS.EOSInternalEnergy(WL[0], WL[1])
+//                            + S2L / (4.0 * SHEAR_MODULUS * WL[0])
+                            + 0.5 * v2L;
         const double SL = SLmvL + vL;
 
         // Physical flux FL (eq. 43)
@@ -701,7 +706,12 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
 #else
         const double v2R = WR[2]*WR[2] + WR[3]*WR[3];
 #endif
-        const double eR = WR[1] * rhoRinv * hydro_one_over_gamma_minus_one + 0.5 * v2R;
+        // Elastic energy
+        const double S2R = SijRotR[0]*SijRotR[0] + 2.0*SijRotR[1]*SijRotR[1]
+                 + SijRotR[DIM*DIM-1]*SijRotR[DIM*DIM-1];
+        const double eR = MeshlessEOS.EOSInternalEnergy(WR[0], WR[1])
+//                        + S2R / (4.0 * SHEAR_MODULUS * WR[0])
+                        + 0.5 * v2R;
         const double SR = SRmvR + vR;
 
         // Physical flux FR (eq. 43)
