@@ -78,6 +78,9 @@ void MeshlessScheme::run(){
 #endif
 
         Logger(INFO) << "    > Computing pressure";
+#if EOS == 1
+        if (step == 0) particles->initRho0();
+#endif
         particles->compPressure();
         //particles->printDensity(config.gamma);
 

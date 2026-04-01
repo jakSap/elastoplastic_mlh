@@ -39,6 +39,10 @@ public:
 #endif
     int *cell; // cell in which particle at index resides
     double *m, *u, *x, *y, *vx, *vy, *rho, *P;
+#if EOS == 1
+    double *rho0;    // reference density per particle (Murnaghan)
+    void initRho0(); // call once after first compDensity
+#endif
 
     double (*rhoGrad)[DIM], (*vxGrad)[DIM], (*vyGrad)[DIM], (*vzGrad)[DIM], (*PGrad)[DIM];
 

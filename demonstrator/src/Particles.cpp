@@ -78,6 +78,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     u = new double[numParticles];
     rho = new double[numParticles];
     P = new double[numParticles];
+#if EOS == 1
+    rho0 = new double[numParticles];
+#endif
     x = new double[numParticles];
     y = new double[numParticles];
     vx = new double[numParticles];
@@ -185,6 +188,9 @@ Particles::~Particles() {
     delete[] u;
     delete[] P;
     delete[] rho;
+#if EOS == 1
+    delete[] rho0;
+#endif
     delete[] x;
     delete[] y;
     delete[] vx;
@@ -271,6 +277,13 @@ Particles::~Particles() {
     }
 #endif
 }
+
+#if EOS == 1
+void Particles::initRho0(){
+    for (int i = 0; i < N; ++i) rho0[i] = rho[i];
+}
+#endif
+
 #if ELASTIC
 void Particles::integrateStressTensor(const double &dt) {
     const double mu = SHEAR_MODULUS;
@@ -1481,19 +1494,18 @@ void Particles::gradient(double *f, double (*grad)[DIM]){
 }
 
 void Particles::compPressure(){
-    for (int i=0; i<N; ++i){
-        // if (i % 1 == 0){
+    for (int i=0; i<N; ++i){        
+#if EOS == 1
+        P[i] = MeshlessEOS->EOSPressure(rho[i], u[i], rho0[i]);
+#else
         P[i] = MeshlessEOS->EOSPressure(rho[i], u[i]);
-        //     Logger(DEBUG) << "Paricle " << i << " has density " << rho[i] << " and u[i] " << u[i];
-        // }
-        // P[i] = (MeshlessEOS->hydro_gamma-1.)*rho[i]*u[i]
-
-        P[i] = MeshlessEOS->EOSPressure(rho[i], u[i]);
+#endif
+        // P[i] = MeshlessEOS->EOSPressure(rho[i], u[i]); // Use this for globally constant rho0
         // std::cout << P[i] << std::endl;
 //#if DIM == 3
-//        P[i] = (gamma-1.)*rho[i]*(u[i]+.5*(vx[i]*vx[i]+vy[i]*vy[i]+vz[i]*vz[i]));
+//        P[i] = (hydro_gamma-1.)*rho[i]*(u[i]+.5*(vx[i]*vx[i]+vy[i]*vy[i]+vz[i]*vz[i]));
 //#else
-//        P[i] = (gamma-1.)*rho[i]*(u[i]+.5*(vx[i]*vx[i]+vy[i]*vy[i]));
+//        P[i] = (hydro_gamma-1.)*rho[i]*(u[i]+.5*(vx[i]*vx[i]+vy[i]*vy[i]));
 //#endif
 #if EOS == 0
         if(P[i] <= 0.){
@@ -1706,14 +1718,20 @@ double Particles::compGlobalTimestep(const double &kernelSize){
     for (int i=0; i<N; ++i){
         double vSig = std::numeric_limits<double>::min();
         // double ci = sqrt(hydro_gamma*P[i]/rho[i]); // soundspeed @i
-        double ci = MeshlessEOS->EOSSoundSpeed(rho[i], -1, P[i]); // SOundspeed @i, -1 is a dummy
-
+#if EOS == 1
+        double ci = MeshlessEOS->EOSSoundSpeed(rho[i], -1, P[i], rho0[i]);
+#else
+        double ci = MeshlessEOS->EOSSoundSpeed(rho[i], -1, P[i]);
+#endif
         // searching for maximum signal speed
         for (int jn=0; jn<noi[i]; ++jn){
             int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
 
-            // double cj = sqrt(hydro_gamma*P[j]/rho[j]); // soundspeed @j
-            double cj = MeshlessEOS->EOSSoundSpeed(rho[j], -1, P[j]); // SOundspeed @j, -1 is a dummy
+#if EOS == 1
+            double cj = MeshlessEOS->EOSSoundSpeed(rho[j], -1, P[j], rho0[j]);
+#else
+            double cj = MeshlessEOS->EOSSoundSpeed(rho[j], -1, P[j]);
+#endif
 
             double xij[DIM], vij[DIM];
 
@@ -1750,13 +1768,21 @@ double Particles::compElasticTimestep(const double &kernelSize){
         double vSig = std::numeric_limits<double>::min();
 
         // Elastic longitudinal wave speed (eq. 92)
+#if EOS == 1
+        double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i], rho0[i]);
+#else
         double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
+#endif
         double ci = sqrt((Ki + 4.0/3.0 * SHEAR_MODULUS) / rho[i]);
 
         for (int jn=0; jn<noi[i]; ++jn){
             int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
 
+#if EOS == 1
+            double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j], rho0[j]);
+#else
             double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j]);
+#endif
             double cj = sqrt((Kj + 4.0/3.0 * SHEAR_MODULUS) / rho[j]);
 
             double xij[DIM], vij[DIM];
@@ -2003,11 +2029,16 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
             // energy
             // WijR[iW][1] -= dt/2. * (hydro_gamma*P[i] * viDiv + (vx[i]-vFrame[iW][0])*PGrad[i][0] + (vy[i]-vFrame[iW][1])*PGrad[i][1]);
             // WijL[iW][1] -= dt/2. * (hydro_gamma*P[j] * vjDiv + (vx[j]-vFrame[iW][0])*PGrad[j][0] + (vy[j]-vFrame[iW][1])*PGrad[j][1]);
-            double EnergyFluxhydro_gammai = MeshlessEOS->EOSEnergyFluxGamma(rho[i], P[i], u[i]);
-            double EnergyFluxhydro_gammaj = MeshlessEOS->EOSEnergyFluxGamma(rho[j], P[j], u[j]);
-            WijR[iW][1] -= dt/2. * (EnergyFluxhydro_gammai * P[i] * viDiv
+#if EOS == 1
+            double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i], rho0[i]);
+            double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j], rho0[j]);
+#else
+            double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
+            double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j]);
+#endif
+            WijR[iW][1] -= dt/2. * (Ki * viDiv
                                         + (vx[i]-vFrame[iW][0])*PGrad[i][0] + (vy[i]-vFrame[iW][1])*PGrad[i][1]);
-            WijL[iW][1] -= dt/2. * (EnergyFluxhydro_gammaj * P[j] * vjDiv
+            WijL[iW][1] -= dt/2. * (Kj * vjDiv
                                         + (vx[j]-vFrame[iW][0])*PGrad[j][0] + (vy[j]-vFrame[iW][1])*PGrad[j][1]);
 
             // velocities
@@ -2949,26 +2980,27 @@ void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles, c
         //Logger(DEBUG) << "E = " << "[" << B[0] << ", " << B[1] << ", " << B[2] << ", " << B[3] << "]";
 
         // needed for sanity check of matrix E
-        //double normE = 0;
-        //for (int alpha=0; alpha<DIM; ++alpha){
-        //    for (int beta=0; beta<DIM; ++beta){
-        //        normE += B[alpha*DIM+beta]*B[alpha*DIM+beta];
-        //    }
-        //}
+        double normE = 0;
+        for (int alpha=0; alpha<DIM; ++alpha){
+           for (int beta=0; beta<DIM; ++beta){
+               normE += B[alpha*DIM+beta]*B[alpha*DIM+beta];
+           }
+        }
 
         helper.inverseMatrix(B, DIM);
 
-        //double normB = 0;
-        //for (int alpha=0; alpha<DIM; ++alpha){
-        //    for (int beta=0; beta<DIM; ++beta){
-        //        normB += B[alpha*DIM+beta]*B[alpha*DIM+beta];
-        //    }
-        //}
+        double normB = 0;
+        for (int alpha=0; alpha<DIM; ++alpha){
+           for (int beta=0; beta<DIM; ++beta){
+               normB += B[alpha*DIM+beta]*B[alpha*DIM+beta];
+           }
+        }
 
         // Check whether Matrix E is ill-conditioned
-        //double Ncond = 1./DIM * sqrt(normE*normB);
-        //Logger(DEBUG) << "Ncond@" << i << " = " << Ncond;
-
+        double Ncond = 1./DIM * sqrt(normE*normB);
+        if (Ncond > 1){
+            Logger(DEBUG) << "Ncond@" << i << " = " << Ncond;
+        }
         //if (i == 7) {
         //    Logger(DEBUG) << "B = " << "[" << B[0] << ", " << B[1] << ", " << B[2] << ", " << B[3] << "]";
         //}
@@ -3235,12 +3267,19 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
             viDiv += vzGrad[i][2];
             vjDiv += ghostParticles.vzGrad[j][2];
 #endif // DIM == 3
-            double EnergyFluxhydro_gammai = MeshlessEOS->EOSEnergyFluxGamma(rho[i], P[i], u[i]);
-            double EnergyFluxhydro_gammaj = MeshlessEOS->EOSEnergyFluxGamma(ghostParticles.rho[j], ghostParticles.P[j], ghostParticles.u[j]);
+
+#if EOS == 1
+            double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i], rho0[i]);
+            double Kj = MeshlessEOS->EOSBulkModulus(ghostParticles.rho[j], ghostParticles.P[j]);
+#else
+            double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
+            double Kj = MeshlessEOS->EOSBulkModulus(ghostParticles.rho[j], ghostParticles.P[j]);
+#endif
+
             WijRGhosts[iW][0] -= dt/2. * (rho[i] * viDiv + (vx[i]-vFrameGhosts[iW][0])*rhoGrad[i][0] + (vy[i]-vFrameGhosts[iW][1])*rhoGrad[i][1]);
             WijLGhosts[iW][0] -= dt/2. * (ghostParticles.rho[j] * vjDiv + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.rhoGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.rhoGrad[j][1]);
-            WijRGhosts[iW][1] -= dt/2. * (EnergyFluxhydro_gammai * P[i] * viDiv + (vx[i]-vFrameGhosts[iW][0])*PGrad[i][0] + (vy[i]-vFrameGhosts[iW][1])*PGrad[i][1]);
-            WijLGhosts[iW][1] -= dt/2. * (EnergyFluxhydro_gammaj * P[j] * vjDiv + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.PGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.PGrad[j][1]);
+            WijRGhosts[iW][1] -= dt/2. * (Ki * viDiv + (vx[i]-vFrameGhosts[iW][0])*PGrad[i][0] + (vy[i]-vFrameGhosts[iW][1])*PGrad[i][1]);
+            WijLGhosts[iW][1] -= dt/2. * (Kj * vjDiv + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.PGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.PGrad[j][1]);
             WijRGhosts[iW][2] -= dt/2. * (PGrad[i][0]/rho[i] + (vx[i] - vFrameGhosts[iW][0])*vxGrad[i][0] + (vy[i] - vFrameGhosts[iW][1])*vxGrad[i][1]);
             WijLGhosts[iW][2] -= dt/2. * (ghostParticles.PGrad[j][0]/ghostParticles.rho[j] + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.vxGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.vxGrad[j][1]);
             WijRGhosts[iW][3] -= dt/2. * (PGrad[i][1]/rho[i] + (vx[i] - vFrameGhosts[iW][0])*vyGrad[i][0] + (vy[i] - vFrameGhosts[iW][1])*vyGrad[i][1]);
@@ -3664,7 +3703,16 @@ void Particles::dump2file(std::string filename, double simTime){
     HighFive::DataSet rhoGradDataSet = h5File.createDataSet<double>("/rhoGrad", HighFive::DataSpace(dataSpaceDims));
     HighFive::DataSet PDataSet = h5File.createDataSet<double>("/P", HighFive::DataSpace(N));
     HighFive::DataSet noiDataSet = h5File.createDataSet<int>("/noi", HighFive::DataSpace(N));
-
+#if ELASTIC
+    HighFive::DataSet SxxDataSet = h5File.createDataSet<double>("/Sxx", HighFive::DataSpace(N));
+    HighFive::DataSet SxyDataSet = h5File.createDataSet<double>("/Sxy", HighFive::DataSpace(N));
+    HighFive::DataSet SyyDataSet = h5File.createDataSet<double>("/Syy", HighFive::DataSpace(N));
+#if DIM == 3
+    HighFive::DataSet SxzDataSet = h5File.createDataSet<double>("/Sxz", HighFive::DataSpace(N));
+    HighFive::DataSet SyzDataSet = h5File.createDataSet<double>("/Syz", HighFive::DataSpace(N));
+    HighFive::DataSet SzzDataSet = h5File.createDataSet<double>("/Szz", HighFive::DataSpace(N));
+#endif
+#endif
 
     // containers for particle data
     std::vector<double> timeVec({ simTime });
@@ -3685,12 +3733,23 @@ void Particles::dump2file(std::string filename, double simTime){
     std::vector<std::vector<double>> velVec(N);
 
     std::vector<std::vector<double>> rhoGradVec(N);
+#if ELASTIC
+    std::vector<double> SxxVec(Sxx, Sxx+N);
+    std::vector<double> SxyVec(Sxy, Sxy+N);
+    std::vector<double> SyyVec(Syy, Syy+N);
+#if DIM == 3
+    std::vector<double> SxzVec(Sxz, Sxz+N);
+    std::vector<double> SyzVec(Syz, Syz+N);
+    std::vector<double> SzzVec(Szz, Szz+N);
+#endif
+#endif // ELASTIC
 
     // fill containers with data
     std::vector<double> posBuf(DIM);
     std::vector<double> velBuf(DIM);
     std::vector<double> rhoGradBuf(DIM);
     for(int i=0; i<N; ++i){
+        // Logger(DEBUG) << " Pressure of particle i = " << i << " is P = " << P[i] << ", vector at i is " << PVec.at(i);
         //Logger(DEBUG) << "      > Dumping particle @"  << i;
         // position
         posBuf[0] = x[i];
@@ -3733,4 +3792,15 @@ void Particles::dump2file(std::string filename, double simTime){
     posDataSet.write(posVec);
     velDataSet.write(velVec);
     rhoGradDataSet.write(rhoGradVec);
+
+#if ELASTIC
+    SxxDataSet.write(SxxVec);
+    SxyDataSet.write(SxyVec);
+    SyyDataSet.write(SyyVec);
+#if DIM == 3
+    SxzDataSet.write(SxzVec);
+    SyzDataSet.write(SyzVec);
+    SzzDataSet.write(SzzVec);
+#endif
+#endif    
 }
