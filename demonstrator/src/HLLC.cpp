@@ -668,6 +668,17 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
         const double SL = SLmvL + vL;
 
         // Physical flux FL (eq. 43)
+#if MESHLESS_FINITE_MASS
+        totflux[0] = 0;
+        totflux[2] = tL;
+        totflux[3] = -SxyL;
+#if DIM == 3
+        totflux[4] = -SxzL;
+        totflux[1] = vL * tL - WL[3] * SxyL - WL[4] * SxzL;
+#else
+        totflux[1] = vL * tL - WL[3] * SxyL;
+#endif
+#else // MFV
         totflux[0] = rhoLvL;
         totflux[2] = rhoLvL * vL + tL;
         totflux[3] = rhoLvL * WL[3] - SxyL;
@@ -677,6 +688,7 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
 #else
         totflux[1] = vL * (WL[1] + WL[0] * eL) - vL * SxxL - WL[3] * SxyL;
 #endif
+#endif // MESHLESS_FINITE_MASS
 
         // Star-state correction if SL < 0
         if (SL < 0.0){
@@ -687,12 +699,21 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
             const double rhoLSLSstarmvL = rhoLSL * SstarmvL * starfac;
 
             // F*L = FL + SL*(U*L - UL)
+#if MESHLESS_FINITE_MASS
+            totflux[0] += 0;
+            totflux[2] += rhoLSLSstarmvL;
+            totflux[3] += 0;
+#if DIM == 3
+            totflux[4] += 0;
+#endif
+#else // MFV
             totflux[0] += rhoLSLstarfac;
             totflux[2] += rhoLSLstarfac * vL + rhoLSLSstarmvL;
             totflux[3] += rhoLSLstarfac * WL[3];
 #if DIM == 3
             totflux[4] += rhoLSLstarfac * WL[4];
 #endif
+#endif // MESHLESS_FINITE_MASS
             // Energy: F*K^(5) = FK^(5) + SK*(ρ*K*ε*K - ρK*εK) (eq. 98)
             // with ε*K = εK + (S* - vK) * [S* + tK/(ρK*(SK-vK))] (eq. 73)
             totflux[1] += rhoLSLstarfac * eL
@@ -715,6 +736,17 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
         const double SR = SRmvR + vR;
 
         // Physical flux FR (eq. 43)
+#if MESHLESS_FINITE_MASS
+        totflux[0] = 0;
+        totflux[2] = tR;
+        totflux[3] = -SxyR;
+#if DIM == 3
+        totflux[4] = -SxzR;
+        totflux[1] = vR * tR - WR[3] * SxyR - WR[4] * SxzR;
+#else
+        totflux[1] = vR * tR - WR[3] * SxyR;
+#endif
+#else // MFV
         totflux[0] = rhoRvR;
         totflux[2] = rhoRvR * vR + tR;
         totflux[3] = rhoRvR * WR[3] - SxyR;
@@ -724,6 +756,7 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
 #else
         totflux[1] = vR * (WR[1] + WR[0] * eR) - vR * SxxR - WR[3] * SxyR;
 #endif
+#endif // MESHLESS_FINITE_MASS
 
         // Star-state correction if SR > 0
         if (SR > 0.0){
@@ -734,12 +767,21 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
             const double rhoRSRSstarmvR = rhoRSR * SstarmvR * starfac;
 
             // F*R = FR + SR*(U*R - UR)
+#if MESHLESS_FINITE_MASS
+            totflux[0] += 0;
+            totflux[2] += rhoRSRSstarmvR;
+            totflux[3] += 0;
+#if DIM == 3
+            totflux[4] += 0;
+#endif
+#else // MFV
             totflux[0] += rhoRSRstarfac;
             totflux[2] += rhoRSRstarfac * vR + rhoRSRSstarmvR;
             totflux[3] += rhoRSRstarfac * WR[3];
 #if DIM == 3
             totflux[4] += rhoRSRstarfac * WR[4];
 #endif
+#endif // MESHLESS_FINITE_MASS
             totflux[1] += rhoRSRstarfac * eR
                         + rhoRSRSstarmvR * (Sstar + tR / (WR[0] * SRmvR));
         }
