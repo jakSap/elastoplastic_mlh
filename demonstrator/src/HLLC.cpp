@@ -626,15 +626,15 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
 
     // Step 5: Wave speed estimates (same q-factor pattern as solveHLLC1, with traction)
     double qL = 1.0;
-    if (tstar > tL && tL > 0.0){
-        qL = sqrt(1.0 + 0.5 * hydro_gamma_plus_one * hydro_one_over_gamma
-                  * (tstar / tL - 1.0));
-    }
+    // if (tstar > tL && tL > 0.0){
+    //     qL = sqrt(1.0 + 0.5 * hydro_gamma_plus_one * hydro_one_over_gamma
+    //               * (tstar / tL - 1.0));
+    // }
     double qR = 1.0;
-    if (tstar > tR && tR > 0.0){
-        qR = sqrt(1.0 + 0.5 * hydro_gamma_plus_one * hydro_one_over_gamma
-                  * (tstar / tR - 1.0));
-    }
+    // if (tstar > tR && tR > 0.0){
+    //     qR = sqrt(1.0 + 0.5 * hydro_gamma_plus_one * hydro_one_over_gamma
+    //               * (tstar / tR - 1.0));
+    // }
     const double SLmvL = -aL * qL;   // SL - vL
     const double SRmvR =  aR * qR;   // SR - vR
 
