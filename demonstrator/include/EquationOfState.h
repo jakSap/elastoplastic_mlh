@@ -32,6 +32,18 @@ public:
     double EOSAdiabaticSoundSpeed(const double &rho, const double &p);
     double EOSGeneralGamma(const double &rho, const double &p);
     double EOSBulkModulus(const double &rho, const double &p);
+
+#if EOS == 1
+    // Overloads with explicit per-particle reference density (Murnaghan):
+    double EOSPressure(const double &rho, const double &u, const double &rho0_local);
+    double EOSSoundSpeed(const double &rho, const double &u, const double &p, const double &rho0_local);
+    double EOSInternalEnergy(const double &rho, const double &p, const double &rho0_local);
+    double EOSEnergyFluxGamma(const double &rho, const double &p, const double &u, const double &rho0_local);
+    double EOSAdiabaticSoundSpeed(const double &rho, const double &p, const double &rho0_local);
+    double EOSGeneralGamma(const double &rho, const double &p, const double &rho0_local);
+    double EOSBulkModulus(const double &rho, const double &p, const double &rho0_local);
+#endif
+
 #if EOS == 0
     double EOSGetHydroGammaParam();
 #elif EOS == 1

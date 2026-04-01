@@ -39,7 +39,7 @@ double EquationOfState::EOSPressure(const double &rho, const double &u){
 #if EOS == 0 // Ideal gas
     return (hydro_gamma - 1) * u * rho;
 #elif EOS == 1 // Murnaghan
-    return K0 / murn_n * (pow(rho / rho0, murn_n) - 1);
+    return EOSPressure(rho, u, rho0);
 #elif EOS == 2 // Tillotson
     return -1
 #endif // EOS
@@ -50,7 +50,7 @@ double EquationOfState::EOSSoundSpeed(const double &rho, const double &u,
 #if EOS == 0 // Ideal gas
     return sqrt(hydro_gamma * p / rho);
 #elif EOS == 1 // Murnaghan
-    return K0 / rho0 * pow(rho / rho0, murn_n - 1);
+    return EOSSoundSpeed(rho, u, p, rho0);
 #elif EOS == 2 // Tillotson
     return -1; // TODO
 #endif // EOS
@@ -60,7 +60,7 @@ double EquationOfState::EOSInternalEnergy(const double &rho, const double &p){
 #if EOS == 0 // Ideal gas
     return p /((hydro_gamma - 1) * rho);
 #elif EOS == 1 // Murnaghan
-    return 1;
+    return EOSInternalEnergy(rho, p, rho0);
 #endif // EOS
 }
 
@@ -68,7 +68,7 @@ double EquationOfState::EOSEnergyFluxGamma(const double &rho, const double &p, c
 #if EOS == 0
     return hydro_gamma;
 #elif EOS == 1
-    return K0 * pow(rho / rho0, murn_n) / p;
+    return EOSEnergyFluxGamma(rho, p, u, rho0);
 #endif
 }
 
@@ -77,8 +77,7 @@ double EquationOfState::EOSAdiabaticSoundSpeed(const double &rho, const double &
 #if EOS == 0
     cs = sqrt(hydro_gamma * p / rho);
 #elif EOS == 1
-    const double eta = rho / rho0;
-    cs = murn_n * pow(eta, murn_n) / (pow(eta, murn_n) - 1);
+    cs = EOSAdiabaticSoundSpeed(rho, p, rho0);
 #endif
     assert(cs >= 0 && "Negative sound speed encountered");
     assert(cs > 0 && "Zero sound speed encountered");
@@ -89,7 +88,7 @@ double EquationOfState::EOSBulkModulus(const double &rho, const double &p){
 #if EOS == 0
     return hydro_gamma * p;
 #elif EOS == 1
-    return K0 * pow(rho / rho0, murn_n);
+    return EOSBulkModulus(rho, p, rho0);
 #endif
 }
 
@@ -98,9 +97,51 @@ double EquationOfState::EOSGeneralGamma(const double &rho, const double &p){
 #if EOS == 0
     return hydro_gamma;
 #elif EOS == 1
-    return murn_n * pow(rho / rho0, murn_n) / (pow(rho / rho0, murn_n) - 1);
+    return EOSGeneralGamma(rho, p, rho0);
 #endif
 }
+
+#if EOS == 1
+double EquationOfState::EOSPressure(const double &rho, const double &u, const double &rho0_local){
+    return K0 / murn_n * (pow(rho / rho0_local, murn_n) - 1);
+}
+
+double EquationOfState::EOSSoundSpeed(const double &rho, const double &u, const double &p, const double &rho0_local){
+    return K0 / rho0_local * pow(rho / rho0_local, murn_n - 1);
+}
+
+double EquationOfState::EOSInternalEnergy(const double &rho, const double &p, const double &rho0_local){
+    // u(rho) = integral_{rho0}^{rho} P(rho')/rho'^2 drho'
+    if (std::abs(murn_n - 1.0) < 1e-14) {
+        // n = 1: u = K0/rho0 * ln(rho/rho0) + K0 * (1/rho - 1/rho0)
+        return K0 / rho0_local * log(rho / rho0_local) + K0 * (1.0 / rho - 1.0 / rho0_local);
+    } else {
+        // General n: u = K0/(n(n-1)rho0^n) * (rho^(n-1) - rho0^(n-1)) + K0/n * (1/rho - 1/rho0)
+        return K0 / (murn_n * (murn_n - 1.0) * pow(rho0_local, murn_n)) * (pow(rho, murn_n - 1.0) - pow(rho0_local, murn_n - 1.0))
+             + K0 / murn_n * (1.0 / rho - 1.0 / rho0_local);
+    }
+}
+
+double EquationOfState::EOSEnergyFluxGamma(const double &rho, const double &p, const double &u, const double &rho0_local){
+    return K0 * pow(rho / rho0_local, murn_n) / p;
+}
+
+double EquationOfState::EOSAdiabaticSoundSpeed(const double &rho, const double &p, const double &rho0_local){
+    const double eta = rho / rho0_local;
+    double cs = murn_n * pow(eta, murn_n) / (pow(eta, murn_n) - 1);
+    assert(cs >= 0 && "Negative sound speed encountered");
+    assert(cs > 0 && "Zero sound speed encountered");
+    return cs;
+}
+
+double EquationOfState::EOSGeneralGamma(const double &rho, const double &p, const double &rho0_local){
+    return murn_n * pow(rho / rho0_local, murn_n) / (pow(rho / rho0_local, murn_n) - 1);
+}
+
+double EquationOfState::EOSBulkModulus(const double &rho, const double &p, const double &rho0_local){
+    return K0 * pow(rho / rho0_local, murn_n);
+}
+#endif // EOS == 1
 
 #if EOS == 0
 double EquationOfState::EOSGetHydroGammaParam(){
