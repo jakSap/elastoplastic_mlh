@@ -9,7 +9,7 @@
 #define DIM 2
 
 /// define if periodic boundaries should be employed
-#define PERIODIC_BOUNDARIES 1
+#define PERIODIC_BOUNDARIES 0
 
 /// define if timestep is adaptive
 #define ADAPTIVE_TIMESTEP 1
@@ -22,13 +22,13 @@
 
 /* Define which equation of state to use.
 For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
-#define EOS 0 // Ideal gas EOS
-// #define EOS 1 // Murnaghan EOS
+// #define EOS 0 // Ideal gas EOS
+#define EOS 1 // Murnaghan EOS
 // #define EOS 2 // Tillotson EOS
 
 /* Simulate elastic dynamics*/
 #define ELASTIC 1
-#define SHEAR_MODULUS 0.
+#define SHEAR_MODULUS 0.22
 /** maximum interactions with ghost particles
  *  ignored when `PERIODIC_BOUNDARIES` is not set
 **/
@@ -46,7 +46,7 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 #define PSI_2 .25           // TODO: move to config
 
 /// meshless finite mass method instead of meshless finite volume
-#define MESHLESS_FINITE_MASS 1
+#define MESHLESS_FINITE_MASS 0
 
 
 #define USE_MATID 0
@@ -97,6 +97,9 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 /// deprecated, ENFORCE_FLUX_SYM should be set to 1
 // define how much tolerance of flux antisymmetry is allowed in checkFluxSymmetry
 #define FLUX_SYM_TOL 1e-20
+
+// floor for internal energy u, set to negative value to disable
+#define ENERGY_FLOOR 0
 
 // using pressure floor to avoid predicting negative pressures
 //#define PRESSURE_FLOOR 1e-8

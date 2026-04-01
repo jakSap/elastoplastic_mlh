@@ -703,6 +703,11 @@ void Particles::compuis(const double &dt, const double &kernelSize){
         if (u[i] < 0.){
             Logger(WARN) << "+++DANGER+++ negative specific internal energy encountered.";
         }
+#if ENERGY_FLOOR >= 0
+        if (u[i] < ENERGY_FLOOR){
+            u[i] = ENERGY_FLOOR;
+        }
+#endif
     }
 }
 
@@ -2578,8 +2583,12 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
 #endif
         if (u[i] <= 0.){
             Logger(ERROR) << "Negative internal energy. u[" << i << "] =" << u[i] << ", eF = " << eF[i];
-            //u[i] = ENERGY_FLOOR;
         }
+#if ENERGY_FLOOR >= 0
+        if (u[i] < ENERGY_FLOOR){
+            u[i] = ENERGY_FLOOR;
+        }
+#endif
 
 #if MOVE_PARTICLES
         // MOVE PARTICLES
@@ -2661,6 +2670,11 @@ void Particles::updateState(const double &dt){
         if (u[i] <= 0.){
             Logger(ERROR) << "Negative internal energy. u[" << i << "] =" << u[i] << ", eF = " << eF[i];
         }
+#if ENERGY_FLOOR >= 0
+        if (u[i] < ENERGY_FLOOR){
+            u[i] = ENERGY_FLOOR;
+        }
+#endif
     }
 }
 
