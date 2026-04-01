@@ -591,7 +591,7 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
 
     const double hydro_gamma_plus_one = hydro_gamma + 1.0d;
     const double hydro_one_over_gamma = 1.0d / hydro_gamma;
-    const double hydro_one_over_gamma_minus_one = hydro_one_over_gamma - 1.0d;
+    const double hydro_one_over_gamma_minus_one = 1.0d / (hydro_gamma - 1.0d);
 
     // Step 1: x-split normal velocity (no projection onto n needed)
     const double vL = WL[2];
