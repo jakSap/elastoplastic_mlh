@@ -2587,6 +2587,7 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
 #if ENERGY_FLOOR >= 0
         if (u[i] < ENERGY_FLOOR){
             u[i] = ENERGY_FLOOR;
+            Logger(ERROR) << "Clamped internal energy at " << ENERGY_FLOOR;
         }
 #endif
 
