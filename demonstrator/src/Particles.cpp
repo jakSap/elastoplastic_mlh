@@ -2280,11 +2280,11 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #endif
                 Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i, *MeshlessEOS
 #if ELASTIC
-                                 , fSxxR, fSxyR, fSyyR
-                                 , fSxxL, fSxyL, fSyyL
+                                , fSxxL, fSxyL, fSyyL
+                                , fSxxR, fSxyR, fSyyR
 #if DIM == 3
-                                 , fSxzR, fSyzR, fSzzR
-                                 , fSxzL, fSyzL, fSzzL
+                                , fSxzL, fSyzL, fSzzL
+                                , fSxzR, fSyzR, fSzzR
 #endif
 #endif
                 };
