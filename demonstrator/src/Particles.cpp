@@ -281,6 +281,7 @@ Particles::~Particles() {
 #if EOS == 1
 void Particles::initRho0(){
     for (int i = 0; i < N; ++i) rho0[i] = rho[i];
+    Logger(INFO) << "   Initialized rho0 to rho locally";
 }
 #endif
 
