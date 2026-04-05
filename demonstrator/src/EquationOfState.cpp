@@ -35,6 +35,7 @@ EquationOfState::EquationOfState(
 #endif //EOS
 }
 
+// This is for global Rho0
 double EquationOfState::EOSPressure(const double &rho, const double &u){
 #if EOS == 0 // Ideal gas
     return (hydro_gamma - 1) * u * rho;

@@ -101,6 +101,11 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 // floor for internal energy u, set to negative value to disable
 #define ENERGY_FLOOR 0
 
+// Use per-particle local reference density rho0 for Murnaghan EOS.
+// 1: rho0 is stored per particle and initialized from initial density (local rho0)
+// 0: rho0 from the global EOS parameter is used for all particles
+#define LOCAL_RHO0 1
+
 // using pressure floor to avoid predicting negative pressures
 //#define PRESSURE_FLOOR 1e-8
 
