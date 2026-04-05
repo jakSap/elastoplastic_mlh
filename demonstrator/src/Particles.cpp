@@ -1691,7 +1691,7 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kerne
         //}
 
 #if DEBUG_LVL
-        if(i == 2){
+        if(i == 0){
             Logger(DEBUG) << "slopeLimiter i=2: f[i]=" << f[i]
                           << " grad=[" << grad[i][0] << ", " << grad[i][1] << "]"
                           << " alphaMin=" << alphaMin << " alphaMax=" << alphaMax
@@ -1894,7 +1894,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
 #endif // MOVE_PARTICLES
             // boost frame to effective face
 #if DEBUG_LVL
-            if(i == 2 && jn == 0){
+            if(i == 0 && jn == 0){
                 Logger(DEBUG) << "compRiemannStatesLR i=2, j=" << j
                               << " RAW: vx[i]=" << vx[i] << ", vy[i]=" << vy[i]
                               << ", vFrame=[" << vFrame[iW][0] << ", " << vFrame[iW][1] << "]";
@@ -1968,7 +1968,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
 #endif // DIM == 3
 
 #if DEBUG_LVL
-            if(i == 2 && jn == 0){
+            if(i == 0 && jn == 0){
                 Logger(DEBUG) << "  AFTER GRAD EXTRAP: vxR=" << WijR[iW][2]
                               << ", vyR=" << WijR[iW][3];
             }
@@ -1992,7 +1992,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
 #endif // PAIRWISE_LIMITER
 
 #if DEBUG_LVL
-            if(i == 2 && jn == 0){
+            if(i == 0 && jn == 0){
                 Logger(DEBUG) << "  AFTER PAIRWISE LIM: vxR=" << WijR[iW][2]
                               << ", vyR=" << WijR[iW][3];
             }
@@ -2061,7 +2061,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
             WijL[iW][3] += dt/2. * (SxyGrad[j][0] + SyyGrad[j][1]) / rho[j];
 #endif // ELASTIC
 #if DEBUG_LVL
-            if(i == 2 && jn == 0){
+            if(i == 0 && jn == 0){
                 Logger(DEBUG) << "  AFTER TIME PRED+ELASTIC: vxR=" << WijR[iW][2]
                               << ", vyR=" << WijR[iW][3];
             }
@@ -2509,7 +2509,7 @@ void Particles::collectFluxes(Helper &helper){
             //                  << "], Fe = " << eF[i];
             //}
 
-            if (i == 128){
+            if (i == 0){
                // Logger(DEBUG) << "  > j = " << nnl[ii] << ", AijNorm = " << AijNorm
                //           << ", vFrame = [" << vFrame[ii][0] << ", " << vFrame[ii][1] << "]";
                Logger(DEBUG) << "  > j = " << nnl[ii] <<  " > Fm = " << FijGhosts[ii][0] << ", Fv = [" << FijGhosts[ii][2] << ", " << FijGhosts[ii][3]
@@ -2718,7 +2718,6 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
         // Logger(DEBUG) << "i = " << i << ", N = "<< N;
         bool foundGhostX = false, foundGhostY = false;
         ghostMap[i*(DIM+1)] = -1;
-        Logger(DEBUG) << "_";
         ghostMap[i*(DIM+1)+1] = -1;
         ghostMap[i*(DIM+1)+2] = -1;
 
@@ -2743,7 +2742,7 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
         } else {
             ghostParticles.y[iGhost] = y[i];
         }
-        Logger(DEBUG) << "corner-direction:";
+        // Logger(DEBUG) << "corner-direction:";
 
         // 'corner' particle first if both are true
         if (foundGhostX || foundGhostY) {
@@ -2754,7 +2753,7 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
             //          << ghostParticles.y[iGhost] << "]";
             ++iGhost;
         }
-        Logger(DEBUG) << "corner ok";
+        // Logger(DEBUG) << "corner ok";
 
         // create DIM extra normal particles
         if (foundGhostX && foundGhostY){
@@ -3014,9 +3013,9 @@ void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles, c
 
         // Check whether Matrix E is ill-conditioned
         double Ncond = 1./DIM * sqrt(normE*normB);
-        if (Ncond > 1){
-            Logger(DEBUG) << "Ncond@" << i << " = " << Ncond;
-        }
+        // if (Ncond > 1){
+        //     Logger(DEBUG) << "Ncond@" << i << " = " << Ncond;
+        // }
         //if (i == 7) {
         //    Logger(DEBUG) << "B = " << "[" << B[0] << ", " << B[1] << ", " << B[2] << ", " << B[3] << "]";
         //}
@@ -3269,7 +3268,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
             WijLGhosts[iW][4] += Helper::dotProduct(ghostParticles.vzGrad[j], xijxj);
 #endif
 
-            //if (i == 23 && iW == 28){
+            //if (i == 03 && iW == 28){
             //    Logger(DEBUG) << "        j = " << j
             //                  << ", rhoL = " << WijLGhosts[iW][0] << ", rhoR = " << WijRGhosts[iW][0]
             //                  << ", uL = " << WijLGhosts[iW][2] << ", uR = " << WijRGhosts[iW][2]
