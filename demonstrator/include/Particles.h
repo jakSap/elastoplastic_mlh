@@ -39,7 +39,7 @@ public:
 #endif
     int *cell; // cell in which particle at index resides
     double *m, *u, *x, *y, *vx, *vy, *rho, *P;
-#if EOS == 1
+#if EOS == 1 && LOCAL_RHO0
     double *rho0;    // reference density per particle (Murnaghan)
     void initRho0(); // call once after first compDensity
 #endif

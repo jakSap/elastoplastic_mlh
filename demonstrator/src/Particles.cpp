@@ -78,7 +78,7 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     u = new double[numParticles];
     rho = new double[numParticles];
     P = new double[numParticles];
-#if EOS == 1
+#if EOS == 1 && LOCAL_RHO0
     rho0 = new double[numParticles];
 #endif
     x = new double[numParticles];
@@ -188,7 +188,7 @@ Particles::~Particles() {
     delete[] u;
     delete[] P;
     delete[] rho;
-#if EOS == 1
+#if EOS == 1 && LOCAL_RHO0
     delete[] rho0;
 #endif
     delete[] x;
@@ -278,7 +278,7 @@ Particles::~Particles() {
 #endif
 }
 
-#if EOS == 1
+#if EOS == 1 && LOCAL_RHO0
 void Particles::initRho0(){
     for (int i = 0; i < N; ++i) rho0[i] = rho[i];
     Logger(INFO) << "   Initialized rho0 to rho locally";
@@ -1500,8 +1500,8 @@ void Particles::gradient(double *f, double (*grad)[DIM]){
 }
 
 void Particles::compPressure(){
-    for (int i=0; i<N; ++i){        
-#if EOS == 1
+    for (int i=0; i<N; ++i){
+#if EOS == 1 && LOCAL_RHO0
         P[i] = MeshlessEOS->EOSPressure(rho[i], u[i], rho0[i]);
 #else
         P[i] = MeshlessEOS->EOSPressure(rho[i], u[i]);
@@ -1724,7 +1724,7 @@ double Particles::compGlobalTimestep(const double &kernelSize){
     for (int i=0; i<N; ++i){
         double vSig = std::numeric_limits<double>::min();
         // double ci = sqrt(hydro_gamma*P[i]/rho[i]); // soundspeed @i
-#if EOS == 1
+#if EOS == 1 && LOCAL_RHO0
         double ci = MeshlessEOS->EOSSoundSpeed(rho[i], -1, P[i], rho0[i]);
 #else
         double ci = MeshlessEOS->EOSSoundSpeed(rho[i], -1, P[i]);
@@ -1733,7 +1733,7 @@ double Particles::compGlobalTimestep(const double &kernelSize){
         for (int jn=0; jn<noi[i]; ++jn){
             int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
 
-#if EOS == 1
+#if EOS == 1 && LOCAL_RHO0
             double cj = MeshlessEOS->EOSSoundSpeed(rho[j], -1, P[j], rho0[j]);
 #else
             double cj = MeshlessEOS->EOSSoundSpeed(rho[j], -1, P[j]);
@@ -1774,7 +1774,7 @@ double Particles::compElasticTimestep(const double &kernelSize){
         double vSig = std::numeric_limits<double>::min();
 
         // Elastic longitudinal wave speed (eq. 92)
-#if EOS == 1
+#if EOS == 1 && LOCAL_RHO0
         double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i], rho0[i]);
 #else
         double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
@@ -1784,7 +1784,7 @@ double Particles::compElasticTimestep(const double &kernelSize){
         for (int jn=0; jn<noi[i]; ++jn){
             int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
 
-#if EOS == 1
+#if EOS == 1 && LOCAL_RHO0
             double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j], rho0[j]);
 #else
             double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j]);
@@ -2035,7 +2035,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
             // energy
             // WijR[iW][1] -= dt/2. * (hydro_gamma*P[i] * viDiv + (vx[i]-vFrame[iW][0])*PGrad[i][0] + (vy[i]-vFrame[iW][1])*PGrad[i][1]);
             // WijL[iW][1] -= dt/2. * (hydro_gamma*P[j] * vjDiv + (vx[j]-vFrame[iW][0])*PGrad[j][0] + (vy[j]-vFrame[iW][1])*PGrad[j][1]);
-#if EOS == 1
+#if EOS == 1 && LOCAL_RHO0
             double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i], rho0[i]);
             double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j], rho0[j]);
 #else
@@ -3284,7 +3284,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
             vjDiv += ghostParticles.vzGrad[j][2];
 #endif // DIM == 3
 
-#if EOS == 1
+#if EOS == 1 && LOCAL_RHO0
             double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i], rho0[i]);
             double Kj = MeshlessEOS->EOSBulkModulus(ghostParticles.rho[j], ghostParticles.P[j]);
 #else
