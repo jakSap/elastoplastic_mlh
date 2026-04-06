@@ -9,10 +9,10 @@
 #define DIM 2
 
 /// define if periodic boundaries should be employed
-#define PERIODIC_BOUNDARIES 0
+#define PERIODIC_BOUNDARIES 1
 
 /// define if timestep is adaptive
-#define ADAPTIVE_TIMESTEP 1
+#define ADAPTIVE_TIMESTEP 0
 
 /// define Courant-Friedrichs-Levy number, should be smaller than 1
 #define CFL .2              // TODO: move to config
@@ -28,7 +28,8 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 
 /* Simulate elastic dynamics*/
 #define ELASTIC 1
-#define SHEAR_MODULUS 0.22
+// #define SHEAR_MODULUS 0.22
+#define SHEAR_MODULUS 0
 /** maximum interactions with ghost particles
  *  ignored when `PERIODIC_BOUNDARIES` is not set
 **/
@@ -46,7 +47,7 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 #define PSI_2 .25           // TODO: move to config
 
 /// meshless finite mass method instead of meshless finite volume
-#define MESHLESS_FINITE_MASS 0
+#define MESHLESS_FINITE_MASS 1
 
 
 #define USE_MATID 0
@@ -101,10 +102,13 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 // floor for internal energy u, set to negative value to disable
 #define ENERGY_FLOOR 0
 
+// Output per-particle condition number of the gradient estimation matrix E
+#define OUTPUT_CONDITION_NUMBER 1
+
 // Use per-particle local reference density rho0 for Murnaghan EOS.
 // 1: rho0 is stored per particle and initialized from initial density (local rho0)
 // 0: rho0 from the global EOS parameter is used for all particles
-#define LOCAL_RHO0 1
+#define LOCAL_RHO0 0
 
 // using pressure floor to avoid predicting negative pressures
 //#define PRESSURE_FLOOR 1e-8

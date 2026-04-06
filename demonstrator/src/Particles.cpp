@@ -140,6 +140,14 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     vzGrad = new double[numParticles][DIM];
 #endif
     omega = new double[numParticles];
+#if OUTPUT_CONDITION_NUMBER
+    conditionNumber = new double[numParticles];
+#if DIM == 2
+    lambdaMax = new double[numParticles];
+    lambdaMin = new double[numParticles];
+    eigenvecMin = new double[numParticles][DIM];
+#endif
+#endif
     if (!ghosts){
         nnl = new int[numParticles*MAX_NUM_INTERACTIONS];
         noi = new int[numParticles];
@@ -200,6 +208,14 @@ Particles::~Particles() {
     delete[] vyGrad;
     delete[] PGrad;
     delete[] omega;
+#if OUTPUT_CONDITION_NUMBER
+    delete[] conditionNumber;
+#if DIM == 2
+    delete[] lambdaMax;
+    delete[] lambdaMin;
+    delete[] eigenvecMin;
+#endif
+#endif
 
 #if ELASTIC
     delete[] Sxx;
@@ -1455,7 +1471,45 @@ void Particles::compPsijTilde(Helper &helper, const double &kernelSize){
             }
         }
 
+#if OUTPUT_CONDITION_NUMBER
+        double normE = 0;
+        for (int alpha=0; alpha<DIM; ++alpha){
+           for (int beta=0; beta<DIM; ++beta){
+               normE += B[alpha*DIM+beta]*B[alpha*DIM+beta];
+           }
+        }
+#if DIM == 2
+        {
+            double a = B[0], b = B[1], c = B[3];
+            double trace = a + c;
+            double disc = sqrt((a - c) * (a - c) + 4.0 * b * b);
+            lambdaMax[i] = 0.5 * (trace + disc);
+            lambdaMin[i] = 0.5 * (trace - disc);
+            double ev_x = b;
+            double ev_y = lambdaMin[i] - a;
+            double norm = sqrt(ev_x * ev_x + ev_y * ev_y);
+            if (norm > 0.) {
+                eigenvecMin[i][0] = ev_x / norm;
+                eigenvecMin[i][1] = ev_y / norm;
+            } else {
+                eigenvecMin[i][0] = 1.;
+                eigenvecMin[i][1] = 0.;
+            }
+        }
+#endif
+#endif
+
         helper.inverseMatrix(B, DIM);
+
+#if OUTPUT_CONDITION_NUMBER
+        double normB = 0;
+        for (int alpha=0; alpha<DIM; ++alpha){
+           for (int beta=0; beta<DIM; ++beta){
+               normB += B[alpha*DIM+beta]*B[alpha*DIM+beta];
+           }
+        }
+        conditionNumber[i] = 1./DIM * sqrt(normE*normB);
+#endif
 
         for (int j=0; j<noi[i]; ++j) {
             iP = nnl[j+i*MAX_NUM_INTERACTIONS];
@@ -3002,6 +3056,26 @@ void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles, c
            }
         }
 
+#if OUTPUT_CONDITION_NUMBER && DIM == 2
+        {
+            double a = B[0], b = B[1], c = B[3];
+            double trace = a + c;
+            double disc = sqrt((a - c) * (a - c) + 4.0 * b * b);
+            lambdaMax[i] = 0.5 * (trace + disc);
+            lambdaMin[i] = 0.5 * (trace - disc);
+            double ev_x = b;
+            double ev_y = lambdaMin[i] - a;
+            double norm = sqrt(ev_x * ev_x + ev_y * ev_y);
+            if (norm > 0.) {
+                eigenvecMin[i][0] = ev_x / norm;
+                eigenvecMin[i][1] = ev_y / norm;
+            } else {
+                eigenvecMin[i][0] = 1.;
+                eigenvecMin[i][1] = 0.;
+            }
+        }
+#endif
+
         helper.inverseMatrix(B, DIM);
 
         double normB = 0;
@@ -3013,6 +3087,9 @@ void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles, c
 
         // Check whether Matrix E is ill-conditioned
         double Ncond = 1./DIM * sqrt(normE*normB);
+#if OUTPUT_CONDITION_NUMBER
+        conditionNumber[i] = Ncond;
+#endif
         // if (Ncond > 1){
         //     Logger(DEBUG) << "Ncond@" << i << " = " << Ncond;
         // }
@@ -3718,6 +3795,14 @@ void Particles::dump2file(std::string filename, double simTime){
     HighFive::DataSet rhoGradDataSet = h5File.createDataSet<double>("/rhoGrad", HighFive::DataSpace(dataSpaceDims));
     HighFive::DataSet PDataSet = h5File.createDataSet<double>("/P", HighFive::DataSpace(N));
     HighFive::DataSet noiDataSet = h5File.createDataSet<int>("/noi", HighFive::DataSpace(N));
+#if OUTPUT_CONDITION_NUMBER
+    HighFive::DataSet condDataSet = h5File.createDataSet<double>("/conditionNumber", HighFive::DataSpace(N));
+#if DIM == 2
+    HighFive::DataSet lambdaMaxDataSet = h5File.createDataSet<double>("/lambdaMax", HighFive::DataSpace(N));
+    HighFive::DataSet lambdaMinDataSet = h5File.createDataSet<double>("/lambdaMin", HighFive::DataSpace(N));
+    HighFive::DataSet eigenvecMinDataSet = h5File.createDataSet<double>("/eigenvecMin", HighFive::DataSpace(dataSpaceDims));
+#endif
+#endif
 #if ELASTIC
     HighFive::DataSet SxxDataSet = h5File.createDataSet<double>("/Sxx", HighFive::DataSpace(N));
     HighFive::DataSet SxyDataSet = h5File.createDataSet<double>("/Sxy", HighFive::DataSpace(N));
@@ -3804,6 +3889,26 @@ void Particles::dump2file(std::string filename, double simTime){
     uDataSet.write(uVec);
     PDataSet.write(PVec);
     noiDataSet.write(noi);
+#if OUTPUT_CONDITION_NUMBER
+    std::vector<double> condVec(conditionNumber, conditionNumber+N);
+    condDataSet.write(condVec);
+#if DIM == 2
+    std::vector<double> lambdaMaxVec(lambdaMax, lambdaMax+N);
+    std::vector<double> lambdaMinVec(lambdaMin, lambdaMin+N);
+    lambdaMaxDataSet.write(lambdaMaxVec);
+    lambdaMinDataSet.write(lambdaMinVec);
+    {
+        std::vector<std::vector<double>> eigenvecMinVec(N);
+        std::vector<double> evBuf(DIM);
+        for (int i = 0; i < N; ++i) {
+            evBuf[0] = eigenvecMin[i][0];
+            evBuf[1] = eigenvecMin[i][1];
+            eigenvecMinVec[i] = evBuf;
+        }
+        eigenvecMinDataSet.write(eigenvecMinVec);
+    }
+#endif
+#endif
     posDataSet.write(posVec);
     velDataSet.write(velVec);
     rhoGradDataSet.write(rhoGradVec);

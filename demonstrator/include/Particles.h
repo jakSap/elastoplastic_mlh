@@ -46,6 +46,14 @@ public:
 
     double (*rhoGrad)[DIM], (*vxGrad)[DIM], (*vyGrad)[DIM], (*vzGrad)[DIM], (*PGrad)[DIM];
 
+#if OUTPUT_CONDITION_NUMBER
+    double *conditionNumber;
+#if DIM == 2
+    double *lambdaMax, *lambdaMin;
+    double (*eigenvecMin)[DIM];
+#endif
+#endif
+
 #if ELASTIC
     double *Sxx, *Sxy, *Syy;
     double (*SxxGrad)[DIM], (*SxyGrad)[DIM], (*SyyGrad)[DIM];
