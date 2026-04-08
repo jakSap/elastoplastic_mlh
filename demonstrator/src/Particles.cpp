@@ -1439,6 +1439,14 @@ void Particles::compDensity(){
 }
 
 #if VARIABLE_SML
+double Particles::hMax() const {
+    double hm = 0.;
+    for (int i = 0; i < N; ++i){
+        if (sml[i] > hm) hm = sml[i];
+    }
+    return hm;
+}
+
 // Helper macro: kernel volume V(h) = c_V * h^DIM and dV/dh = c_V * DIM * h^(DIM-1).
 // In 2D: V = pi h^2; in 3D: V = (4/3) pi h^3.
 #if DIM == 2

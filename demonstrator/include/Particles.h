@@ -168,6 +168,12 @@ public:
     void compDensity(); // also computes omega
 
 #if VARIABLE_SML
+    /// Largest sml[i] over all particles. Used by MeshlessScheme to size the
+    /// NNS / ghost search radius so that every neighbor within max(h_i, h_j)
+    /// is found, which keeps neighbor relations symmetric and the existing
+    /// flux-symmetry mechanism (ENFORCE_FLUX_SYM) intact.
+    double hMax() const;
+
     /// Newton-Raphson update of every particle's smoothing length sml[i] so
     /// that the kernel-weighted effective neighbor count
     ///     V_kern(h_i) * sum_j W(r_ij, h_i)

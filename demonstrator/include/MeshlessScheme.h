@@ -5,6 +5,7 @@
 #ifndef DEMONSTRATOR_MESHLESSSCHEME_H
 #define DEMONSTRATOR_MESHLESSSCHEME_H
 
+#include <algorithm>
 #include <iomanip>
 
 #include "parameter.h"

@@ -7,6 +7,11 @@
 Domain::Domain(Cell bounds) : bounds { bounds }{}
 
 void Domain::createGrid(const double &kernelSize){
+    // free any previous allocation so this routine is safe to call repeatedly
+    // (needed for VARIABLE_SML, where the grid may be rebuilt mid-simulation
+    // when h_max grows beyond the current cell size).
+    delete[] dimIndex;
+    dimIndex = nullptr;
     cellsX = floor((bounds.maxX - bounds.minX)/kernelSize);
     cellsY = floor((bounds.maxY - bounds.minY)/kernelSize);
 #if DIM == 3

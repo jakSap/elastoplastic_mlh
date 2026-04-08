@@ -40,6 +40,18 @@ void MeshlessScheme::run(){
 
     do {
         Logger(INFO) << "  > TIME: " << t << ", STEP: " << step;
+
+        // Search radius used for the grid, NNS and ghost-particle generation.
+        // With VARIABLE_SML, h_i may grow beyond config.kernelSize. To keep
+        // neighbor relations symmetric (i in nnl[j] iff j in nnl[i]), we
+        // search with the largest h currently in use; flux symmetry is then
+        // preserved by the existing ENFORCE_FLUX_SYM machinery.
+#if VARIABLE_SML
+        const double nnsRadius = std::max(config.kernelSize, particles->hMax());
+#else
+        const double nnsRadius = config.kernelSize;
+#endif
+
 #if !PERIODIC_BOUNDARIES
         Logger(INFO) << "    > Computing domain limits ...";
         double domainLimits[DIM*2];
@@ -48,8 +60,21 @@ void MeshlessScheme::run(){
         domain.bounds = boundingBox;
         domain.printout();
         Logger(DEBUG) << "      > ... creating grid ...";
-        domain.createGrid(config.kernelSize);
+        domain.createGrid(nnsRadius);
         Logger(INFO) << "    > ... done.";
+#else // PERIODIC_BOUNDARIES
+#if VARIABLE_SML
+        // The periodic grid is built once in the constructor with cell size
+        // based on config.kernelSize. If h_max grows past the current cell
+        // size, we must rebuild the grid so that gridNNS' 3^DIM cell scan
+        // still covers the search radius.
+        if (nnsRadius > domain.cellSizeX){
+            Logger(DEBUG) << "      > h_max=" << nnsRadius
+                          << " exceeds cellSizeX=" << domain.cellSizeX
+                          << ", rebuilding periodic grid";
+            domain.createGrid(nnsRadius);
+        }
+#endif // VARIABLE_SML
 #endif
         Logger(INFO) << "    > Assigning particles ...";
         particles->assignParticlesAndCells(domain);
@@ -59,16 +84,16 @@ void MeshlessScheme::run(){
         //Logger(DEBUG) << "      > Creating ghost grid";
         //domain.createGhostGrid();
         Logger(DEBUG) << "      > Creating ghost particles ... ";
-        particles->createGhostParticles(domain, ghostParticles, config.kernelSize);
+        particles->createGhostParticles(domain, ghostParticles, nnsRadius);
         Logger(DEBUG) << "      > ... found " << ghostParticles.N << " ghosts";
         Logger(INFO) << "    > ... done.";
 
 #endif
         Logger(INFO) << "    > Nearest neighbor search";
-        particles->gridNNS(domain, config.kernelSize);
+        particles->gridNNS(domain, nnsRadius);
 #if PERIODIC_BOUNDARIES
         Logger(DEBUG) << "      > Ghosts NNS";
-        particles->ghostNNS(domain, ghostParticles, config.kernelSize);
+        particles->ghostNNS(domain, ghostParticles, nnsRadius);
         //particles->printNoi();
 #endif
 #if VARIABLE_SML
