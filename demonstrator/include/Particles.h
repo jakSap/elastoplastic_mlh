@@ -167,6 +167,20 @@ public:
 
     void compDensity(); // also computes omega
 
+#if VARIABLE_SML
+    /// Newton-Raphson update of every particle's smoothing length sml[i] so
+    /// that the kernel-weighted effective neighbor count
+    ///     V_kern(h_i) * sum_j W(r_ij, h_i)
+    /// matches NNN_TARGET, where V_kern(h) is the volume of the kernel
+    /// support (pi h^2 in 2D, 4/3 pi h^3 in 3D). Iterates until the relative
+    /// change in h is below SML_TOL or SML_MAX_ITER iterations are reached.
+    /// Must be called AFTER the NNS, BEFORE compDensity / compPsijTilde.
+    void updateAllSmoothingLengths();
+#if PERIODIC_BOUNDARIES
+    void updateAllSmoothingLengths(const Particles &ghostParticles);
+#endif
+#endif // VARIABLE_SML
+
     void compPsijTilde(Helper &helper);
     void gradient(double *f, double (*grad)[DIM]);
     void slopeLimiter(Particles *ghostParticles=nullptr);

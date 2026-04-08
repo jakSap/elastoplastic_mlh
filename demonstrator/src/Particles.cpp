@@ -1438,6 +1438,157 @@ void Particles::compDensity(){
     }
 }
 
+#if VARIABLE_SML
+// Helper macro: kernel volume V(h) = c_V * h^DIM and dV/dh = c_V * DIM * h^(DIM-1).
+// In 2D: V = pi h^2; in 3D: V = (4/3) pi h^3.
+#if DIM == 2
+#  define SML_V_COEF (M_PI)
+#else
+#  define SML_V_COEF ((4./3.)*M_PI)
+#endif
+
+// Single Newton iteration body. Sums over the (already-built) NNL of particle
+// i, and over its ghost NNL when periodic. Returns true once converged.
+// real-only variant
+void Particles::updateAllSmoothingLengths(){
+    int totalIters = 0;
+    int maxIters = 0;
+    int unconverged = 0;
+    for (int i = 0; i < N; ++i){
+        double h = sml[i];
+        bool converged = false;
+        int it = 0;
+        for (it = 0; it < SML_MAX_ITER; ++it){
+            // self contribution at r = 0
+            double n_h   = Kernel::cubicSpline(0., h);
+            double dn_dh = Kernel::cubicSplineDh(0., h);
+            for (int j = 0; j < noi[i]; ++j){
+                int iP = nnl[j + i*MAX_NUM_INTERACTIONS];
+                double dSqr = pow(x[i] - x[iP], 2)
+                            + pow(y[i] - y[iP], 2);
+#if DIM == 3
+                dSqr += pow(z[i] - z[iP], 2);
+#endif
+                double r = sqrt(dSqr);
+                n_h   += Kernel::cubicSpline(r, h);
+                dn_dh += Kernel::cubicSplineDh(r, h);
+            }
+#if DIM == 2
+            double V  = SML_V_COEF * h * h;
+            double dV = SML_V_COEF * 2. * h;
+#else
+            double V  = SML_V_COEF * h * h * h;
+            double dV = SML_V_COEF * 3. * h * h;
+#endif
+            double f      = V * n_h - (double)NNN_TARGET;
+            double fPrime = dV * n_h + V * dn_dh;
+            if (fPrime == 0.){
+                Logger(WARN) << "updateAllSmoothingLengths: f' = 0 at i = " << i;
+                break;
+            }
+            double dh = -f / fPrime;
+            // clamp the update so |dh|/h <= (SML_MAX_FACTOR - 1)
+            const double maxAbs = h * (SML_MAX_FACTOR - 1.);
+            if (dh >  maxAbs) dh =  maxAbs;
+            if (dh < -maxAbs) dh = -maxAbs;
+            h += dh;
+            if (h <= 0.){
+                Logger(ERROR) << "updateAllSmoothingLengths: non-positive h at i = " << i;
+                exit(7);
+            }
+            if (std::fabs(dh) / h < SML_TOL){
+                converged = true;
+                ++it;
+                break;
+            }
+        }
+        sml[i] = h;
+        totalIters += it;
+        if (it > maxIters) maxIters = it;
+        if (!converged) ++unconverged;
+    }
+    Logger(DEBUG) << "      > sml iter: avg = " << ((double)totalIters/(double)N)
+                  << ", max = " << maxIters
+                  << ", unconverged = " << unconverged;
+}
+
+#if PERIODIC_BOUNDARIES
+// ghost-aware variant: identical to the above but also sums the ghost NNL
+void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
+    int totalIters = 0;
+    int maxIters = 0;
+    int unconverged = 0;
+    for (int i = 0; i < N; ++i){
+        double h = sml[i];
+        bool converged = false;
+        int it = 0;
+        for (it = 0; it < SML_MAX_ITER; ++it){
+            double n_h   = Kernel::cubicSpline(0., h);
+            double dn_dh = Kernel::cubicSplineDh(0., h);
+            for (int j = 0; j < noi[i]; ++j){
+                int iP = nnl[j + i*MAX_NUM_INTERACTIONS];
+                double dSqr = pow(x[i] - x[iP], 2)
+                            + pow(y[i] - y[iP], 2);
+#if DIM == 3
+                dSqr += pow(z[i] - z[iP], 2);
+#endif
+                double r = sqrt(dSqr);
+                n_h   += Kernel::cubicSpline(r, h);
+                dn_dh += Kernel::cubicSplineDh(r, h);
+            }
+            for (int j = 0; j < noiGhosts[i]; ++j){
+                int iP = nnlGhosts[j + i*MAX_NUM_GHOST_INTERACTIONS];
+                double dSqr = pow(x[i] - ghostParticles.x[iP], 2)
+                            + pow(y[i] - ghostParticles.y[iP], 2);
+#if DIM == 3
+                dSqr += pow(z[i] - ghostParticles.z[iP], 2);
+#endif
+                double r = sqrt(dSqr);
+                n_h   += Kernel::cubicSpline(r, h);
+                dn_dh += Kernel::cubicSplineDh(r, h);
+            }
+#if DIM == 2
+            double V  = SML_V_COEF * h * h;
+            double dV = SML_V_COEF * 2. * h;
+#else
+            double V  = SML_V_COEF * h * h * h;
+            double dV = SML_V_COEF * 3. * h * h;
+#endif
+            double f      = V * n_h - (double)NNN_TARGET;
+            double fPrime = dV * n_h + V * dn_dh;
+            if (fPrime == 0.){
+                Logger(WARN) << "updateAllSmoothingLengths: f' = 0 at i = " << i;
+                break;
+            }
+            double dh = -f / fPrime;
+            const double maxAbs = h * (SML_MAX_FACTOR - 1.);
+            if (dh >  maxAbs) dh =  maxAbs;
+            if (dh < -maxAbs) dh = -maxAbs;
+            h += dh;
+            if (h <= 0.){
+                Logger(ERROR) << "updateAllSmoothingLengths: non-positive h at i = " << i;
+                exit(7);
+            }
+            if (std::fabs(dh) / h < SML_TOL){
+                converged = true;
+                ++it;
+                break;
+            }
+        }
+        sml[i] = h;
+        totalIters += it;
+        if (it > maxIters) maxIters = it;
+        if (!converged) ++unconverged;
+    }
+    Logger(DEBUG) << "      > sml iter (ghosts): avg = " << ((double)totalIters/(double)N)
+                  << ", max = " << maxIters
+                  << ", unconverged = " << unconverged;
+}
+#endif // PERIODIC_BOUNDARIES
+
+#undef SML_V_COEF
+#endif // VARIABLE_SML
+
 void Particles::compOmega(int i){
     const double hi = sml[i];
     double omg = 0.;

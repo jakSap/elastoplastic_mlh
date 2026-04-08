@@ -71,6 +71,14 @@ void MeshlessScheme::run(){
         particles->ghostNNS(domain, ghostParticles, config.kernelSize);
         //particles->printNoi();
 #endif
+#if VARIABLE_SML
+        Logger(INFO) << "    > Updating smoothing lengths";
+#if PERIODIC_BOUNDARIES
+        particles->updateAllSmoothingLengths(ghostParticles);
+#else
+        particles->updateAllSmoothingLengths();
+#endif
+#endif // VARIABLE_SML
         Logger(INFO) << "    > Computing density";
         particles->compDensity();
 #if PERIODIC_BOUNDARIES
