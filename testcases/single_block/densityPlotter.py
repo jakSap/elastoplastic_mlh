@@ -38,7 +38,7 @@ def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=Fals
         Sxy = np.array(data["Sxy"][:])
         Syy = np.array(data["Syy"][:])
         SAbs = np.sqrt(Sxx**2 + Sxy**2 + Syy**2)
-        cm = Syy
+        cm = SAbs
     else:
         rho = data["rho"][()]
         cm = rho
@@ -422,7 +422,7 @@ if __name__=="__main__":
     parser.add_argument("--plotGhosts", "-G", action="store_true", help="also plot ghost cells in an extra file")
     parser.add_argument("--pressure", "-P", action="store_true", help="plot pressure instead of density")
     parser.add_argument("--energy", "-u", action="store_true", help="plot internal energy instead of density")
-    parser.add_argument("--stress", "-S", action="store_true", help="Plot max value of stress")
+    parser.add_argument("--stress", "-S", action="store_true", help="Plot absolute value of stress (|S| = sqrt(Sxx^2 + Sxy^2 + Syy^2))")
     parser.add_argument("--combined", "-C", action="store_true",
                         help="Plot rho, P, u, Sxx, Sxy, Syy in a 2x3 combined figure")
     parser.add_argument("--noi", "-n", action="store_true", help="plot number of interactions instead of density")
