@@ -168,6 +168,15 @@ public:
     void compDensity(); // also computes omega
 
 #if VARIABLE_SML
+    /// Runtime overrides for the Newton iteration. Initialized to the
+    /// compile-time defaults from parameter.h; MeshlessScheme may override
+    /// them from the config file at startup so the user can tune N_NN etc.
+    /// without recompiling.
+    double smlNNNTarget   { (double)NNN_TARGET };
+    double smlTol         { SML_TOL };
+    int    smlMaxIter     { SML_MAX_ITER };
+    double smlMaxFactor   { SML_MAX_FACTOR };
+
     /// Largest sml[i] over all particles. Used by MeshlessScheme to size the
     /// NNS / ghost search radius so that every neighbor within max(h_i, h_j)
     /// is found, which keeps neighbor relations symmetric and the existing

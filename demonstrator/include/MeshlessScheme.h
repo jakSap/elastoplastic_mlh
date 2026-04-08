@@ -26,6 +26,14 @@ public:
         int h5DumpInterval;
         double periodicBoxLimits[2 * DIM];
         double kernelSize;
+#if VARIABLE_SML
+        // Per-particle smoothing length iteration parameters.
+        // Defaults come from parameter.h; the config file may override them.
+        double smlNNNTarget { (double)NNN_TARGET };
+        double smlTol       { SML_TOL };
+        int    smlMaxIter   { SML_MAX_ITER };
+        double smlMaxFactor { SML_MAX_FACTOR };
+#endif
 #if EOS == 0
         double hydro_gamma; // adiabatic index
 #elif EOS == 1

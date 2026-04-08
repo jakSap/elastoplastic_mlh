@@ -18,6 +18,12 @@ MeshlessScheme::MeshlessScheme(Configuration config, Particles *particles,
     Logger(INFO) << "    > Creating grid ... ";
     domain.createGrid(config.kernelSize);
     Logger(INFO) << "    > ... got " << domain.numGridCells << " cells";
+#if VARIABLE_SML
+    particles->smlNNNTarget = config.smlNNNTarget;
+    particles->smlTol       = config.smlTol;
+    particles->smlMaxIter   = config.smlMaxIter;
+    particles->smlMaxFactor = config.smlMaxFactor;
+#endif
 }
 
 void MeshlessScheme::run(){

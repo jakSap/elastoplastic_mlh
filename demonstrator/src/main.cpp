@@ -65,6 +65,26 @@ int main(int argc, char *argv[]){
     Logger(INFO) << "    > Dump data to h5 file every " << config.h5DumpInterval << " steps";
     config.kernelSize = confP.getVal<double>("kernelSize");
     Logger(INFO) << "    > Using global kernel size h = " << config.kernelSize;
+#if VARIABLE_SML
+    // All four sml.* keys are optional; fall back to the compile-time
+    // defaults (from parameter.h) if a key is missing.
+    try { config.smlNNNTarget = confP.getVal<double>("sml.NNNTarget"); }
+    catch (...) { Logger(INFO) << "    > sml.NNNTarget not set, using default "
+                               << config.smlNNNTarget; }
+    try { config.smlTol       = confP.getVal<double>("sml.tol"); }
+    catch (...) { Logger(INFO) << "    > sml.tol not set, using default "
+                               << config.smlTol; }
+    try { config.smlMaxIter   = confP.getVal<int>("sml.maxIter"); }
+    catch (...) { Logger(INFO) << "    > sml.maxIter not set, using default "
+                               << config.smlMaxIter; }
+    try { config.smlMaxFactor = confP.getVal<double>("sml.maxFactor"); }
+    catch (...) { Logger(INFO) << "    > sml.maxFactor not set, using default "
+                               << config.smlMaxFactor; }
+    Logger(INFO) << "    > Variable smoothing length: N_NN=" << config.smlNNNTarget
+                 << ", tol=" << config.smlTol
+                 << ", maxIter=" << config.smlMaxIter
+                 << ", maxFactor=" << config.smlMaxFactor;
+#endif
 #if EOS == 0
     config.hydro_gamma = confP.getVal<double>("hydro_gamma");
     Logger(INFO) << "    > Adiabatic index for ideal gas EOS hydro_gamma = " << config.hydro_gamma;

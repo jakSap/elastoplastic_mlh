@@ -1,6 +1,7 @@
 ; h5 file containing the initial particle distribution
 ; generate with: python3 generateIC.py -d 0.025 -v 0.059 --plot
-initFile ../testcases/single_block/single_block_deltap0.025-2D.h5
+initFile ../testcases/single_block/single_block_deltap0.005-2D.h5
+;initFile ../testcases/single_block/single_block_deltap0.025-2D.h5
 
 ; output directory for particle distribution h5 files
 outDir ../testcases/single_block/output
@@ -8,28 +9,42 @@ outDir ../testcases/single_block/output
 ; fixed time step
 ; when ADAPTIVE_TIMESTEP is set in parameter.h,
 ; this gives the output timestep stride combined with h5DumpInterval
-timeStep 0.001
+timeStep 0.1
 
 ; end of the simulation
-timeEnd 1.6
+timeEnd 40
 
 ; output particle distribution each h5DumpInterval steps
-h5DumpInterval 100
+h5DumpInterval 2
 
 ; periodic boundaries of box (1x1 domain centered at origin)
 ; ignored when PERIODIC_BOUNDARIES is not set in parameter.h
 periodicBoxLimits {
-    lowerX -0.5
-    lowerY -0.5
+    lowerX -0.25
+    lowerY -0.25
     lowerZ  0.
-    upperX  0.5
-    upperY  0.5
+    upperX  0.25
+    upperY  0.25
     upperZ  0.
 }
 
 ; kernel size for meshless scheme (roughly 2x mean particle distance)
 ; for delta_p = 0.025 -> kernelSize ~ 0.05
-kernelSize 0.075
+kernelSize 0.02
+
+; variable smoothing length Newton iteration parameters.
+; Only read when VARIABLE_SML is set to 1 in parameter.h; each key is
+; optional and falls back to the compile-time default if omitted.
+sml {
+    ; target effective neighbor count N_NN = V_kern(h) * sum_j W(r_ij, h)
+    NNNTarget 50
+    ; relative convergence tolerance |dh|/h
+    tol       1e-3
+    ; hard cap on the number of Newton iterations per particle
+    maxIter   20
+    ; max allowed factor h_new/h_old per iteration (clamps overshoot)
+    maxFactor 1.2
+}
 
 ; adiabatic index (unused when EOS != 0, kept for config parser compatibility)
 hydro_gamma 1.6666666666666667

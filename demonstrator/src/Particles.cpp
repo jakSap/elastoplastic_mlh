@@ -1466,7 +1466,7 @@ void Particles::updateAllSmoothingLengths(){
         double h = sml[i];
         bool converged = false;
         int it = 0;
-        for (it = 0; it < SML_MAX_ITER; ++it){
+        for (it = 0; it < smlMaxIter; ++it){
             // self contribution at r = 0
             double n_h   = Kernel::cubicSpline(0., h);
             double dn_dh = Kernel::cubicSplineDh(0., h);
@@ -1488,7 +1488,7 @@ void Particles::updateAllSmoothingLengths(){
             double V  = SML_V_COEF * h * h * h;
             double dV = SML_V_COEF * 3. * h * h;
 #endif
-            double f      = V * n_h - (double)NNN_TARGET;
+            double f      = V * n_h - smlNNNTarget;
             double fPrime = dV * n_h + V * dn_dh;
             if (fPrime == 0.){
                 Logger(WARN) << "updateAllSmoothingLengths: f' = 0 at i = " << i;
@@ -1496,7 +1496,7 @@ void Particles::updateAllSmoothingLengths(){
             }
             double dh = -f / fPrime;
             // clamp the update so |dh|/h <= (SML_MAX_FACTOR - 1)
-            const double maxAbs = h * (SML_MAX_FACTOR - 1.);
+            const double maxAbs = h * (smlMaxFactor - 1.);
             if (dh >  maxAbs) dh =  maxAbs;
             if (dh < -maxAbs) dh = -maxAbs;
             h += dh;
@@ -1504,7 +1504,7 @@ void Particles::updateAllSmoothingLengths(){
                 Logger(ERROR) << "updateAllSmoothingLengths: non-positive h at i = " << i;
                 exit(7);
             }
-            if (std::fabs(dh) / h < SML_TOL){
+            if (std::fabs(dh) / h < smlTol){
                 converged = true;
                 ++it;
                 break;
@@ -1530,7 +1530,7 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
         double h = sml[i];
         bool converged = false;
         int it = 0;
-        for (it = 0; it < SML_MAX_ITER; ++it){
+        for (it = 0; it < smlMaxIter; ++it){
             double n_h   = Kernel::cubicSpline(0., h);
             double dn_dh = Kernel::cubicSplineDh(0., h);
             for (int j = 0; j < noi[i]; ++j){
@@ -1562,14 +1562,14 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
             double V  = SML_V_COEF * h * h * h;
             double dV = SML_V_COEF * 3. * h * h;
 #endif
-            double f      = V * n_h - (double)NNN_TARGET;
+            double f      = V * n_h - smlNNNTarget;
             double fPrime = dV * n_h + V * dn_dh;
             if (fPrime == 0.){
                 Logger(WARN) << "updateAllSmoothingLengths: f' = 0 at i = " << i;
                 break;
             }
             double dh = -f / fPrime;
-            const double maxAbs = h * (SML_MAX_FACTOR - 1.);
+            const double maxAbs = h * (smlMaxFactor - 1.);
             if (dh >  maxAbs) dh =  maxAbs;
             if (dh < -maxAbs) dh = -maxAbs;
             h += dh;
@@ -1577,7 +1577,7 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
                 Logger(ERROR) << "updateAllSmoothingLengths: non-positive h at i = " << i;
                 exit(7);
             }
-            if (std::fabs(dh) / h < SML_TOL){
+            if (std::fabs(dh) / h < smlTol){
                 converged = true;
                 ++it;
                 break;
