@@ -1462,6 +1462,9 @@ void Particles::updateAllSmoothingLengths(){
     int totalIters = 0;
     int maxIters = 0;
     int unconverged = 0;
+    double hMinObs = std::numeric_limits<double>::max();
+    double hMaxObs = 0.;
+    double hSum = 0.;
     for (int i = 0; i < N; ++i){
         double h = sml[i];
         bool converged = false;
@@ -1514,10 +1517,15 @@ void Particles::updateAllSmoothingLengths(){
         totalIters += it;
         if (it > maxIters) maxIters = it;
         if (!converged) ++unconverged;
+        if (h < hMinObs) hMinObs = h;
+        if (h > hMaxObs) hMaxObs = h;
+        hSum += h;
     }
     Logger(DEBUG) << "      > sml iter: avg = " << ((double)totalIters/(double)N)
                   << ", max = " << maxIters
-                  << ", unconverged = " << unconverged;
+                  << ", unconverged = " << unconverged
+                  << ", h[min/mean/max] = " << hMinObs << " / "
+                  << (hSum/(double)N) << " / " << hMaxObs;
 }
 
 #if PERIODIC_BOUNDARIES
@@ -1526,6 +1534,9 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
     int totalIters = 0;
     int maxIters = 0;
     int unconverged = 0;
+    double hMinObs = std::numeric_limits<double>::max();
+    double hMaxObs = 0.;
+    double hSum = 0.;
     for (int i = 0; i < N; ++i){
         double h = sml[i];
         bool converged = false;
@@ -1587,10 +1598,15 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
         totalIters += it;
         if (it > maxIters) maxIters = it;
         if (!converged) ++unconverged;
+        if (h < hMinObs) hMinObs = h;
+        if (h > hMaxObs) hMaxObs = h;
+        hSum += h;
     }
     Logger(DEBUG) << "      > sml iter (ghosts): avg = " << ((double)totalIters/(double)N)
                   << ", max = " << maxIters
-                  << ", unconverged = " << unconverged;
+                  << ", unconverged = " << unconverged
+                  << ", h[min/mean/max] = " << hMinObs << " / "
+                  << (hSum/(double)N) << " / " << hMaxObs;
 }
 #endif // PERIODIC_BOUNDARIES
 
