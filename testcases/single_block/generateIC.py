@@ -29,6 +29,8 @@ if __name__ == "__main__":
                         default=1.0, help="reference particle density (default: 1.0)")
     parser.add_argument("--u", metavar="float", type=float,
                         default=0.0, help="specific internal energy (default: 0.0, equilibrium for Murnaghan at rho=rho0)")
+    parser.add_argument("--vx-gradient", action="store_true",
+                        help="apply a linear vx gradient: vx=0 at x=0, ramping to full velocity at x=+-0.25")
     parser.add_argument("--fillUp", "-f", action="store_true",
                         help="fill up coordinates to 3D with z=0")
     parser.add_argument("--plot", action="store_true",
@@ -70,7 +72,17 @@ if __name__ == "__main__":
         pos = np.column_stack([x_flat, y_flat])
         vel = np.zeros((N, DIM))
 
-    vel[:, 0] = v_p
+    if args.vx_gradient:
+        # Antisymmetric triangle wave ("edgy sine"):
+        # positive hump on [-0.25, 0], negative hump on [0, 0.25], sum = 0
+        quarter = half / 2.0  # 0.125
+        envelope = (quarter - np.abs(np.abs(x_flat) - quarter)) / quarter
+        vel[:, 0] = v_p * envelope * np.sign(-x_flat)
+    else:
+        vel[:, 0] = v_p
+
+    mean_vx = np.mean(vel[:, 0])
+    print('Mean vx: ', mean_vx)
 
     m          = np.ones(N) * mass
     u          = np.ones(N) * u_const
@@ -112,4 +124,5 @@ if __name__ == "__main__":
         plt.tight_layout()
         plotname = f"single_block_deltap{delta_p}-{suffix}.png"
         plt.savefig(plotname)
+        plt.show()
         print(f"... saved to {plotname}")
