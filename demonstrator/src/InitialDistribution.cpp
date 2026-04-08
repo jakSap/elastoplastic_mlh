@@ -25,6 +25,12 @@ InitialDistribution::InitialDistribution(const std::string &file){
     materialId.read(matId);
 
 #endif
+    // optional per-particle smoothing length
+    if (h5file.exist("/sml")) {
+        HighFive::DataSet smlSet = h5file.getDataSet("/sml");
+        smlSet.read(sml);
+        hasSml = true;
+    }
     // sanity check
     if (x.size() == v.size() && x.size() == m.size() && x.size() == u.size()
 #if USE_MATID
@@ -37,7 +43,10 @@ InitialDistribution::InitialDistribution(const std::string &file){
     }
 }
 
-void InitialDistribution::getAllParticles(Particles &particles){
+void InitialDistribution::getAllParticles(Particles &particles, double defaultSml){
+    if (hasSml && (int)sml.size() != numberOfParticles){
+        throw std::length_error("Length of /sml dataset does not match number of particles.");
+    }
     std::vector<std::vector<double>>::iterator xit = x.begin();
     std::vector<std::vector<double>>::iterator vit = v.begin();
     std::vector<double>::iterator mit = m.begin();
@@ -51,6 +60,7 @@ void InitialDistribution::getAllParticles(Particles &particles){
     while (xit != x.end()){
         particles.m[pCounter] = *mit;
         particles.u[pCounter] = *uit;
+        particles.sml[pCounter] = hasSml ? sml[pCounter] : defaultSml;
         particles.x[pCounter] = (*xit)[0];
         particles.vx[pCounter] = (*vit)[0];
         particles.y[pCounter] = (*xit)[1];

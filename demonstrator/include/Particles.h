@@ -39,6 +39,9 @@ public:
 #endif
     int *cell; // cell in which particle at index resides
     double *m, *u, *x, *y, *vx, *vy, *rho, *P;
+    /// per-particle smoothing length h_i. Always allocated, even when
+    /// VARIABLE_SML is 0; in that case it is just a copy of config.kernelSize.
+    double *sml;
 #if EOS == 1 && LOCAL_RHO0
     double *rho0;    // reference density per particle (Murnaghan)
     void initRho0(); // call once after first compDensity

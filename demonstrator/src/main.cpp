@@ -122,7 +122,7 @@ int main(int argc, char *argv[]){
 
     InitialDistribution initDist { config.initFile };
     Particles particles { initDist.getNumberOfParticles(), &MeshlessEOS};
-    initDist.getAllParticles(particles);
+    initDist.getAllParticles(particles, config.kernelSize);
 
     Logger(INFO) << "    > N = " << particles.N;
     Logger(INFO) << "... done. Initializing simulation ...";

@@ -14,13 +14,17 @@ public:
     InitialDistribution(const std::string &file);
 
     int getNumberOfParticles() const { return numberOfParticles; };
-    void getAllParticles(Particles &particles);
+    /// Copy IC data into `particles`. The smoothing length array is filled
+    /// from the IC file if a `/sml` dataset is present; otherwise every
+    /// particle gets `defaultSml` (typically `config.kernelSize`).
+    void getAllParticles(Particles &particles, double defaultSml);
 
 private:
     // containers to be filled from hdf5 file
-    std::vector<double> m {}, u {};
+    std::vector<double> m {}, u {}, sml {};
     std::vector<std::vector<double>> x {}, v {};
     std::vector<int> matId {};
+    bool hasSml { false };
     int numberOfParticles { 0 };
 };
 

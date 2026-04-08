@@ -20,6 +20,25 @@
 /// maximum number of interactions for each particle
 #define MAX_NUM_INTERACTIONS 200
 
+/// use a per-particle, iteratively determined smoothing length (Hopkins 2015,
+/// see Martin's master thesis section 3.4.2). When 0, the global
+/// `config.kernelSize` is used everywhere as before. Even with VARIABLE_SML 0
+/// the per-particle `sml[i]` array is allocated and initialized to
+/// `config.kernelSize` so the new IO path is exercised.
+#define VARIABLE_SML 0
+
+/// target effective neighbor number N_NN for the smoothing length iteration
+#define NNN_TARGET 32
+
+/// numerical tolerance for the Newton-Raphson root finding on f_SML
+#define SML_TOL 1e-3
+
+/// maximum number of Newton-Raphson iterations
+#define SML_MAX_ITER 20
+
+/// maximum allowed relative change of h per NR iteration (clamps overshoot)
+#define SML_MAX_FACTOR 1.2
+
 /* Define which equation of state to use.
 For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 // #define EOS 0 // Ideal gas EOS

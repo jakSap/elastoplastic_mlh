@@ -78,6 +78,7 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     u = new double[numParticles];
     rho = new double[numParticles];
     P = new double[numParticles];
+    sml = new double[numParticles];
 #if EOS == 1 && LOCAL_RHO0
     rho0 = new double[numParticles];
 #endif
@@ -196,6 +197,7 @@ Particles::~Particles() {
     delete[] u;
     delete[] P;
     delete[] rho;
+    delete[] sml;
 #if EOS == 1 && LOCAL_RHO0
     delete[] rho0;
 #endif
@@ -3795,6 +3797,7 @@ void Particles::dump2file(std::string filename, double simTime){
     HighFive::DataSet velDataSet = h5File.createDataSet<double>("/v", HighFive::DataSpace(dataSpaceDims));
     HighFive::DataSet rhoGradDataSet = h5File.createDataSet<double>("/rhoGrad", HighFive::DataSpace(dataSpaceDims));
     HighFive::DataSet PDataSet = h5File.createDataSet<double>("/P", HighFive::DataSpace(N));
+    HighFive::DataSet smlDataSet = h5File.createDataSet<double>("/sml", HighFive::DataSpace(N));
     HighFive::DataSet noiDataSet = h5File.createDataSet<int>("/noi", HighFive::DataSpace(N));
 #if OUTPUT_CONDITION_NUMBER
     HighFive::DataSet condDataSet = h5File.createDataSet<double>("/conditionNumber", HighFive::DataSpace(N));
@@ -3889,6 +3892,10 @@ void Particles::dump2file(std::string filename, double simTime){
     mDataSet.write(mVec);
     uDataSet.write(uVec);
     PDataSet.write(PVec);
+    {
+        std::vector<double> smlVec(sml, sml+N);
+        smlDataSet.write(smlVec);
+    }
     noiDataSet.write(noi);
 #if OUTPUT_CONDITION_NUMBER
     std::vector<double> condVec(conditionNumber, conditionNumber+N);
