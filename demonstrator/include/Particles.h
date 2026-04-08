@@ -18,6 +18,9 @@
 
 namespace Kernel {
     double cubicSpline(const double &r, const double &h);
+    /// Analytical d/dh of cubicSpline (MFM kernel, support r in [0, h]).
+    /// Used by the variable smoothing length Newton iteration.
+    double cubicSplineDh(const double &r, const double &h);
     // For SPH only and 2d:
     // dW(r, h)/dr:
     double dWdr(const double &r, const double &h);

@@ -23,6 +23,31 @@ double Kernel::cubicSpline(const double &r, const double &h) {
     }
 }
 
+// dW(r, h)/dh for the MFM cubic spline used by `cubicSpline` above.
+// W(r,h) = sigma(h) * f(q),  q = r/(h/2) = 2r/h,  sigma = C / h^DIM.
+// Therefore dW/dh = -(sigma/h) * (DIM * f(q) + q * f'(q)),
+// since dq/dh = -q/h and dsigma/dh = -DIM*sigma/h.
+double Kernel::cubicSplineDh(const double &r, const double &h){
+    const double h2 = h/2.;
+#if DIM == 2
+    const double sigma = 10./(7.*M_PI*h2*h2);
+#else // DIM == 3
+    const double sigma = 1./(M_PI*h2*h2*h2);
+#endif
+    const double q = r/h2;
+    double f, fPrime;
+    if (0. <= q && q <= 1.){
+        f = 1. - 3./2.*q*q*(1. - q/2.);
+        fPrime = -3.*q + 9./4.*q*q;
+    } else if (1. < q && q < 2.){
+        f = pow(2.-q, 3.)/4.;
+        fPrime = -3./4.*pow(2.-q, 2.);
+    } else {
+        return 0.;
+    }
+    return -(sigma/h) * ((double)DIM * f + q * fPrime);
+}
+
 // // dW(r, h)/dr. Scalar. For needs to be multiplied with (x_i - x_j)/r
 // // For 2d SPH only
 // double Kernel::dWdr(const double &r, const double &h){

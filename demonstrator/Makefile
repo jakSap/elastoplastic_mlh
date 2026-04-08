@@ -124,4 +124,14 @@ $(OBJDIR)/%.$(OBJEXT): $(DEPDIR)/%.$(DEPEXT) | $(OBJDIR)
 	@$(CXX) -c $(CXXFLAGS) $(@:$(OBJDIR)/%.$(OBJEXT)=$(SRCDIR)/%.$(SRCEXT)) -o $@
 	@echo "... done."
 
-.PHONY: all debug clean cleaner install prepare-run binac binac-load-modules
+test-kernel: | $(TRGTDIR)
+	@echo "Building kernel unit test (DIM=2) ..."
+	@g++ -std=c++11 -O2 -I$(INCLDIR) -DDIM=2 tests/test_kernel.cpp -o $(TRGTDIR)/test_kernel_2d
+	@echo "Building kernel unit test (DIM=3) ..."
+	@g++ -std=c++11 -O2 -I$(INCLDIR) -DDIM=3 tests/test_kernel.cpp -o $(TRGTDIR)/test_kernel_3d
+	@echo "Running 2D test ..."
+	@$(TRGTDIR)/test_kernel_2d
+	@echo "Running 3D test ..."
+	@$(TRGTDIR)/test_kernel_3d
+
+.PHONY: all debug clean cleaner install prepare-run binac binac-load-modules test-kernel
