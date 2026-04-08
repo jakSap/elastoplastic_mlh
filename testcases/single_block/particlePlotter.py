@@ -26,7 +26,8 @@ if __name__ == "__main__":
 
     print("Examining files in", args.simOutputDir, "...")
 
-    h5Files = sorted(pathlib.Path(args.simOutputDir).glob('*.h5'))
+    h5Files = sorted(f for f in pathlib.Path(args.simOutputDir).glob('*.h5')
+                     if not (f.stem.endswith('Ghosts') or f.stem.endswith('NNL')))
 
     time = []
     scalars = {k: [] for k in PARTICLE_KEYS}
@@ -69,12 +70,14 @@ if __name__ == "__main__":
     print("... plotting ...")
 
     plt.rcParams.update({'font.size': 25})
-    fig, ax = plt.subplots(figsize=(12,18), dpi=200)
+    fig, ax = plt.subplots(figsize=(8,12), dpi=200)
 
-    for key, values in all_series.items():
+    cmap = plt.get_cmap('tab20')
+    colors = [cmap(i / len(all_series)) for i in range(len(all_series))]
+    for (key, values), color in zip(all_series.items(), colors):
         arr = np.array(values)
         initial = arr[0] if arr[0] != 0.0 else 1.0
-        ax.plot(time, arr / initial, label=labels.get(key, key))
+        ax.plot(time, arr / initial, label=labels.get(key, key), color=color)
 
     if args.log:
         ax.set_yscale('log')
