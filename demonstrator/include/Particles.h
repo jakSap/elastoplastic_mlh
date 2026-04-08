@@ -162,17 +162,16 @@ public:
 #endif
 #endif // RUNSPH
 
-    void compDensity(const double &kernelSize); // also computes omega
+    void compDensity(); // also computes omega
 
-    void compPsijTilde(Helper &helper, const double &kernelSize);
+    void compPsijTilde(Helper &helper);
     void gradient(double *f, double (*grad)[DIM]);
-    void slopeLimiter(const double &kernelSize,
-                      Particles *ghostParticles=nullptr);
+    void slopeLimiter(Particles *ghostParticles=nullptr);
     void compPressure();
     void compEffectiveFace();
 
-    double compGlobalTimestep(const double &kernelSize);
-    void compRiemannStatesLR(const double &dt, const double &kernelSize);
+    double compGlobalTimestep();
+    void compRiemannStatesLR(const double &dt);
 
     void solveRiemannProblems(const Particles &ghostParticles);
 
@@ -183,8 +182,8 @@ public:
     void moveParticles(const double &dt, const Domain &domain);
 
 #if ELASTIC
-    void slopeLimiterStress(const double &kernelSize, Particles *ghostParticles=nullptr);
-    double compElasticTimestep(const double &kernelSize);
+    void slopeLimiterStress(Particles *ghostParticles=nullptr);
+    double compElasticTimestep();
 #endif
 
 // //For DEBUGGING:
@@ -205,12 +204,12 @@ public:
                               Particles &ghostParticles, const double &kernelSize);
     void ghostNNS(Domain &domain, const Particles &ghostParticles, const double &kernelSize);
 
-    void compDensity(const Particles &ghostParticles, const double &kernelSize);
+    void compDensity(const Particles &ghostParticles);
 
-    void compPsijTilde(Helper &helper, const Particles &ghostParticles, const double &kernelSize);
+    void compPsijTilde(Helper &helper, const Particles &ghostParticles);
     void gradient(double *f, double (*grad)[DIM], double *fGhost, const Particles &ghostParticles); //TODO: remove ghostParticles argument
     void compEffectiveFace(const Particles &ghostParticles);
-    void compRiemannStatesLR(const double &dt, const double &kernelSize,
+    void compRiemannStatesLR(const double &dt,
                              const Particles &ghostParticles);
 
     /// functions to copy computed quantities to ghosts needed for further processing
@@ -257,13 +256,13 @@ private:
     /// variables for integration
     double *mF, *eF, (*vF)[DIM];
 
-    void compOmega(int i, const double &kernelSize);
-    void slopeLimiter(double *f, double (*grad)[DIM], const double &kernelSize,
+    void compOmega(int i);
+    void slopeLimiter(double *f, double (*grad)[DIM],
                       Particles *ghostParticles, double *fGhost);
 
 
 #if PERIODIC_BOUNDARIES
-    void compOmega(int i, const Particles &ghostParticles, const double &kernelSize);
+    void compOmega(int i, const Particles &ghostParticles);
     int *nnlGhosts;
     int *noiGhosts;
     double (*psijTilde_xiGhosts)[DIM];

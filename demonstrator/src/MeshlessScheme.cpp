@@ -72,9 +72,9 @@ void MeshlessScheme::run(){
         //particles->printNoi();
 #endif
         Logger(INFO) << "    > Computing density";
-        particles->compDensity(config.kernelSize);
+        particles->compDensity();
 #if PERIODIC_BOUNDARIES
-        particles->compDensity(ghostParticles, config.kernelSize);
+        particles->compDensity(ghostParticles);
 #endif
 
         Logger(INFO) << "    > Computing pressure";
@@ -95,7 +95,7 @@ void MeshlessScheme::run(){
 
 #if ADAPTIVE_TIMESTEP
         Logger(INFO) << "    > Selecting global timestep ... ";
-        timeStep = particles->compGlobalTimestep(config.kernelSize);
+        timeStep = particles->compGlobalTimestep();
         //Logger(INFO) << "Time  > dt = " << timeStep << " selected.";
         if(dumpStep >= numDumpTimes){
             Logger(ERROR) << "Simulation did not abort after reaching timeEnd. Exiting.";
@@ -115,7 +115,7 @@ void MeshlessScheme::run(){
         Logger(INFO) << "    > Computing gradients";
 #if PERIODIC_BOUNDARIES
         particles->updateGhostState(ghostParticles);
-        particles->compPsijTilde(helper, ghostParticles, config.kernelSize);
+        particles->compPsijTilde(helper, ghostParticles);
         //Logger(DEBUG) << "      > Update ghost psij_xiTilde";
         //particles->updateGhostPsijTilde(ghostParticles);
 
@@ -143,15 +143,15 @@ void MeshlessScheme::run(){
 #if SLOPE_LIMITING
         // TODO: Check slope limiter
         Logger(DEBUG) << "      > Limiting slopes";
-        particles->slopeLimiter(config.kernelSize, &ghostParticles);
+        particles->slopeLimiter(&ghostParticles);
 #if ELASTIC
-        particles->slopeLimiterStress(config.kernelSize, &ghostParticles);
+        particles->slopeLimiterStress(&ghostParticles);
 #endif
         Logger(DEBUG) << "      > Update limited ghost gradients";
         particles->updateGhostGradients(ghostParticles);
 #endif // SLOPE_LIMITING
 #else // PERIODIC_BOUNDARIES
-        particles->compPsijTilde(helper, config.kernelSize);
+        particles->compPsijTilde(helper);
         particles->gradient(particles->rho, particles->rhoGrad);
         particles->gradient(particles->vx, particles->vxGrad);
         particles->gradient(particles->vy, particles->vyGrad);
@@ -172,9 +172,9 @@ void MeshlessScheme::run(){
 #if SLOPE_LIMITING
         // TODO: check how to properly limit gradiens
         Logger(DEBUG) << "      > Limiting slopes";
-        particles->slopeLimiter(config.kernelSize);
+        particles->slopeLimiter();
 #if ELASTIC
-        particles->slopeLimiterStress(config.kernelSize);
+        particles->slopeLimiterStress();
 #endif // ELASTIC
 #endif // SLOPE_LIMITING
 #endif
@@ -193,11 +193,11 @@ void MeshlessScheme::run(){
         particles->compEffectiveFace(ghostParticles);
 #endif // PERIODIC_BOUNDARIES
         Logger(DEBUG) << "      > Computing fluxes";
-        particles->compRiemannStatesLR(timeStep, config.kernelSize);
+        particles->compRiemannStatesLR(timeStep);
 
 #if PERIODIC_BOUNDARIES
         Logger(DEBUG) << "      > Computing ghost fluxes";
-        particles->compRiemannStatesLR(timeStep, config.kernelSize,
+        particles->compRiemannStatesLR(timeStep,
                                      ghostParticles);
         //Logger(DEBUG) << "Aborting for debugging.";
         //exit(6);
@@ -298,7 +298,7 @@ void MeshlessScheme::run(){
 
 #if SLOPE_LIMITING
         Logger(DEBUG) << "      > Limiting new gradients";
-        particles->slopeLimiterStress(config.kernelSize, &ghostParticles);
+        particles->slopeLimiterStress(&ghostParticles);
         particles->updateGhostGradients(ghostParticles);
 #endif // SLOPE_LIMITING
 
@@ -317,7 +317,7 @@ void MeshlessScheme::run(){
         particles->gradient(particles->Szz, particles->SzzGrad);
 #endif
 #if SLOPE_LIMITING
-        particles->slopeLimiterStress(config.kernelSize);
+        particles->slopeLimiterStress();
 #endif
 #endif // PERIODIC_BOUNDARIES
 

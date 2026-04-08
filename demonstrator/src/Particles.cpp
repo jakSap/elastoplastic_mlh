@@ -732,8 +732,9 @@ void Particles::compuis(const double &dt, const double &kernelSize){
 
 // Computing all omegas:
 void Particles::compOmegas(const double &kernelSize){
+    (void)kernelSize; // sml[i] is used inside compOmega
     for (int i = 0; i < N; i++){
-        compOmega(i, kernelSize);
+        compOmega(i);
     }
 }
 
@@ -936,8 +937,9 @@ void Particles::compAccSPH(const Particles &ghostParticles, const double &kernel
 
 // Compute all omegas
 void Particles::compOmegas(const Particles &ghostParticles, const double &kernelSize){
+    (void)kernelSize; // sml[i] is used inside compOmega
     for (int i = 0; i < N; i++){
-        compOmega(i, ghostParticles, kernelSize);
+        compOmega(i, ghostParticles);
         //std::cout << i << " " << omega[i] << std::endl;
     }
 }
@@ -1396,10 +1398,10 @@ void Particles::calcNunit(const Particles &ghostParticles, const int i, const in
 }
 #endif // PERIODIC_BOUNDARIES
 
-void Particles::compDensity(const double &kernelSize){
+void Particles::compDensity(){
     for(int i=0; i<N; ++i){
 //#if PERIODIC_BOUNDARIES
-        compOmega(i, kernelSize);
+        compOmega(i);
         rho[i] = m[i]*omega[i];
         if(rho[i] <= 0.){
             Logger(ERROR) << "Zero or negative density @" << i;
@@ -1411,7 +1413,8 @@ void Particles::compDensity(const double &kernelSize){
     }
 }
 
-void Particles::compOmega(int i, const double &kernelSize){
+void Particles::compOmega(int i){
+    const double hi = sml[i];
     double omg = 0.;
     int iP;
     for (int j=0; j<noi[i]; ++j){
@@ -1422,19 +1425,20 @@ void Particles::compOmega(int i, const double &kernelSize){
         dSqr += pow(z[i] - z[iP], 2);
 #endif
         double r = sqrt(dSqr);
-        omg += kernel(r, kernelSize);
+        omg += kernel(r, hi);
 
         //Logger(DEBUG) << "x[" << i << "] = [" << x[i] << ", " <<  y[i] << "], x["
         //          << iP << "] = [" << x[iP] << ", "
         //          << y[iP] << "]";
 
     }
-    omega[i] = omg + kernel(0., kernelSize); // add self interaction to normalization factor
+    omega[i] = omg + kernel(0., hi); // add self interaction to normalization factor
 }
 
-void Particles::compPsijTilde(Helper &helper, const double &kernelSize){
+void Particles::compPsijTilde(Helper &helper){
     int iP;
     for (int i=0; i<N; ++i){
+        const double hi = sml[i];
 
         // reset buffer
         for (int k=0; k<DIM*DIM; ++k){
@@ -1459,7 +1463,7 @@ void Particles::compPsijTilde(Helper &helper, const double &kernelSize){
             dSqr += pow(z[i] - z[iP], 2);
 #endif
             double r = sqrt(dSqr);
-            double psij_xi = kernel(r, kernelSize)/omega[i];
+            double psij_xi = kernel(r, hi)/omega[i];
 
             xj[0] = x[iP];
             xj[1] = y[iP];
@@ -1522,7 +1526,7 @@ void Particles::compPsijTilde(Helper &helper, const double &kernelSize){
             dSqr += pow(z[i] - z[iP], 2);
 #endif
             double r = sqrt(dSqr);
-            double psij_xi = kernel(r, kernelSize) / omega[i];
+            double psij_xi = kernel(r, hi) / omega[i];
 
             xj[0] = x[iP];
             xj[1] = y[iP];
@@ -1605,8 +1609,7 @@ void Particles::compEffectiveFace(){
     }
 }
 
-void Particles::slopeLimiter(const double &kernelSize,
-                             Particles *ghostParticles){
+void Particles::slopeLimiter(Particles *ghostParticles){
     double *rhoGhost = nullptr, *vxGhost = nullptr, *vyGhost = nullptr,
 #if DIM==3
         *vzGhost = nullptr,
@@ -1621,18 +1624,17 @@ void Particles::slopeLimiter(const double &kernelSize,
 #endif
     PGhost = ghostParticles->P;
 #endif
-    slopeLimiter(rho, rhoGrad, kernelSize, ghostParticles, rhoGhost);
-    slopeLimiter(vx, vxGrad, kernelSize, ghostParticles, vxGhost);
-    slopeLimiter(vy, vyGrad, kernelSize, ghostParticles, vyGhost);
+    slopeLimiter(rho, rhoGrad, ghostParticles, rhoGhost);
+    slopeLimiter(vx, vxGrad, ghostParticles, vxGhost);
+    slopeLimiter(vy, vyGrad, ghostParticles, vyGhost);
 #if DIM==3
-    slopeLimiter(vz, vzGrad, kernelSize, ghostParticles, vzGhost);
+    slopeLimiter(vz, vzGrad, ghostParticles, vzGhost);
 #endif
-    slopeLimiter(P, PGrad, kernelSize, ghostParticles, PGhost);
+    slopeLimiter(P, PGrad, ghostParticles, PGhost);
 }
 
 #if ELASTIC
-void Particles::slopeLimiterStress(const double &kernelSize,
-                                    Particles *ghostParticles){
+void Particles::slopeLimiterStress(Particles *ghostParticles){
     double *SxxGhost = nullptr, *SxyGhost = nullptr, *SyyGhost = nullptr;
 #if DIM==3
     double *SxzGhost = nullptr, *SyzGhost = nullptr, *SzzGhost = nullptr;
@@ -1647,17 +1649,17 @@ void Particles::slopeLimiterStress(const double &kernelSize,
     SzzGhost = ghostParticles->Szz;
 #endif
 #endif
-    slopeLimiter(Sxx, SxxGrad, kernelSize, ghostParticles, SxxGhost);
-    slopeLimiter(Sxy, SxyGrad, kernelSize, ghostParticles, SxyGhost);
-    slopeLimiter(Syy, SyyGrad, kernelSize, ghostParticles, SyyGhost);
+    slopeLimiter(Sxx, SxxGrad, ghostParticles, SxxGhost);
+    slopeLimiter(Sxy, SxyGrad, ghostParticles, SxyGhost);
+    slopeLimiter(Syy, SyyGrad, ghostParticles, SyyGhost);
 #if DIM==3
-    slopeLimiter(Sxz, SxzGrad, kernelSize, ghostParticles, SxzGhost);
-    slopeLimiter(Syz, SyzGrad, kernelSize, ghostParticles, SyzGhost);
-    slopeLimiter(Szz, SzzGrad, kernelSize, ghostParticles, SzzGhost);
+    slopeLimiter(Sxz, SxzGrad, ghostParticles, SxzGhost);
+    slopeLimiter(Syz, SyzGrad, ghostParticles, SyzGhost);
+    slopeLimiter(Szz, SzzGrad, ghostParticles, SzzGhost);
 #endif
 }
 #endif // ELASTIC
-void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kernelSize,
+void Particles::slopeLimiter(double *f, double (*grad)[DIM],
                              Particles *ghostParticles, double *fGhost){
     double xij[DIM], xijxi[DIM];
     //Logger(DEBUG) << "#################### NEXT GRADIENT ####################";
@@ -1671,14 +1673,14 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kerne
         for (int jn=0; jn<noi[i]; ++jn) {
             int j = nnl[i * MAX_NUM_INTERACTIONS + jn];
 
-            //xij[0] = x[i] + kernelSize / 2. * (x[j] - x[i]);
-            //xij[1] = y[i] + kernelSize / 2. * (y[j] - y[i]);
+            //xij[0] = x[i] + sml[i] / 2. * (x[j] - x[i]);
+            //xij[1] = y[i] + sml[i] / 2. * (y[j] - y[i]);
 #if FIRST_ORDER_QUAD_POINT
             xij[0] = (x[i] + x[j])/2.;
             xij[1] = (y[i] + y[j])/2.;
 #else
-            xij[0] = x[i] + kernelSize / 4. * (x[j] - x[i]);
-            xij[1] = y[i] + kernelSize / 4. * (y[j] - y[i]);
+            xij[0] = x[i] + sml[i] / 4. * (x[j] - x[i]);
+            xij[1] = y[i] + sml[i] / 4. * (y[j] - y[i]);
 #endif
 
             xijxi[0] = xij[0] - x[i];
@@ -1687,8 +1689,8 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kerne
 #if FIRST_ORDER_QUAD_POINT
             xij[2] = (z[i] + z[j])/2.;
 #else
-            //xij[2] = z[i] + kernelSize/2. * (z[j] - z[i]);
-            xij[2] = z[i] + kernelSize/4. * (z[j] - z[i]);
+            //xij[2] = z[i] + sml[i]/2. * (z[j] - z[i]);
+            xij[2] = z[i] + sml[i]/4. * (z[j] - z[i]);
 #endif
             xijxi[2] = xij[2] - z[i];
 #endif
@@ -1703,15 +1705,15 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kerne
         for (int jn=0; jn<noiGhosts[i]; ++jn) {
             int j = nnlGhosts[i * MAX_NUM_GHOST_INTERACTIONS + jn];
 
-            //xij[0] = x[i] + kernelSize / 2. * (ghostParticles->x[j] - x[i]);
-            //xij[1] = y[i] + kernelSize / 2. * (ghostParticles->y[j] - y[i]);
+            //xij[0] = x[i] + sml[i] / 2. * (ghostParticles->x[j] - x[i]);
+            //xij[1] = y[i] + sml[i] / 2. * (ghostParticles->y[j] - y[i]);
 
 #if FIRST_ORDER_QUAD_POINT
             xij[0] = (x[i] + ghostParticles->x[j])/2.;
             xij[1] = (y[i] + ghostParticles->y[j])/2.;
 #else
-            xij[0] = x[i] + kernelSize / 4. * (ghostParticles->x[j] - x[i]);
-            xij[1] = y[i] + kernelSize / 4. * (ghostParticles->y[j] - y[i]);
+            xij[0] = x[i] + sml[i] / 4. * (ghostParticles->x[j] - x[i]);
+            xij[1] = y[i] + sml[i] / 4. * (ghostParticles->y[j] - y[i]);
 #endif
 
             xijxi[0] = xij[0] - x[i];
@@ -1720,8 +1722,8 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kerne
 #if FIRST_ORDER_QUAD_POINT
             xij[2] = (z[i] + ghostParticles->z[j])/2.;
 #else
-            //xij[2] = z[i] + kernelSize/2. * (ghostParticles->z[j] - z[i]);
-            xij[2] = z[i] + kernelSize/4. * (ghostParticles->z[j] - z[i]);
+            //xij[2] = z[i] + sml[i]/2. * (ghostParticles->z[j] - z[i]);
+            xij[2] = z[i] + sml[i]/4. * (ghostParticles->z[j] - z[i]);
 #endif
 
             xijxi[2] = xij[2] - z[i];
@@ -1776,7 +1778,7 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kerne
     }
 }
 
-double Particles::compGlobalTimestep(const double &kernelSize){
+double Particles::compGlobalTimestep(){
     double dt_ = std::numeric_limits<double>::max();
     for (int i=0; i<N; ++i){
         double vSig = std::numeric_limits<double>::min();
@@ -1817,7 +1819,7 @@ double Particles::compGlobalTimestep(const double &kernelSize){
         }
 
         // TODO: Note: Kernel size is double the actual kernel size
-        double dt = CFL*kernelSize/vSig;
+        double dt = CFL*sml[i]/vSig;
         dt_ = dt < dt_ ? dt : dt_;
     }
 
@@ -1825,7 +1827,7 @@ double Particles::compGlobalTimestep(const double &kernelSize){
 }
 
 #if ELASTIC
-double Particles::compElasticTimestep(const double &kernelSize){
+double Particles::compElasticTimestep(){
     double dt_ = std::numeric_limits<double>::max();
     for (int i=0; i<N; ++i){
         double vSig = std::numeric_limits<double>::min();
@@ -1864,14 +1866,14 @@ double Particles::compElasticTimestep(const double &kernelSize){
             vSig = vSig_i > vSig ? vSig_i : vSig;
         }
 
-        double dt = CFL*kernelSize/vSig;
+        double dt = CFL*sml[i]/vSig;
         dt_ = dt < dt_ ? dt : dt_;
     }
     return dt_;
 }
 #endif // ELASTIC
 
-void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
+void Particles::compRiemannStatesLR(const double &dt){
     for (int i=0; i<N; ++i){
         double xij[DIM];
         //double vFrame[DIM];
@@ -1884,8 +1886,8 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
             xjxi[0] = x[j] - x[i];
             xjxi[1] = y[j] - y[i];
 
-            //xij[0] = x[i] + kernelSize/2. * xjxi[0];
-            //xij[1] = y[i] + kernelSize/2. * xjxi[1];
+            //xij[0] = x[i] + sml[i]/2. * xjxi[0];
+            //xij[1] = y[i] + sml[i]/2. * xjxi[1];
 
 #if FIRST_ORDER_QUAD_POINT
             xij[0] = (x[i] + x[j])/2.;
@@ -1898,8 +1900,8 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
             xijxi[1] = .5*(y[j] - y[i]);
 
 #else // !FIRST_ORDER_QUAD_POINT
-            xij[0] = x[i] + kernelSize/4. * xjxi[0];
-            xij[1] = y[i] + kernelSize/4. * xjxi[1];
+            xij[0] = x[i] + sml[i]/4. * xjxi[0];
+            xij[1] = y[i] + sml[i]/4. * xjxi[1];
 
             xijxi[0] = xij[0] - x[i];
             xijxi[1] = xij[1] - y[i];
@@ -1915,9 +1917,9 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
             xijxi[2] = .5*(z[j] - z[i]);
 #else // !FIRST_ORDER_QUAD_POINT
             xjxi[2] = z[j] - z[i];
-            //xij[2] = z[i] + kernelSize/2. * xjxi[2];
+            //xij[2] = z[i] + sml[i]/2. * xjxi[2];
 
-            xij[2] = z[i] + kernelSize/4. * xjxi[2];
+            xij[2] = z[i] + sml[i]/4. * xjxi[2];
 
             xijxi[2] = xij[2] - z[i];
             xijxj[2] = xij[2] - z[j];
@@ -2940,9 +2942,9 @@ void Particles::ghostNNS(Domain &domain, const Particles &ghostParticles, const 
     }
 }
 
-void Particles::compDensity(const Particles &ghostParticles, const double &kernelSize){
+void Particles::compDensity(const Particles &ghostParticles){
     for(int i=0; i<N; ++i){
-        compOmega(i, ghostParticles, kernelSize);
+        compOmega(i, ghostParticles);
         rho[i] = m[i]*omega[i];
         if(rho[i] <= 0.){
             Logger(WARN) << "Zero or negative density @" << i;
@@ -2950,7 +2952,8 @@ void Particles::compDensity(const Particles &ghostParticles, const double &kerne
     }
 }
 
-void Particles::compOmega(int i, const Particles &ghostParticles, const double &kernelSize){
+void Particles::compOmega(int i, const Particles &ghostParticles){
+    const double hi = sml[i];
     double omg = omega[i];
     for (int j=0; j<noiGhosts[i]; ++j){
         double dSqr = pow(x[i] - ghostParticles.x[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]], 2)
@@ -2959,7 +2962,7 @@ void Particles::compOmega(int i, const Particles &ghostParticles, const double &
         dSqr += pow(z[i] - ghostParticles.z[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]], 2);
 #endif
         double r = sqrt(dSqr);
-        omg += kernel(r, kernelSize);
+        omg += kernel(r, hi);
 
         //Logger(DEBUG) << "x[" << i << "] = [" << x[i] << ", " <<  y[i] << "], x["
         //              << nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS] << "] = [" << ghostParticles.x[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]] << ", "
@@ -2970,9 +2973,10 @@ void Particles::compOmega(int i, const Particles &ghostParticles, const double &
     //          << " noiGhosts = " << noiGhosts[i];
 }
 
-void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles, const double &kernelSize){
+void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles){
     int iP;
     for (int i=0; i<N; ++i){
+        const double hi = sml[i];
 
         // reset buffer
         for (int k=0; k<DIM*DIM; ++k){
@@ -3000,8 +3004,8 @@ void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles, c
             dSqr += pow(z[i] - z[iP], 2);
 #endif
             double r = sqrt(dSqr);
-            //double psij_xi = kernel(r, kernelSize)/omega[nnl[j + i * MAX_NUM_INTERACTIONS]];
-            double psij_xi = kernel(r, kernelSize)/omega[i];
+            //double psij_xi = kernel(r, hi)/omega[nnl[j + i * MAX_NUM_INTERACTIONS]];
+            double psij_xi = kernel(r, hi)/omega[i];
 
             xj[0] = x[iP];
             xj[1] = y[iP];
@@ -3029,8 +3033,8 @@ void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles, c
             dSqr += pow(z[i] - ghostParticles.z[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]], 2);
 #endif
             double r = sqrt(dSqr);
-            //double psij_xi = kernel(r, kernelSize)/ghostParticles.omega[nnlGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS]];
-            double psij_xi = kernel(r, kernelSize)/omega[i];
+            //double psij_xi = kernel(r, hi)/ghostParticles.omega[nnlGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS]];
+            double psij_xi = kernel(r, hi)/omega[i];
 
             xjGhost[0] = ghostParticles.x[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]];
             xjGhost[1] = ghostParticles.y[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]];
@@ -3110,8 +3114,8 @@ void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles, c
             dSqr += pow(z[i] - z[iP], 2);
 #endif
             double r = sqrt(dSqr);
-            //double psij_xi = kernel(r, kernelSize) / omega[nnl[j + i * MAX_NUM_INTERACTIONS]];
-            double psij_xi = kernel(r, kernelSize) / omega[i];
+            //double psij_xi = kernel(r, hi) / omega[nnl[j + i * MAX_NUM_INTERACTIONS]];
+            double psij_xi = kernel(r, hi) / omega[i];
 
             xj[0] = x[iP];
             xj[1] = y[iP];
@@ -3138,8 +3142,8 @@ void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles, c
             dSqr += pow(z[i] - ghostParticles.z[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]], 2);
 #endif
             double r = sqrt(dSqr);
-            //double psij_xi = kernel(r, kernelSize) / ghostParticles.omega[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]];
-            double psij_xi = kernel(r, kernelSize) / omega[i];
+            //double psij_xi = kernel(r, hi) / ghostParticles.omega[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]];
+            double psij_xi = kernel(r, hi) / omega[i];
 
             xjGhost[0] = ghostParticles.x[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]];
             xjGhost[1] = ghostParticles.y[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]];
@@ -3235,7 +3239,7 @@ void Particles::compEffectiveFace(const Particles &ghostParticles){
     }
 }
 
-void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
+void Particles::compRiemannStatesLR(const double &dt,
                                   const Particles &ghostParticles){
 
     for (int i=0; i<N; ++i){
@@ -3251,8 +3255,8 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
             xjxi[0] = ghostParticles.x[j] - x[i];
             xjxi[1] = ghostParticles.y[j] - y[i];
 
-            //xij[0] = x[i] + kernelSize/2. * xjxi[0];
-            //xij[1] = y[i] + kernelSize/2. * xjxi[1];
+            //xij[0] = x[i] + sml[i]/2. * xjxi[0];
+            //xij[1] = y[i] + sml[i]/2. * xjxi[1];
 
 
 #if FIRST_ORDER_QUAD_POINT
@@ -3266,8 +3270,8 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
             xijxi[1] = .5*(ghostParticles.y[j] - y[i]);
 
 #else // !FIRST_ORDER_QUAD_POINT
-            xij[0] = x[i] + kernelSize/4. * xjxi[0];
-            xij[1] = y[i] + kernelSize/4. * xjxi[1];
+            xij[0] = x[i] + sml[i]/4. * xjxi[0];
+            xij[1] = y[i] + sml[i]/4. * xjxi[1];
             xijxi[0] = xij[0] - x[i];
             xijxi[1] = xij[1] - y[i];
 
@@ -3277,8 +3281,8 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
 
 #if DIM==3
             xjxi[2] = ghostParticles.z[j] - z[i];
-            //xij[2] = z[i] + kernelSize/2. * xjxi[2];
-            xij[2] = z[i] + kernelSize/4. * xjxi[2];
+            //xij[2] = z[i] + sml[i]/2. * xjxi[2];
+            xij[2] = z[i] + sml[i]/4. * xjxi[2];
             xijxi[2] = xij[2] - z[i];
             xijxj[2] = xij[2] - ghostParticles.z[j];
             // TODO: add FIRST_ORDER_QUAD_POINT
