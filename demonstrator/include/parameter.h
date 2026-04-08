@@ -12,10 +12,10 @@
 #define PERIODIC_BOUNDARIES 1
 
 /// define if timestep is adaptive
-#define ADAPTIVE_TIMESTEP 0
+#define ADAPTIVE_TIMESTEP 1
 
 /// define Courant-Friedrichs-Levy number, should be smaller than 1
-#define CFL .2              // TODO: move to config
+#define CFL .2           // TODO: move to config
 
 /// maximum number of interactions for each particle
 #define MAX_NUM_INTERACTIONS 200
@@ -28,8 +28,8 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 
 /* Simulate elastic dynamics*/
 #define ELASTIC 1
-// #define SHEAR_MODULUS 0.22
-#define SHEAR_MODULUS 0
+#define SHEAR_MODULUS 0.22
+// #define SHEAR_MODULUS 0
 /** maximum interactions with ghost particles
  *  ignored when `PERIODIC_BOUNDARIES` is not set
 **/
@@ -100,10 +100,10 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 #define FLUX_SYM_TOL 1e-20
 
 // floor for internal energy u, set to negative value to disable
-#define ENERGY_FLOOR 0
+#define ENERGY_FLOOR -1
 
 // Output per-particle condition number of the gradient estimation matrix E
-#define OUTPUT_CONDITION_NUMBER 1
+#define OUTPUT_CONDITION_NUMBER 0
 
 // Use per-particle local reference density rho0 for Murnaghan EOS.
 // 1: rho0 is stored per particle and initialized from initial density (local rho0)

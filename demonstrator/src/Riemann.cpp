@@ -44,7 +44,7 @@ Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i, Equ
 #endif
     }
     // if (i == 6){
-    if (i == 0){
+    if (i == 184){
        Logger(DEBUG) << "Aij = [" << Aij[0] << ", " << Aij[1] << "], AijNorm = " << AijNorm;
     }
 
@@ -149,7 +149,7 @@ Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i, Equ
     //Logger(DEBUG) << "vR_unrot = [" << WR[2] << ", " << WR[3] << "], vL_unrot = ["
     //          <<  WL[2] << ", " << WL[3] << "]";
 
-    //if(i == 004){
+    //if(i == 18404){
     //    Logger(DEBUG) <<  "rhoR = " << WR[0] << ", rhoL = " << WL[0]
     //                  << ", vR = [" << WR[2] << ", " << WR[3]
     //                  << "], vL = [" <<  WL[2] << ", " << WL[3]
@@ -189,7 +189,7 @@ void Riemann::HLLCFlux(double *Fij){
 #if ELASTIC
     // x-split elastic HLLC: states and vFrame are already rotated in constructor
 #if DEBUG_LVL
-    if(i == 0){
+    if(WL[0] < 0 | WR[0] < 0){
         Logger(DEBUG) << "HLLCFlux i=" << i << ":"
                     << " WL=[rho=" << WL[0] << ", P=" << WL[1]
                     << ", vx=" << WL[2] << ", vy=" << WL[3]
@@ -400,7 +400,7 @@ void Riemann::rotateAndProjectFluxes2D(double *Fij){
     vSol[0] = LambdaInv[0]*vSolBuf[0]+LambdaInv[1]*vSolBuf[1];
     vSol[1] = LambdaInv[2]*vSolBuf[0]+LambdaInv[3]*vSolBuf[1];
 
-    //if (i == 004){
+    //if (i == 18404){
     //    Logger(DEBUG) << "rhoSol = " << rhoSol << ", vSol_rot = [" << vSol[0] << ", " << vSol[1] << "], PSol = " << PSol;
     //}
 
@@ -453,7 +453,7 @@ void Riemann::rotateAndProjectFluxes3D(double *Fij){
     vSol[1] = LambdaInv[3]*vSolBuf[0]+LambdaInv[4]*vSolBuf[1]+LambdaInv[5]*vSolBuf[2];
     vSol[2] = LambdaInv[6]*vSolBuf[0]+LambdaInv[7]*vSolBuf[1]+LambdaInv[8]*vSolBuf[2];
 
-    //if (i == 004){
+    //if (i == 18404){
     //    Logger(DEBUG) << "rhoSol = " << rhoSol << ", vSol_rot = [" << vSol[0] << ", " << vSol[1] << "], PSol = " << PSol;
     //}
 

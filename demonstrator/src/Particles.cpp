@@ -1400,7 +1400,8 @@ void Particles::compDensity(const double &kernelSize){
         compOmega(i, kernelSize);
         rho[i] = m[i]*omega[i];
         if(rho[i] <= 0.){
-            Logger(WARN) << "Zero or negative density @" << i;
+            Logger(ERROR) << "Zero or negative density @" << i;
+            exit(6);
         }
         //if ((i - 0) % 30 == 0){
         //    Logger(DEBUG) << "density from ghosts: i = " << i << ", dnst = " << rho[i];
@@ -1745,7 +1746,7 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM], const double &kerne
         //}
 
 #if DEBUG_LVL
-        if(i == 0){
+        if(i == 184){
             Logger(DEBUG) << "slopeLimiter i=2: f[i]=" << f[i]
                           << " grad=[" << grad[i][0] << ", " << grad[i][1] << "]"
                           << " alphaMin=" << alphaMin << " alphaMax=" << alphaMax
@@ -1948,7 +1949,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
 #endif // MOVE_PARTICLES
             // boost frame to effective face
 #if DEBUG_LVL
-            if(i == 0 && jn == 0){
+            if(i == 184 && jn == 0){
                 Logger(DEBUG) << "compRiemannStatesLR i=2, j=" << j
                               << " RAW: vx[i]=" << vx[i] << ", vy[i]=" << vy[i]
                               << ", vFrame=[" << vFrame[iW][0] << ", " << vFrame[iW][1] << "]";
@@ -2022,7 +2023,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
 #endif // DIM == 3
 
 #if DEBUG_LVL
-            if(i == 0 && jn == 0){
+            if(i == 184 && jn == 0){
                 Logger(DEBUG) << "  AFTER GRAD EXTRAP: vxR=" << WijR[iW][2]
                               << ", vyR=" << WijR[iW][3];
             }
@@ -2046,7 +2047,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
 #endif // PAIRWISE_LIMITER
 
 #if DEBUG_LVL
-            if(i == 0 && jn == 0){
+            if(i == 184 && jn == 0){
                 Logger(DEBUG) << "  AFTER PAIRWISE LIM: vxR=" << WijR[iW][2]
                               << ", vyR=" << WijR[iW][3];
             }
@@ -2115,7 +2116,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize){
             WijL[iW][3] += dt/2. * (SxyGrad[j][0] + SyyGrad[j][1]) / rho[j];
 #endif // ELASTIC
 #if DEBUG_LVL
-            if(i == 0 && jn == 0){
+            if(i == 184 && jn == 0){
                 Logger(DEBUG) << "  AFTER TIME PRED+ELASTIC: vxR=" << WijR[iW][2]
                               << ", vyR=" << WijR[iW][3];
             }
@@ -2563,7 +2564,7 @@ void Particles::collectFluxes(Helper &helper){
             //                  << "], Fe = " << eF[i];
             //}
 
-            if (i == 0){
+            if (i == 184){
                // Logger(DEBUG) << "  > j = " << nnl[ii] << ", AijNorm = " << AijNorm
                //           << ", vFrame = [" << vFrame[ii][0] << ", " << vFrame[ii][1] << "]";
                Logger(DEBUG) << "  > j = " << nnl[ii] <<  " > Fm = " << FijGhosts[ii][0] << ", Fv = [" << FijGhosts[ii][2] << ", " << FijGhosts[ii][3]
@@ -3345,7 +3346,7 @@ void Particles::compRiemannStatesLR(const double &dt, const double &kernelSize,
             WijLGhosts[iW][4] += Helper::dotProduct(ghostParticles.vzGrad[j], xijxj);
 #endif
 
-            //if (i == 03 && iW == 28){
+            //if (i == 1843 && iW == 28){
             //    Logger(DEBUG) << "        j = " << j
             //                  << ", rhoL = " << WijLGhosts[iW][0] << ", rhoR = " << WijRGhosts[iW][0]
             //                  << ", uL = " << WijLGhosts[iW][2] << ", uR = " << WijRGhosts[iW][2]
