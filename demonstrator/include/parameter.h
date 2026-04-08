@@ -27,8 +27,12 @@
 /// `config.kernelSize` so the new IO path is exercised.
 #define VARIABLE_SML 0
 
-/// target effective neighbor number N_NN for the smoothing length iteration
-#define NNN_TARGET 32
+/// target effective neighbor number N_NN for the smoothing length iteration.
+/// Defined as N_NN = V_kern(h_i) * sum_j W(r_ij, h_i) where
+/// V_kern is pi h^2 in 2D and (4/3) pi h^3 in 3D.
+/// For the single_block 2D testcase (delta_p = 0.005, kernelSize = 0.02),
+/// this evaluates to ~50, which is also a reasonable default for 2D MFM.
+#define NNN_TARGET 50
 
 /// numerical tolerance for the Newton-Raphson root finding on f_SML
 #define SML_TOL 1e-3
