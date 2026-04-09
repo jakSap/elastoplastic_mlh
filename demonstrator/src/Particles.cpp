@@ -2881,9 +2881,12 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
 #else
         u[i] = Q[0]/m[i]-.5*(vx[i]*vx[i]+vy[i]*vy[i]);
 #endif
+#if EOS != 1 // For murnaghan this is ok
         if (u[i] <= 0.){
             Logger(ERROR) << "Negative internal energy. u[" << i << "] =" << u[i] << ", eF = " << eF[i];
         }
+#endif
+
 #if ENERGY_FLOOR >= 0
         if (u[i] < ENERGY_FLOOR){
             u[i] = ENERGY_FLOOR;
@@ -2968,9 +2971,11 @@ void Particles::updateState(const double &dt){
 #else
         u[i] = Q[0]/m[i]-.5*(vx[i]*vx[i]+vy[i]*vy[i]);
 #endif
+#if EOS != 1 // Ok for murnaghan
         if (u[i] <= 0.){
             Logger(ERROR) << "Negative internal energy. u[" << i << "] =" << u[i] << ", eF = " << eF[i];
         }
+#endif
 #if ENERGY_FLOOR >= 0
         if (u[i] < ENERGY_FLOOR){
             u[i] = ENERGY_FLOOR;

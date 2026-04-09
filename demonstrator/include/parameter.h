@@ -18,7 +18,7 @@
 #define CFL .2           // TODO: move to config
 
 /// maximum number of interactions for each particle
-#define MAX_NUM_INTERACTIONS 200
+#define MAX_NUM_INTERACTIONS 250
 
 /// use a per-particle, iteratively determined smoothing length (Hopkins 2015,
 /// see Martin's master thesis section 3.4.2). When 0, the global
@@ -32,7 +32,7 @@
 /// V_kern is pi h^2 in 2D and (4/3) pi h^3 in 3D.
 /// For the single_block 2D testcase (delta_p = 0.005, kernelSize = 0.02),
 /// this evaluates to ~50, which is also a reasonable default for 2D MFM.
-#define NNN_TARGET 50
+#define NNN_TARGET 20
 
 /// numerical tolerance for the Newton-Raphson root finding on f_SML
 #define SML_TOL 1e-3
