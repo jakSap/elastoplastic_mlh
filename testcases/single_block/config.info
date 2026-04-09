@@ -44,6 +44,15 @@ sml {
     maxIter   20
     ; max allowed factor h_new/h_old per iteration (clamps overshoot)
     maxFactor 1.2
+    ; hard lower / upper bound on h_i as a factor of kernelSize.
+    ; Every Newton step clamps into [hMinFactor*kernelSize, hMaxFactor*kernelSize]
+    ; so a single sick particle cannot collapse h to 0 or run it away.
+    hMinFactor 0.1
+    hMaxFactor 4.0
+    ; fraction of particles in a bad state (unconverged or clamped at a
+    ; bound) at which the iteration logs a WARN / aborts the run.
+    warnFraction  0.01
+    panicFraction 0.1
 }
 
 ; adiabatic index (unused when EOS != 0, kept for config parser compatibility)

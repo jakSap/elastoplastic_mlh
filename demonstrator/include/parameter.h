@@ -25,7 +25,7 @@
 /// `config.kernelSize` is used everywhere as before. Even with VARIABLE_SML 0
 /// the per-particle `sml[i]` array is allocated and initialized to
 /// `config.kernelSize` so the new IO path is exercised.
-#define VARIABLE_SML 0
+#define VARIABLE_SML 1
 
 /// target effective neighbor number N_NN for the smoothing length iteration.
 /// Defined as N_NN = V_kern(h_i) * sum_j W(r_ij, h_i) where
@@ -42,6 +42,23 @@
 
 /// maximum allowed relative change of h per NR iteration (clamps overshoot)
 #define SML_MAX_FACTOR 1.2
+
+/// hard lower bound on h_i, as a factor of config.kernelSize.
+/// Clamps every Newton step so a sick particle cannot collapse h to 0.
+#define SML_H_MIN_FACTOR 0.1
+
+/// hard upper bound on h_i, as a factor of config.kernelSize.
+/// Clamps every Newton step so a sick particle cannot run h away to infinity.
+/// Must stay <= the NNS search radius budget or neighbors will be missed.
+#define SML_H_MAX_FACTOR 4.0
+
+/// fraction of particles allowed to end the Newton iteration in a bad state
+/// (unconverged OR clamped at hMin/hMax) before a WARN is logged.
+#define SML_WARN_FRACTION 0.01
+
+/// fraction of particles in a bad state that triggers a hard abort.
+/// Above this the simulation state is considered unrecoverable.
+#define SML_PANIC_FRACTION 0.1
 
 /* Define which equation of state to use.
 For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */

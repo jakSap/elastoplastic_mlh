@@ -33,6 +33,12 @@ public:
         double smlTol       { SML_TOL };
         int    smlMaxIter   { SML_MAX_ITER };
         double smlMaxFactor { SML_MAX_FACTOR };
+        // Safeguards: hard bounds as factors of kernelSize, and the fractions
+        // of bad-state particles that trigger WARN / ERROR+exit.
+        double smlHMinFactor   { SML_H_MIN_FACTOR };
+        double smlHMaxFactor   { SML_H_MAX_FACTOR };
+        double smlWarnFraction { SML_WARN_FRACTION };
+        double smlPanicFraction{ SML_PANIC_FRACTION };
 #endif
 #if EOS == 0
         double hydro_gamma; // adiabatic index

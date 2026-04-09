@@ -66,7 +66,7 @@ int main(int argc, char *argv[]){
     config.kernelSize = confP.getVal<double>("kernelSize");
     Logger(INFO) << "    > Using global kernel size h = " << config.kernelSize;
 #if VARIABLE_SML
-    // All four sml.* keys are optional; fall back to the compile-time
+    // All sml.* keys are optional; fall back to the compile-time
     // defaults (from parameter.h) if a key is missing.
     try { config.smlNNNTarget = confP.getVal<double>("sml.NNNTarget"); }
     catch (...) { Logger(INFO) << "    > sml.NNNTarget not set, using default "
@@ -80,10 +80,26 @@ int main(int argc, char *argv[]){
     try { config.smlMaxFactor = confP.getVal<double>("sml.maxFactor"); }
     catch (...) { Logger(INFO) << "    > sml.maxFactor not set, using default "
                                << config.smlMaxFactor; }
+    try { config.smlHMinFactor = confP.getVal<double>("sml.hMinFactor"); }
+    catch (...) { Logger(INFO) << "    > sml.hMinFactor not set, using default "
+                               << config.smlHMinFactor; }
+    try { config.smlHMaxFactor = confP.getVal<double>("sml.hMaxFactor"); }
+    catch (...) { Logger(INFO) << "    > sml.hMaxFactor not set, using default "
+                               << config.smlHMaxFactor; }
+    try { config.smlWarnFraction = confP.getVal<double>("sml.warnFraction"); }
+    catch (...) { Logger(INFO) << "    > sml.warnFraction not set, using default "
+                               << config.smlWarnFraction; }
+    try { config.smlPanicFraction = confP.getVal<double>("sml.panicFraction"); }
+    catch (...) { Logger(INFO) << "    > sml.panicFraction not set, using default "
+                               << config.smlPanicFraction; }
     Logger(INFO) << "    > Variable smoothing length: N_NN=" << config.smlNNNTarget
                  << ", tol=" << config.smlTol
                  << ", maxIter=" << config.smlMaxIter
-                 << ", maxFactor=" << config.smlMaxFactor;
+                 << ", maxFactor=" << config.smlMaxFactor
+                 << ", hMinFactor=" << config.smlHMinFactor
+                 << ", hMaxFactor=" << config.smlHMaxFactor
+                 << ", warnFraction=" << config.smlWarnFraction
+                 << ", panicFraction=" << config.smlPanicFraction;
 #endif
 #if EOS == 0
     config.hydro_gamma = confP.getVal<double>("hydro_gamma");

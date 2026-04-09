@@ -176,6 +176,16 @@ public:
     double smlTol         { SML_TOL };
     int    smlMaxIter     { SML_MAX_ITER };
     double smlMaxFactor   { SML_MAX_FACTOR };
+    /// Hard absolute bounds on h_i, resolved by MeshlessScheme from
+    /// smlHMinFactor/smlHMaxFactor * config.kernelSize. Every Newton step
+    /// clamps to [smlHMin, smlHMax] so a single sick particle cannot drive
+    /// h to 0 or blow it up past the NNS search radius.
+    double smlHMin        { 0. };
+    double smlHMax        { 0. };
+    /// Fraction of particles that may end the iteration in a bad state
+    /// (unconverged or clamped at a bound) before WARN / ERROR+exit kicks in.
+    double smlWarnFraction  { SML_WARN_FRACTION };
+    double smlPanicFraction { SML_PANIC_FRACTION };
 
     /// Largest sml[i] over all particles. Used by MeshlessScheme to size the
     /// NNS / ghost search radius so that every neighbor within max(h_i, h_j)

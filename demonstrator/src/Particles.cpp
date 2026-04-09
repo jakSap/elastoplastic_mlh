@@ -1462,6 +1462,7 @@ void Particles::updateAllSmoothingLengths(){
     int totalIters = 0;
     int maxIters = 0;
     int unconverged = 0;
+    int clamped = 0;
     double hMinObs = std::numeric_limits<double>::max();
     double hMaxObs = 0.;
     double hSum = 0.;
@@ -1503,10 +1504,10 @@ void Particles::updateAllSmoothingLengths(){
             if (dh >  maxAbs) dh =  maxAbs;
             if (dh < -maxAbs) dh = -maxAbs;
             h += dh;
-            if (h <= 0.){
-                Logger(ERROR) << "updateAllSmoothingLengths: non-positive h at i = " << i;
-                exit(7);
-            }
+            // hard absolute bounds: never let a single particle escape the
+            // band set by MeshlessScheme (resolved from config.kernelSize).
+            if (h < smlHMin) h = smlHMin;
+            if (h > smlHMax) h = smlHMax;
             if (std::fabs(dh) / h < smlTol){
                 converged = true;
                 ++it;
@@ -1517,6 +1518,8 @@ void Particles::updateAllSmoothingLengths(){
         totalIters += it;
         if (it > maxIters) maxIters = it;
         if (!converged) ++unconverged;
+        const bool atBound = (h <= smlHMin) || (h >= smlHMax);
+        if (atBound) ++clamped;
         if (h < hMinObs) hMinObs = h;
         if (h > hMaxObs) hMaxObs = h;
         hSum += h;
@@ -1524,8 +1527,27 @@ void Particles::updateAllSmoothingLengths(){
     Logger(DEBUG) << "      > sml iter: avg = " << ((double)totalIters/(double)N)
                   << ", max = " << maxIters
                   << ", unconverged = " << unconverged
+                  << ", clamped = " << clamped
                   << ", h[min/mean/max] = " << hMinObs << " / "
                   << (hSum/(double)N) << " / " << hMaxObs;
+    // Union of the two bad-state sets is bounded above by their sum, which
+    // is all we need to compare against the warn / panic fractions.
+    const double badFrac = (double)(unconverged + clamped) / (double)N;
+    if (badFrac > smlPanicFraction){
+        Logger(ERROR) << "updateAllSmoothingLengths: "
+                      << (unconverged + clamped) << "/" << N
+                      << " particles in a bad state (unconverged or clamped), "
+                      << "fraction " << badFrac
+                      << " exceeds panicFraction " << smlPanicFraction
+                      << " - Aborting.";
+        exit(8);
+    } else if (badFrac > smlWarnFraction){
+        Logger(WARN) << "updateAllSmoothingLengths: "
+                     << (unconverged + clamped) << "/" << N
+                     << " particles in a bad state (unconverged or clamped), "
+                     << "fraction " << badFrac
+                     << " exceeds warnFraction " << smlWarnFraction;
+    }
 }
 
 #if PERIODIC_BOUNDARIES
@@ -1534,6 +1556,7 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
     int totalIters = 0;
     int maxIters = 0;
     int unconverged = 0;
+    int clamped = 0;
     double hMinObs = std::numeric_limits<double>::max();
     double hMaxObs = 0.;
     double hSum = 0.;
@@ -1584,10 +1607,9 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
             if (dh >  maxAbs) dh =  maxAbs;
             if (dh < -maxAbs) dh = -maxAbs;
             h += dh;
-            if (h <= 0.){
-                Logger(ERROR) << "updateAllSmoothingLengths: non-positive h at i = " << i;
-                exit(7);
-            }
+            // hard absolute bounds: see the non-ghost variant for rationale.
+            if (h < smlHMin) h = smlHMin;
+            if (h > smlHMax) h = smlHMax;
             if (std::fabs(dh) / h < smlTol){
                 converged = true;
                 ++it;
@@ -1598,6 +1620,8 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
         totalIters += it;
         if (it > maxIters) maxIters = it;
         if (!converged) ++unconverged;
+        const bool atBound = (h <= smlHMin) || (h >= smlHMax);
+        if (atBound) ++clamped;
         if (h < hMinObs) hMinObs = h;
         if (h > hMaxObs) hMaxObs = h;
         hSum += h;
@@ -1605,8 +1629,25 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
     Logger(DEBUG) << "      > sml iter (ghosts): avg = " << ((double)totalIters/(double)N)
                   << ", max = " << maxIters
                   << ", unconverged = " << unconverged
+                  << ", clamped = " << clamped
                   << ", h[min/mean/max] = " << hMinObs << " / "
                   << (hSum/(double)N) << " / " << hMaxObs;
+    const double badFrac = (double)(unconverged + clamped) / (double)N;
+    if (badFrac > smlPanicFraction){
+        Logger(ERROR) << "updateAllSmoothingLengths: "
+                      << (unconverged + clamped) << "/" << N
+                      << " particles in a bad state (unconverged or clamped), "
+                      << "fraction " << badFrac
+                      << " exceeds panicFraction " << smlPanicFraction
+                      << " - Aborting.";
+        exit(8);
+    } else if (badFrac > smlWarnFraction){
+        Logger(WARN) << "updateAllSmoothingLengths: "
+                     << (unconverged + clamped) << "/" << N
+                     << " particles in a bad state (unconverged or clamped), "
+                     << "fraction " << badFrac
+                     << " exceeds warnFraction " << smlWarnFraction;
+    }
 }
 #endif // PERIODIC_BOUNDARIES
 

@@ -23,6 +23,12 @@ MeshlessScheme::MeshlessScheme(Configuration config, Particles *particles,
     particles->smlTol       = config.smlTol;
     particles->smlMaxIter   = config.smlMaxIter;
     particles->smlMaxFactor = config.smlMaxFactor;
+    // Resolve the hMin/hMax factors against the configured kernel size so
+    // Particles stores absolute bounds and does not need to know kernelSize.
+    particles->smlHMin          = config.smlHMinFactor * config.kernelSize;
+    particles->smlHMax          = config.smlHMaxFactor * config.kernelSize;
+    particles->smlWarnFraction  = config.smlWarnFraction;
+    particles->smlPanicFraction = config.smlPanicFraction;
 #endif
 }
 
