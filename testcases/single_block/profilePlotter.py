@@ -21,6 +21,7 @@ QUANTITY_LABELS = {
     'Sxx': r'$S_{xx}$',
     'Sxy': r'$S_{xy}$',
     'Syy': r'$S_{yy}$',
+    'h': r'$h$',
     'conditionNumber': r'$N_\mathrm{cond}$',
     'lambdaMin': r'$\lambda_\mathrm{min}$',
     'lambdaMax': r'$\lambda_\mathrm{max}$',
@@ -187,6 +188,7 @@ def createProfilePlot(h5File, outDir, quantity, axis, index, useLog, plotMean):
     outpath = os.path.join(outDir, outname)
     print("Saving figure to", outpath)
     plt.savefig(outpath)
+    # plt.show()
     plt.close(fig)
     data.close()
 
