@@ -10,6 +10,7 @@ matplotlib.use('Agg')  # non-interactive backend, safe for multiprocessing
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import LogNorm
+from matplotlib.patches import Circle
 from multiprocessing import Pool
 
 #MAX_NUM_INTERACTIONS = 1000
@@ -28,7 +29,7 @@ def setDomainLimits(ax, pos, h5File, openBorders):
         ax.set_xlim((0., 1.))
         ax.set_ylim((0., 1.))
 
-def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=False, vmin=None, vmax=None, markerSize=1.):
+def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
 
@@ -38,7 +39,7 @@ def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=Fals
         Sxy = np.array(data["Sxy"][:])
         Syy = np.array(data["Syy"][:])
         SAbs = np.sqrt(Sxx**2 + Sxy**2 + Syy**2)
-        cm = Syy
+        cm = SAbs
     else:
         rho = data["rho"][()]
         cm = rho
@@ -65,6 +66,10 @@ def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=Fals
     # plot NNL for particle i
     if iNNL > -1 and "Ghosts" not in str(h5File):
         plotNNL(h5File, iNNL, pos, ax)
+
+    # plot kernel circle for particle i
+    if iHi > -1 and "Ghosts" not in str(h5File):
+        plotKernelCircle(data, iHi, pos, ax)
 
     if stress:
         plt.title(r"Color coded " + pref + r" at $t = " + f"{time:.4f}" + r"$")
@@ -104,12 +109,20 @@ def plotVelocity(vel, pos, ax):
     ax.quiver(pos[:,0], pos[:,1], vel[:,0], vel[:,1], angles='xy', scale_units='xy', scale=.5)
 
 def get_output_prefix(args):
-    if args.combined:   return "comb"
-    elif args.pressure: return "P"
-    elif args.energy:   return "u"
-    elif args.noi:      return "noi"
-    elif args.stress:   return pref
-    else:               return ""
+    if args.combined:          return "comb"
+    elif args.pressure:        return "P"
+    elif args.energy:          return "u"
+    elif args.noi:             return "noi"
+    elif args.conditionNumber: return "ncond"
+    elif args.stress:          return pref
+    else:                      return ""
+
+def plotKernelCircle(data, iHi, pos, ax):
+    h = float(data["sml"][iHi])
+    ax.scatter(pos[iHi, 0], pos[iHi, 1], s=5., marker='+', color='cyan', zorder=5)
+    circle = Circle((pos[iHi, 0], pos[iHi, 1]), h, fill=False,
+                    edgecolor='cyan', linewidth=0.5, zorder=5)
+    ax.add_patch(circle)
 
 def plotNNL(h5File, iNNL, pos, ax):
     data = h5.File(str(h5File).replace(".h5", "NNL.h5"), 'r')
@@ -117,7 +130,7 @@ def plotNNL(h5File, iNNL, pos, ax):
     ax.scatter(pos[iNNL,0], pos[iNNL,1], s=5., marker='x', color='r')
     ax.scatter(posNNL[:,0], posNNL[:,1], s=5, marker='x', color='m')
 
-def createEnergyPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1.):
+def createEnergyPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
 
@@ -129,6 +142,9 @@ def createEnergyPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, ma
 
     setDomainLimits(ax, pos, h5File, openBorders)
 
+    if iHi > -1:
+        plotKernelCircle(data, iHi, pos, ax)
+
     fig.colorbar(uPlt, ax=ax)
     plt.title(r"Color coded internal energy $u$")
     plt.xlabel("$x$")
@@ -138,7 +154,7 @@ def createEnergyPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, ma
     plt.savefig(outDir + "/u" + pathlib.Path(h5File).stem + ".png")
     plt.close()
 
-def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1.):
+def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
 
@@ -155,6 +171,9 @@ def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, 
     PPlt = ax.scatter(pos[:,0], pos[:,1], c=P, s=markerSize, vmin=vmin, vmax=vmax)
 
     setDomainLimits(ax, pos, h5File, openBorders)
+
+    if iHi > -1:
+        plotKernelCircle(data, iHi, pos, ax)
 
     plt.title(r"Color coded pressure $P$ at $t = " + f"{time:.4f}" + r"$")
     plt.xlabel("$x$")
@@ -174,7 +193,7 @@ def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, 
     plt.savefig(outDir + "/P" + pathlib.Path(h5File).stem + ".png")
     plt.close()
 
-def createNoiPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1.):
+def createNoiPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
 
@@ -183,6 +202,10 @@ def createNoiPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, marke
     noiPlt = ax.scatter(pos[:,0], pos[:,1], c=noi, s=markerSize, vmin=vmin, vmax=vmax)
 
     setDomainLimits(ax, pos, h5File, openBorders)
+
+    if iHi > -1:
+        plotKernelCircle(data, iHi, pos, ax)
+
     fig.colorbar(noiPlt, ax=ax)
     plt.title(r"Color coded number of interactions")
     plt.xlabel("$x$")
@@ -192,8 +215,135 @@ def createNoiPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, marke
     plt.savefig(outDir + "/noi" + pathlib.Path(h5File).stem + ".png")
     plt.close()
 
+def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., threshold=None, iHi=-1):
+    data = h5.File(h5File, 'r')
+    pos = data["x"][:]
+    time = data["time"][0]
+    ncond = data["conditionNumber"][()]
+
+    plt.rcParams.update({'font.size': 18})
+    fig, ax = plt.subplots(figsize=(7,6), dpi=200)
+    ncondPlt = ax.scatter(pos[:,0], pos[:,1], c=ncond, s=markerSize, vmin=vmin, vmax=vmax)
+
+    if threshold is not None:
+        mask = ncond > threshold[0]
+        if "eigenvecMin" in data:
+            eigvec_thresh = data["eigenvecMin"][:]
+            mask &= np.abs(eigvec_thresh[:,0]) < threshold[1]
+            mask &= np.abs(eigvec_thresh[:,1]) < threshold[2]
+        if np.any(mask):
+            ax.scatter(pos[mask,0], pos[mask,1], s=markerSize*4,
+                       facecolors='none', edgecolors='r', linewidths=0.5)
+
+    setDomainLimits(ax, pos, h5File, openBorders)
+
+    if iHi > -1:
+        plotKernelCircle(data, iHi, pos, ax)
+
+    title = r"Condition number $N_{\mathrm{cond}}$ at $t = " + f"{time:.4f}" + r"$"
+    if threshold is not None:
+        title += (f"\n(red: $N_{{\\mathrm{{cond}}}} > {threshold[0]}$, "
+                  f"$|e_x| < {threshold[1]}$, $|e_y| < {threshold[2]}$, "
+                  f"count: {np.sum(mask)})")
+    plt.title(title)
+    plt.xlabel("$x$")
+    plt.ylabel("$y$")
+
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    fig.colorbar(ncondPlt, cax=cax)
+
+    ax.set_aspect('equal')
+
+    plt.tight_layout()
+    print("Saving figure to", outDir + "/ncond" + pathlib.Path(h5File).stem + ".png")
+    plt.savefig(outDir + "/ncond" + pathlib.Path(h5File).stem + ".png")
+    plt.close()
+
+    # Histogram of condition numbers and eigenvector components
+    has_eigvec = "eigenvecMin" in data
+    nrows = 2 if has_eigvec else 1
+    fig, axes = plt.subplots(nrows, 1, figsize=(7, 5 * nrows), dpi=400)
+    if nrows == 1:
+        axes = [axes]
+
+    axes[0].hist(ncond, bins=100, edgecolor='black', linewidth=0.5)
+    if threshold is not None:
+        axes[0].axvline(threshold[0], color='r', linestyle='--', linewidth=1.5,
+                        label=f'threshold = {threshold[0]}')
+        axes[0].legend()
+    axes[0].set_xlabel(r"$N_{\mathrm{cond}}$")
+    axes[0].set_ylabel("Count")
+    axes[0].set_title(r"Condition number distribution at $t = " + f"{time:.4f}" + r"$")
+
+    if has_eigvec:
+        eigvec = data["eigenvecMin"][:]
+        axes[1].hist(np.abs(eigvec[:,0]), bins=100, edgecolor='black', linewidth=0.5, alpha=0.7, label=r"$|e_x|$")
+        axes[1].hist(np.abs(eigvec[:,1]), bins=100, edgecolor='black', linewidth=0.5, alpha=0.7, label=r"$|e_y|$")
+        if threshold is not None:
+            axes[1].axvline(threshold[1], color='b', linestyle='--', linewidth=1.0,
+                            label=rf'$|e_x| = {threshold[1]}$')
+            axes[1].axvline(threshold[2], color='orange', linestyle='--', linewidth=1.0,
+                            label=rf'$|e_y| = {threshold[2]}$')
+        axes[1].legend()
+        axes[1].set_xlabel(r"$|$Component$|$")
+        axes[1].set_ylabel("Count")
+        axes[1].set_title(r"Eigenvector $|\vec{e}_{\lambda_{\min}}|$ components at $t = " + f"{time:.4f}" + r"$")
+
+    plt.tight_layout()
+    histPath = outDir + "/ncond_hist" + pathlib.Path(h5File).stem + ".png"
+    print("Saving figure to", histPath)
+    plt.savefig(histPath)
+    plt.close()
+
+    # Eigenvalue scatter plots (side-by-side)
+    if "lambdaMin" in data and "lambdaMax" in data:
+        lambdaMin = data["lambdaMin"][()]
+        lambdaMax = data["lambdaMax"][()]
+
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5), dpi=200)
+        for ax, vals, label in zip(axes, [lambdaMin, lambdaMax],
+                                   [r"$\lambda_{\min}$", r"$\lambda_{\max}$"]):
+            sc = ax.scatter(pos[:,0], pos[:,1], c=vals, s=markerSize)
+            setDomainLimits(ax, pos, h5File, openBorders)
+            ax.set_aspect('equal')
+            ax.set_title(label + r" at $t = " + f"{time:.4f}" + r"$")
+            ax.set_xlabel("$x$")
+            ax.set_ylabel("$y$")
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            fig.colorbar(sc, cax=cax)
+        plt.tight_layout()
+        eigPath = outDir + "/eigenvalues" + pathlib.Path(h5File).stem + ".png"
+        print("Saving figure to", eigPath)
+        plt.savefig(eigPath)
+        plt.close()
+
+    # Eigenvector quiver plot
+    if "eigenvecMin" in data:
+        eigvec = data["eigenvecMin"][:]
+        fig, ax = plt.subplots(figsize=(7, 6), dpi=200)
+        sc = ax.scatter(pos[:,0], pos[:,1], c=ncond, s=markerSize, vmin=vmin, vmax=vmax)
+        step = max(1, len(pos) // 1000)
+        ax.quiver(pos[::step,0], pos[::step,1],
+                  eigvec[::step,0], eigvec[::step,1],
+                  angles='xy', scale_units='xy', scale=30., width=0.002, color='red', alpha=0.6)
+        setDomainLimits(ax, pos, h5File, openBorders)
+        ax.set_aspect('equal')
+        ax.set_title(r"$\vec{e}_{\lambda_{\min}}$ at $t = " + f"{time:.4f}" + r"$")
+        ax.set_xlabel("$x$")
+        ax.set_ylabel("$y$")
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="5%", pad=0.05)
+        fig.colorbar(sc, cax=cax)
+        plt.tight_layout()
+        evecPath = outDir + "/eigvecMin" + pathlib.Path(h5File).stem + ".png"
+        print("Saving figure to", evecPath)
+        plt.savefig(evecPath)
+        plt.close()
+
 def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSize=1.,
-                       diff=False, first_frame_data=None, diff_vminmax=None):
+                       diff=False, first_frame_data=None, diff_vminmax=None, iHi=-1):
     data = h5.File(h5File, 'r')
     pos  = data["x"][:]
     time = data["time"][0]
@@ -253,6 +403,8 @@ def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSi
             sc = ax.scatter(pos[:,0], pos[:,1], c=vals, s=markerSize, vmin=vlo, vmax=vhi)
 
             setDomainLimits(ax, pos, h5File, openBorders)
+            if iHi > -1:
+                plotKernelCircle(data, iHi, pos, ax)
             ax.set_aspect('equal')
             ax.set_title(label)
             ax.set_xlabel("$x$")
@@ -271,19 +423,22 @@ def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSi
 
 def _worker(task):
     (h5File, outDir, grad, vel, stress, iNNL, borders, vmin, vmax,
-     pressure, energy, noi, combined, combined_vminmax,
-     markerSize, diff, first_frame_data, diff_vminmax) = task
+     pressure, energy, noi, conditionNumber, condThreshold,
+     combined, combined_vminmax,
+     markerSize, diff, first_frame_data, diff_vminmax, iHi) = task
     if combined:
         createCombinedPlot(h5File, outDir, borders, combined_vminmax, markerSize,
-                           diff, first_frame_data, diff_vminmax)
+                           diff, first_frame_data, diff_vminmax, iHi)
     elif pressure:
-        createPressurePlot(h5File, outDir, borders, vmin, vmax, markerSize)
+        createPressurePlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi)
     elif energy:
-        createEnergyPlot(h5File, outDir, borders, vmin, vmax, markerSize)
+        createEnergyPlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi)
     elif noi:
-        createNoiPlot(h5File, outDir, borders, vmin, vmax, markerSize)
+        createNoiPlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi)
+    elif conditionNumber:
+        createConditionNumberPlot(h5File, outDir, borders, vmin, vmax, markerSize, condThreshold, iHi)
     else:
-        createPlot(h5File, outDir, grad, vel, stress, iNNL, borders, vmin, vmax, markerSize)
+        createPlot(h5File, outDir, grad, vel, stress, iNNL, borders, vmin, vmax, markerSize, iHi)
 
 
 if __name__=="__main__":
@@ -294,12 +449,16 @@ if __name__=="__main__":
     parser.add_argument("--plotGhosts", "-G", action="store_true", help="also plot ghost cells in an extra file")
     parser.add_argument("--pressure", "-P", action="store_true", help="plot pressure instead of density")
     parser.add_argument("--energy", "-u", action="store_true", help="plot internal energy instead of density")
-    parser.add_argument("--stress", "-S", action="store_true", help="Plot max value of stress")
+    parser.add_argument("--stress", "-S", action="store_true", help="Plot absolute value of stress (|S| = sqrt(Sxx^2 + Sxy^2 + Syy^2))")
     parser.add_argument("--combined", "-C", action="store_true",
                         help="Plot rho, P, u, Sxx, Sxy, Syy in a 2x3 combined figure")
     parser.add_argument("--noi", "-n", action="store_true", help="plot number of interactions instead of density")
+    parser.add_argument("--conditionNumber", "-N", action="store_true", help="plot condition number of gradient estimation matrix")
+    parser.add_argument("--threshold", "-T", nargs=3, metavar=("NCOND", "EX", "EY"), type=float, default=None,
+                        help="highlight particles meeting all three: Ncond > NCOND, |e_x| < EX, |e_y| < EY (use with -N)")
     parser.add_argument("--plotVelocity", "-v", action="store_true", help="plot velocity")
     parser.add_argument("--iNNL", "-i", metavar="int", type=int, help="plot NNL for particles i", default=-1)
+    parser.add_argument("--hi", metavar="int", type=int, help="plot kernel length h of particle i as a thin circle", default=-1)
     parser.add_argument("--openBorders", "-b", action="store_true", help="Adjust plot domain to show all real particles")
     parser.add_argument("--continue", "-c", dest="continue_", action="store_true",
                         help="skip h5 files whose plots already exist in outDir")
@@ -307,6 +466,8 @@ if __name__=="__main__":
                         help="number of parallel worker processes (default: all CPUs)")
     parser.add_argument("--markerSize", "-m", metavar="float", type=float, default=1.,
                         help="scatter marker size for all plots (default: 1.0)")
+    parser.add_argument("--tstart", "-t", metavar="float", type=float, default=None,
+                        help="only plot files with simulation time >= tstart")
     parser.add_argument("--diff", "-D", action="store_true",
                         help="(with --combined) add two rows showing log-scale |diff to first frame|")
 
@@ -314,6 +475,8 @@ if __name__=="__main__":
 
     if args.diff and not args.combined:
         print("WARNING: --diff has no effect without --combined.")
+    if args.threshold is not None and not args.conditionNumber:
+        print("WARNING: --threshold has no effect without --conditionNumber.")
 
     plt.rc('text', usetex=True)
     
@@ -332,6 +495,12 @@ if __name__=="__main__":
             print(f"Continuing after {last_stem}, {len(h5Files)} file(s) remaining.")
         else:
             print("No existing plots found in outDir, starting from the beginning.")
+
+    if args.tstart is not None:
+        before = len(h5Files)
+        h5Files = [f for f in h5Files
+                    if h5.File(f, 'r')["time"][0] >= args.tstart]
+        print(f"--tstart={args.tstart}: kept {len(h5Files)}/{before} file(s) with t >= {args.tstart}")
 
     def prescan_quantity(files, key):
         lo, hi = None, None
@@ -391,6 +560,8 @@ if __name__=="__main__":
                 colorKey = "u"
             elif args.noi:
                 colorKey = "noi"
+            elif args.conditionNumber:
+                colorKey = "conditionNumber"
             else:
                 colorKey = "rho"
             print(f"Pre-scanning {len(h5Files)} file(s) for color limits...")
@@ -403,8 +574,9 @@ if __name__=="__main__":
 
     tasks = [(f, args.outDir, args.plotGradient, args.plotVelocity, args.stress,
               args.iNNL, args.openBorders, vmin, vmax,
-              args.pressure, args.energy, args.noi, args.combined, combined_vminmax,
-              args.markerSize, args.diff, first_frame_data, diff_vminmax)
+              args.pressure, args.energy, args.noi, args.conditionNumber,
+              args.threshold, args.combined, combined_vminmax,
+              args.markerSize, args.diff, first_frame_data, diff_vminmax, args.hi)
              for f in h5Files]
 
     nworkers = min(args.workers, len(tasks)) if tasks else 1

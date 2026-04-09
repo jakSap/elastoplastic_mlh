@@ -118,7 +118,7 @@ def get_output_prefix(args):
     else:                      return ""
 
 def plotKernelCircle(data, iHi, pos, ax):
-    h = float(data["h"][iHi])
+    h = float(data["sml"][iHi])
     ax.scatter(pos[iHi, 0], pos[iHi, 1], s=5., marker='+', color='cyan', zorder=5)
     circle = Circle((pos[iHi, 0], pos[iHi, 1]), h, fill=False,
                     edgecolor='cyan', linewidth=0.5, zorder=5)
