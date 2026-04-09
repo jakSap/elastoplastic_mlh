@@ -33,8 +33,8 @@ Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i, Equ
 
     }
     else{
-        Logger(WARN) << "Warning, AijNorm = 0 encountered, i = " << i;
-        Logger(WARN) << "Aborting for debugging";
+        //Logger(WARN) << "Warning, AijNorm = 0 encountered, i = " << i;
+        //Logger(WARN) << "Aborting for debugging";
         // exit(6);
 	
         hatAij[0] = 0;
