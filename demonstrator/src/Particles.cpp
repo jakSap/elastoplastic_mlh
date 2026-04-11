@@ -563,7 +563,17 @@ void Particles::gridNNS(Domain &domain, const double &kernelSize){
         domain.getNeighborCells(cell[i], cells);
         // do nearest neighbor search
         int noiBuf = 0;
+#if VARIABLE_SML
+        // With variable smoothing lengths the grid is sized by the global
+        // h_max, but a pair (i,j) only needs to be neighbours when the
+        // distance is within max(sml[i], sml[j]).  Using the tighter
+        // per-pair criterion keeps the neighbour lists compact and avoids
+        // blowing MAX_NUM_INTERACTIONS for interior particles just because
+        // a few boundary particles have large h.
+        const double hi = sml[i];
+#else
         const double hSqr = kernelSize * kernelSize;
+#endif
         for (int iNeighbor=0; iNeighbor<numSearchCells; ++iNeighbor){
             // loop over particle indices in all
             if (cells[iNeighbor] < 0){
@@ -575,6 +585,10 @@ void Particles::gridNNS(Domain &domain, const double &kernelSize){
                                       + pow(y[iPrtcl] - y[i], 2);
 #if DIM == 3
                         dSqr += pow(z[iPrtcl] - z[i], 2);
+#endif
+#if VARIABLE_SML
+                        const double hPair = std::max(hi, sml[iPrtcl]);
+                        const double hSqr = hPair * hPair;
 #endif
                         if (dSqr < hSqr) {
                             if (noiBuf >= MAX_NUM_INTERACTIONS) {
@@ -3110,6 +3124,7 @@ void Particles::updateGhostState(Particles &ghostParticles){
 #if DIM==3
             ghostParticles.vz[ghostMap[i]] = vz[i/(DIM+1)];
 #endif
+            ghostParticles.sml[ghostMap[i]] = sml[i/(DIM+1)];
 #if ELASTIC
             ghostParticles.Sxx[ghostMap[i]] = Sxx[i/(DIM+1)];
             ghostParticles.Sxy[ghostMap[i]] = Sxy[i/(DIM+1)];
@@ -3164,15 +3179,25 @@ void Particles::updateGhostGradients(Particles &ghostParticles){
 }*/
 
 void Particles::ghostNNS(Domain &domain, const Particles &ghostParticles, const double &kernelSize){
+#if !VARIABLE_SML
     const double hSqr = kernelSize * kernelSize;
+#endif
     for(int i=0; i<N; ++i){
         int noiBuf = 0;
+#if VARIABLE_SML
+        const double hi = sml[i];
+#endif
         for(int iGhost=0; iGhost<ghostParticles.N; ++iGhost){
             double dSqr = pow(ghostParticles.x[iGhost] - x[i], 2)
                           + pow(ghostParticles.y[iGhost] - y[i], 2);
 #if DIM == 3
             Logger(ERROR) << "Ghost cells not implemented for 3D simulations. - Aborting.";
         exit(2);
+#endif
+#if VARIABLE_SML
+            // Ghost's parent sml is copied into ghostParticles.sml[iGhost]
+            const double hPair = std::max(hi, ghostParticles.sml[iGhost]);
+            const double hSqr = hPair * hPair;
 #endif
             if (dSqr < hSqr){
                 if(noiBuf >= MAX_NUM_GHOST_INTERACTIONS){
