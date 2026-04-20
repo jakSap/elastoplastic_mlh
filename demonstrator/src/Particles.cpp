@@ -117,22 +117,25 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     PGrad = new double[numParticles][DIM];
 
 #if ELASTIC
-    Sxx = new double[numParticles];
-    Sxy = new double[numParticles];
-    Syy = new double[numParticles];
+    // value-initialize (zero) so stress starts at the Murnaghan equilibrium
+    // for u = 0. Uninitialized memory here breaks stationary ICs where no
+    // velocity gradient exists to wash out the garbage.
+    Sxx = new double[numParticles]();
+    Sxy = new double[numParticles]();
+    Syy = new double[numParticles]();
 
-    SxxGrad = new double[numParticles][DIM];
-    SxyGrad = new double[numParticles][DIM];
-    SyyGrad = new double[numParticles][DIM];
+    SxxGrad = new double[numParticles][DIM]();
+    SxyGrad = new double[numParticles][DIM]();
+    SyyGrad = new double[numParticles][DIM]();
 
 #if DIM == 3
-    Sxz = new double[numParticles];
-    Syz = new double[numParticles];
-    Szz = new double[numParticles];
+    Sxz = new double[numParticles]();
+    Syz = new double[numParticles]();
+    Szz = new double[numParticles]();
 
-    SxzGrad = new double[numParticles][DIM];
-    SyzGrad = new double[numParticles][DIM];
-    SzzGrad = new double[numParticles][DIM];
+    SxzGrad = new double[numParticles][DIM]();
+    SyzGrad = new double[numParticles][DIM]();
+    SzzGrad = new double[numParticles][DIM]();
 #endif // DIM == 3
 #endif // ELASTIC
 
@@ -448,6 +451,29 @@ void Particles::integrateStressTensor(const double &dt) {
         Sxz[i] = sxz + dt*k2_xz;
         Syz[i] = syz + dt*k2_yz;
 #endif
+
+#if PLASTICITY
+        // --- Von Mises yield criterion (radial return) ---
+        {
+#if DIM == 2
+            const double J2 = 0.5 * (Sxx[i]*Sxx[i] + Syy[i]*Syy[i]
+                                      + 2.0*Sxy[i]*Sxy[i]);
+            const double Y2_over_d = YIELD_STRESS * YIELD_STRESS / 2.0;
+#else
+            const double J2 = 0.5 * (Sxx[i]*Sxx[i] + Syy[i]*Syy[i] + Szz[i]*Szz[i]
+                                      + 2.0*(Sxy[i]*Sxy[i] + Sxz[i]*Sxz[i] + Syz[i]*Syz[i]));
+            const double Y2_over_d = YIELD_STRESS * YIELD_STRESS / 3.0;
+#endif
+            if (J2 > Y2_over_d) {
+                const double f = Y2_over_d / J2;
+                Sxx[i] *= f;  Syy[i] *= f;  Sxy[i] *= f;
+#if DIM == 3
+                Szz[i] *= f;  Sxz[i] *= f;  Syz[i] *= f;
+#endif
+            }
+        }
+#endif // PLASTICITY
+
     }
 }
 #endif // ELASTIC

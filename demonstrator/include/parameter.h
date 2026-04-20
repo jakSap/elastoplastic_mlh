@@ -9,7 +9,7 @@
 #define DIM 2
 
 /// define if periodic boundaries should be employed
-#define PERIODIC_BOUNDARIES 1
+#define PERIODIC_BOUNDARIES 0
 
 /// define if timestep is adaptive
 #define ADAPTIVE_TIMESTEP 1
@@ -18,7 +18,7 @@
 #define CFL .2           // TODO: move to config
 
 /// maximum number of interactions for each particle
-#define MAX_NUM_INTERACTIONS 250
+#define MAX_NUM_INTERACTIONS 200
 
 /// use a per-particle, iteratively determined smoothing length (Hopkins 2015,
 /// see Martin's master thesis section 3.4.2). When 0, the global
@@ -69,6 +69,12 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 /* Simulate elastic dynamics*/
 #define ELASTIC 1
 #define SHEAR_MODULUS 0.22
+/// Enable von Mises plasticity (1 = on, 0 = off).
+/// When enabled, the deviatoric stress is clamped to the yield surface
+/// after each integration half-step via a radial return.
+#define PLASTICITY 0
+/// Von Mises yield stress Y0 (only used when PLASTICITY is 1).
+#define YIELD_STRESS 0.1
 // #define SHEAR_MODULUS 0
 /** maximum interactions with ghost particles
  *  ignored when `PERIODIC_BOUNDARIES` is not set
@@ -143,7 +149,7 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 #define ENERGY_FLOOR -1
 
 // Output per-particle condition number of the gradient estimation matrix E
-#define OUTPUT_CONDITION_NUMBER 0
+#define OUTPUT_CONDITION_NUMBER 1
 
 // Use per-particle local reference density rho0 for Murnaghan EOS.
 // 1: rho0 is stored per particle and initialized from initial density (local rho0)
