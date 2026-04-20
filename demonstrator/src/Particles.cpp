@@ -1469,9 +1469,16 @@ void Particles::compDensity(){
         compOmega(i);
         rho[i] = m[i]*omega[i];
         if(rho[i] <= 0.){
-            Logger(ERROR) << "Zero or negative density @" << i;
-            exit(6);
+            if (DENSITY_FLOOR < 0){
+                Logger(DEBUG) << "Negative density encountered, i = " << i << ". Aborting for debugging.";
+                exit(6);
+            }
+            else{
+                Logger(INFO) << "Negative density encountered, i = " << i << ". Using density floor!";
+                rho[i] = DENSITY_FLOOR;
+            }
         }
+        
         //if ((i - 0) % 30 == 0){
         //    Logger(DEBUG) << "density from ghosts: i = " << i << ", dnst = " << rho[i];
         //}
@@ -1714,6 +1721,9 @@ void Particles::compOmega(int i){
 
     }
     omega[i] = omg + kernel(0., hi); // add self interaction to normalization factor
+    if (omega[i] < 0){
+        Logger(WARN) << "Negative Omega encountered, i = " << i;
+    }
 }
 
 void Particles::compPsijTilde(Helper &helper){

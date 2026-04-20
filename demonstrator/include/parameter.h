@@ -159,4 +159,7 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 // using pressure floor to avoid predicting negative pressures
 //#define PRESSURE_FLOOR 1e-8
 
+// Use density floor
+#define DENSITY_FLOOR .01
+
 #endif //DEMONSTRATOR_PARAMETER_H

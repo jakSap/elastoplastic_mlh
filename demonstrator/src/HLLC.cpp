@@ -647,8 +647,21 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
     const double rhoLinv = (WL[0] > 0.0) ? 1.0 / WL[0] : 0.0;
     const double rhoRinv = (WR[0] > 0.0) ? 1.0 / WR[0] : 0.0;
     if (WL[0] < 0 | WL[0] < 0){
-        Logger(DEBUG) << "Negative density encountered. Aborting for debugging.";
-        exit(6);
+        if (DENSITY_FLOOR < 0){
+            Logger(DEBUG) << "Negative density encountered. Aborting for debugging.";
+            exit(6);
+        }
+        else{
+            Logger(INFO) << "Negative density encountered. Using density floor!";
+            if (WL[0] < 0){
+                Logger(INFO) << " For WL";
+                WL[0] = DENSITY_FLOOR;
+            }
+            if (WR[0] < 0){
+                Logger(INFO) << " For WR";
+                WR[0] = DENSITY_FLOOR;
+            }
+        }
     }
 
     if (Sstar >= 0.0){
