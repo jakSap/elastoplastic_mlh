@@ -580,6 +580,13 @@ void Particles::assignParticlesAndCells(Domain &domain){
 }
 
 void Particles::gridNNS(Domain &domain, const double &kernelSize){
+    int maxNoi = 0;
+    long noiSum = 0;
+    int nNearLimit = 0;
+    // Warn threshold: log once per step how many particles are filling more
+    // than ~80% of the nnl buffer, so the approach to MAX_NUM_INTERACTIONS
+    // is visible well before the hard abort.
+    const int nearLimit = (MAX_NUM_INTERACTIONS * 4) / 5;
     // loop over particles
     for(int i=0; i<N; ++i){
         int numSearchCells = pow(3, DIM);
@@ -633,6 +640,18 @@ void Particles::gridNNS(Domain &domain, const double &kernelSize){
             Logger(WARN) << "No neighbors for particle " << i << ". Caution.";
         }
         noi[i] = noiBuf;
+        if (noiBuf > maxNoi) maxNoi = noiBuf;
+        noiSum += noiBuf;
+        if (noiBuf >= nearLimit) ++nNearLimit;
+    }
+    Logger(DEBUG) << "      > NNS noi[max/mean] = " << maxNoi << " / "
+                  << ((double)noiSum / (double)N)
+                  << " (MAX_NUM_INTERACTIONS = " << MAX_NUM_INTERACTIONS << ")";
+    if (nNearLimit > 0){
+        Logger(WARN) << "gridNNS: " << nNearLimit << " particles with noi >= "
+                     << nearLimit << "/" << MAX_NUM_INTERACTIONS
+                     << " (max noi = " << maxNoi
+                     << "). Approaching the hard limit.";
     }
 }
 
@@ -1510,12 +1529,14 @@ void Particles::updateAllSmoothingLengths(){
     int maxIters = 0;
     int unconverged = 0;
     int clamped = 0;
+    int stuck = 0;
     double hMinObs = std::numeric_limits<double>::max();
     double hMaxObs = 0.;
     double hSum = 0.;
     for (int i = 0; i < N; ++i){
         double h = sml[i];
         bool converged = false;
+        bool rescued  = false;
         int it = 0;
         for (it = 0; it < smlMaxIter; ++it){
             // self contribution at r = 0
@@ -1542,7 +1563,16 @@ void Particles::updateAllSmoothingLengths(){
             double f      = V * n_h - smlNNNTarget;
             double fPrime = dV * n_h + V * dn_dh;
             if (fPrime == 0.){
-                Logger(WARN) << "updateAllSmoothingLengths: f' = 0 at i = " << i;
+                // Self-only case: V(h)*W(0,h) is h-invariant, so no h solves
+                // f = 0. Reset to the reference kernelSize so sml is not
+                // frozen at a stale value (often a previous hMax clamp);
+                // the next step's NNS may pick up neighbors and a normal
+                // Newton iteration can resume. The particle is in a safe,
+                // known state, so it does not contribute to the bad-state
+                // fraction used by the warn / panic thresholds below.
+                h = smlH0;
+                ++stuck;
+                rescued = true;
                 break;
             }
             double dh = -f / fPrime;
@@ -1564,7 +1594,7 @@ void Particles::updateAllSmoothingLengths(){
         sml[i] = h;
         totalIters += it;
         if (it > maxIters) maxIters = it;
-        if (!converged) ++unconverged;
+        if (!converged && !rescued) ++unconverged;
         const bool atBound = (h <= smlHMin) || (h >= smlHMax);
         if (atBound) ++clamped;
         if (h < hMinObs) hMinObs = h;
@@ -1575,6 +1605,7 @@ void Particles::updateAllSmoothingLengths(){
                   << ", max = " << maxIters
                   << ", unconverged = " << unconverged
                   << ", clamped = " << clamped
+                  << ", stuck = " << stuck
                   << ", h[min/mean/max] = " << hMinObs << " / "
                   << (hSum/(double)N) << " / " << hMaxObs;
     // Union of the two bad-state sets is bounded above by their sum, which
@@ -1604,12 +1635,14 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
     int maxIters = 0;
     int unconverged = 0;
     int clamped = 0;
+    int stuck = 0;
     double hMinObs = std::numeric_limits<double>::max();
     double hMaxObs = 0.;
     double hSum = 0.;
     for (int i = 0; i < N; ++i){
         double h = sml[i];
         bool converged = false;
+        bool rescued  = false;
         int it = 0;
         for (it = 0; it < smlMaxIter; ++it){
             double n_h   = Kernel::cubicSpline(0., h);
@@ -1646,7 +1679,10 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
             double f      = V * n_h - smlNNNTarget;
             double fPrime = dV * n_h + V * dn_dh;
             if (fPrime == 0.){
-                Logger(WARN) << "updateAllSmoothingLengths: f' = 0 at i = " << i;
+                // See the non-ghost variant for rationale.
+                h = smlH0;
+                ++stuck;
+                rescued = true;
                 break;
             }
             double dh = -f / fPrime;
@@ -1666,7 +1702,7 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
         sml[i] = h;
         totalIters += it;
         if (it > maxIters) maxIters = it;
-        if (!converged) ++unconverged;
+        if (!converged && !rescued) ++unconverged;
         const bool atBound = (h <= smlHMin) || (h >= smlHMax);
         if (atBound) ++clamped;
         if (h < hMinObs) hMinObs = h;
@@ -1677,6 +1713,7 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
                   << ", max = " << maxIters
                   << ", unconverged = " << unconverged
                   << ", clamped = " << clamped
+                  << ", stuck = " << stuck
                   << ", h[min/mean/max] = " << hMinObs << " / "
                   << (hSum/(double)N) << " / " << hMaxObs;
     const double badFrac = (double)(unconverged + clamped) / (double)N;
@@ -1842,10 +1879,42 @@ void Particles::gradient(double *f, double (*grad)[DIM]){
             grad[i][alpha] = 0;
         }
 
+        // Hopkins 2015 fallback: when E is too ill-conditioned for the
+        // matrix-inverse MFM gradient, switch this particle to the
+        // 0th-order-consistent SPH kernel-sum gradient instead.
+        const bool useSPH = (COND_MAX_FOR_GRADIENT > 0.
+                             && conditionNumber[i] > COND_MAX_FOR_GRADIENT);
+
         for (int j = 0; j < noi[i]; ++j) {
-            for (int alpha = 0; alpha < DIM; ++alpha) {
-                grad[i][alpha] += (f[nnl[j + i * MAX_NUM_INTERACTIONS]] - f[i])
-                                  * psijTilde_xi[j + i * MAX_NUM_INTERACTIONS][alpha];
+            int jIdx = nnl[j + i * MAX_NUM_INTERACTIONS];
+            if (COND_MAX_NEIGHBOR_FOR_GRADIENT > 0. && conditionNumber[jIdx] > COND_MAX_NEIGHBOR_FOR_GRADIENT) {
+                continue;
+            }
+            if (noi[jIdx] < MIN_NOI_FOR_NEIGHBOR_USE) {
+                continue;
+            }
+            if (useSPH){
+                const double dx = x[i] - x[jIdx];
+                const double dy = y[i] - y[jIdx];
+                double r2 = dx*dx + dy*dy;
+#if DIM == 3
+                const double dz = z[i] - z[jIdx];
+                r2 += dz*dz;
+#endif
+                const double r = sqrt(r2);
+                if (r <= 0.) continue;
+                const double dW = Kernel::dWdr(r, sml[i]);
+                const double w  = m[jIdx] * (f[jIdx] - f[i]) * dW / (r * rho[i]);
+                grad[i][0] += w * dx;
+                grad[i][1] += w * dy;
+#if DIM == 3
+                grad[i][2] += w * dz;
+#endif
+            } else {
+                for (int alpha = 0; alpha < DIM; ++alpha) {
+                    grad[i][alpha] += (f[jIdx] - f[i])
+                                      * psijTilde_xi[j + i * MAX_NUM_INTERACTIONS][alpha];
+                }
             }
         }
     }
@@ -2165,6 +2234,13 @@ double Particles::compElasticTimestep(){
 #endif // ELASTIC
 
 void Particles::compRiemannStatesLR(const double &dt){
+    // Rate-limited diagnostics for free-surface reconstruction blow-ups.
+    // Triggers when the final reconstructed rho falls below DENSITY_FLOOR
+    // or the reconstructed velocity magnitude exceeds EXTREME_V.
+    int nExtremeLogged = 0;
+    const int MAX_EXTREME_LOGS = 5;
+    const double EXTREME_V = 10.;
+
     for (int i=0; i<N; ++i){
         double xij[DIM];
         //double vFrame[DIM];
@@ -2303,6 +2379,13 @@ void Particles::compRiemannStatesLR(const double &dt){
             //                << ", xj = [" << x[j] << ", " << y[j] << "] @" << j;
                 //exit(5);
             //}
+            // Raw (pre-extrap) snapshot for diagnostic logging.
+            double WijR_raw[DIM+2], WijL_raw[DIM+2];
+            for (int nu = 0; nu < DIM+2; ++nu){
+                WijR_raw[nu] = WijR[iW][nu];
+                WijL_raw[nu] = WijL[iW][nu];
+            }
+
             // reconstruction at effective face
             WijR[iW][0] += Helper::dotProduct(rhoGrad[i], xijxi);
             WijL[iW][0] += Helper::dotProduct(rhoGrad[j], xijxj);
@@ -2316,6 +2399,13 @@ void Particles::compRiemannStatesLR(const double &dt){
             WijR[iW][4] += Helper::dotProduct(vzGrad[i], xijxi);
             WijL[iW][4] += Helper::dotProduct(vzGrad[j], xijxj);
 #endif // DIM == 3
+
+            // Post-grad-extrap snapshot for diagnostics.
+            double WijR_extrap[DIM+2], WijL_extrap[DIM+2];
+            for (int nu = 0; nu < DIM+2; ++nu){
+                WijR_extrap[nu] = WijR[iW][nu];
+                WijL_extrap[nu] = WijL[iW][nu];
+            }
 
 #if DEBUG_LVL
             if(i == 184 && jn == 0){
@@ -2340,6 +2430,13 @@ void Particles::compRiemannStatesLR(const double &dt){
                 WijL[iW][nu] = pairwiseLimiter(WijL[iW][nu], WijL_buf[nu], WijR_buf[nu], xijxj_abs, xjxi_abs);
             }
 #endif // PAIRWISE_LIMITER
+
+            // Post-pairwise-limiter snapshot for diagnostics.
+            double WijR_pwl[DIM+2], WijL_pwl[DIM+2];
+            for (int nu = 0; nu < DIM+2; ++nu){
+                WijR_pwl[nu] = WijR[iW][nu];
+                WijL_pwl[nu] = WijL[iW][nu];
+            }
 
 #if DEBUG_LVL
             if(i == 184 && jn == 0){
@@ -2469,12 +2566,68 @@ void Particles::compRiemannStatesLR(const double &dt){
 #endif // ELASTIC
 #endif // DIM == 3
 
-            //if (i == 46){// && jn == 28){
-            //    Logger(DEBUG) << "        j = " << j
-            //                  << ", rhoL = " << WijL[iW][0] << ", rhoR = " << WijR[iW][0]
-            //                  << ", uL = " << WijL[iW][2] << ", uR = " << WijR[iW][2]
-            //                  << ", PL = " << WijL[iW][1] << ", PR = " << WijR[iW][1];
-            //}
+            // Free-surface diagnostic: dump the per-stage breakdown whenever
+            // the final reconstructed rho falls below DENSITY_FLOOR or a
+            // reconstructed velocity magnitude exceeds EXTREME_V. Rate-limited
+            // to MAX_EXTREME_LOGS pairs per call so the log stays manageable.
+            {
+                bool pathologicalR = (WijR[iW][0] < DENSITY_FLOOR) ||
+                                     (fabs(WijR[iW][2]) > EXTREME_V) ||
+                                     (fabs(WijR[iW][3]) > EXTREME_V);
+                bool pathologicalL = (WijL[iW][0] < DENSITY_FLOOR) ||
+                                     (fabs(WijL[iW][2]) > EXTREME_V) ||
+                                     (fabs(WijL[iW][3]) > EXTREME_V);
+                if ((pathologicalR || pathologicalL) && nExtremeLogged < MAX_EXTREME_LOGS){
+                    ++nExtremeLogged;
+                    Logger(DEBUG) << "EXTREME reconstruction @ pair (i=" << i
+                                  << ", j=" << j << "): xi=[" << x[i] << "," << y[i]
+                                  << "] xj=[" << x[j] << "," << y[j]
+                                  << "] noi[i]=" << noi[i] << " noi[j]=" << noi[j]
+#if OUTPUT_CONDITION_NUMBER
+                                  << " cond[i]=" << conditionNumber[i]
+                                  << " cond[j]=" << conditionNumber[j]
+#endif
+                                  ;
+                    Logger(DEBUG) << "  |xijxi|=" << sqrt(xijxi[0]*xijxi[0]+xijxi[1]*xijxi[1])
+                                  << "  |xijxj|=" << sqrt(xijxj[0]*xijxj[0]+xijxj[1]*xijxj[1])
+                                  << "  sml[i]=" << sml[i] << "  sml[j]=" << sml[j];
+                    Logger(DEBUG) << "  rho[i]=" << rho[i] << "  rho[j]=" << rho[j]
+                                  << "  P[i]="  << P[i]   << "  P[j]="  << P[j];
+                    Logger(DEBUG) << "  rhoGrad[i]=[" << rhoGrad[i][0] << "," << rhoGrad[i][1]
+                                  << "]  rhoGrad[j]=[" << rhoGrad[j][0] << "," << rhoGrad[j][1] << "]";
+                    Logger(DEBUG) << "  PGrad[i]=[" << PGrad[i][0] << "," << PGrad[i][1]
+                                  << "]  PGrad[j]=[" << PGrad[j][0] << "," << PGrad[j][1] << "]";
+                    Logger(DEBUG) << "  vxGrad[i]=[" << vxGrad[i][0] << "," << vxGrad[i][1]
+                                  << "]  vxGrad[j]=[" << vxGrad[j][0] << "," << vxGrad[j][1] << "]";
+                    Logger(DEBUG) << "  vyGrad[i]=[" << vyGrad[i][0] << "," << vyGrad[i][1]
+                                  << "]  vyGrad[j]=[" << vyGrad[j][0] << "," << vyGrad[j][1] << "]";
+                    Logger(DEBUG) << "  RAW:    rhoR=" << WijR_raw[0]    << " PR=" << WijR_raw[1]
+                                  << " vxR=" << WijR_raw[2] << " vyR=" << WijR_raw[3]
+                                  << " | rhoL=" << WijL_raw[0]    << " PL=" << WijL_raw[1]
+                                  << " vxL=" << WijL_raw[2] << " vyL=" << WijL_raw[3];
+                    Logger(DEBUG) << "  EXTRAP: rhoR=" << WijR_extrap[0] << " PR=" << WijR_extrap[1]
+                                  << " vxR=" << WijR_extrap[2] << " vyR=" << WijR_extrap[3]
+                                  << " | rhoL=" << WijL_extrap[0] << " PL=" << WijL_extrap[1]
+                                  << " vxL=" << WijL_extrap[2] << " vyL=" << WijL_extrap[3];
+                    Logger(DEBUG) << "  PWL:    rhoR=" << WijR_pwl[0]    << " PR=" << WijR_pwl[1]
+                                  << " vxR=" << WijR_pwl[2] << " vyR=" << WijR_pwl[3]
+                                  << " | rhoL=" << WijL_pwl[0]    << " PL=" << WijL_pwl[1]
+                                  << " vxL=" << WijL_pwl[2] << " vyL=" << WijL_pwl[3];
+                    Logger(DEBUG) << "  FINAL:  rhoR=" << WijR[iW][0]    << " PR=" << WijR[iW][1]
+                                  << " vxR=" << WijR[iW][2] << " vyR=" << WijR[iW][3]
+                                  << " | rhoL=" << WijL[iW][0]    << " PL=" << WijL[iW][1]
+                                  << " vxL=" << WijL[iW][2] << " vyL=" << WijL[iW][3];
+                }
+            }
+
+            // Clamp reconstructed density to the floor. Free-surface particles
+            // with steep rhoGrad can have extrapolation drive rho below zero at
+            // the quadrature point; without this the corrupted state feeds HLLC
+            // and NaN propagates through the subsequent flux update.
+            if (DENSITY_FLOOR > 0.){
+                if (WijR[iW][0] < DENSITY_FLOOR) WijR[iW][0] = DENSITY_FLOOR;
+                if (WijL[iW][0] < DENSITY_FLOOR) WijL[iW][0] = DENSITY_FLOOR;
+            }
 
         }
     }
@@ -3476,36 +3629,71 @@ void Particles::gradient(double *f, double (*grad)[DIM], double *fGhost, const P
             grad[i][alpha] = 0;
         }
 
-        //Logger(DEBUG) << "      > noi[" << i << "] = " << noi[i]
-        //              << ", noiGhosts[" << i << "] = " << noiGhosts[i];
-
-        //if(i == 86) Logger(DEBUG) << "fi[" << i << "] = " << f[i];
+        // Hopkins 2015 fallback: when E is too ill-conditioned for the
+        // matrix-inverse MFM gradient, switch this particle to the
+        // 0th-order-consistent SPH kernel-sum gradient instead.
+        const bool useSPH = (COND_MAX_FOR_GRADIENT > 0.
+                             && conditionNumber[i] > COND_MAX_FOR_GRADIENT);
 
         for (int j = 0; j < noi[i]; ++j) {
-            for (int alpha = 0; alpha < DIM; ++alpha) {
-                grad[i][alpha] += (f[nnl[j + i * MAX_NUM_INTERACTIONS]] - f[i])
-                                  //* psijTilde_xi[nnl[j + i * MAX_NUM_INTERACTIONS]+i*MAX_NUM_INTERACTIONS][alpha];
-                                  * psijTilde_xi[j + i * MAX_NUM_INTERACTIONS][alpha];
-
-                //if(i == 6){
-                //    Logger(DEBUG) << "psijTilde_xi[" << alpha << "]@" << nnl[j + i * MAX_NUM_INTERACTIONS]
-                //              << " = " << psijTilde_xi[nnl[j + i * MAX_NUM_INTERACTIONS]][alpha]
-                //              << ", f[" << nnl[j + i * MAX_NUM_INTERACTIONS] << "] = " << f[nnl[j + i * MAX_NUM_INTERACTIONS]];
-                //}
+            int jIdx = nnl[j + i * MAX_NUM_INTERACTIONS];
+            if (COND_MAX_NEIGHBOR_FOR_GRADIENT > 0. && conditionNumber[jIdx] > COND_MAX_NEIGHBOR_FOR_GRADIENT) {
+                continue;
+            }
+            if (noi[jIdx] < MIN_NOI_FOR_NEIGHBOR_USE) {
+                continue;
+            }
+            if (useSPH){
+                const double dx = x[i] - x[jIdx];
+                const double dy = y[i] - y[jIdx];
+                double r2 = dx*dx + dy*dy;
+#if DIM == 3
+                const double dz = z[i] - z[jIdx];
+                r2 += dz*dz;
+#endif
+                const double r = sqrt(r2);
+                if (r <= 0.) continue;
+                const double dW = Kernel::dWdr(r, sml[i]);
+                const double w  = m[jIdx] * (f[jIdx] - f[i]) * dW / (r * rho[i]);
+                grad[i][0] += w * dx;
+                grad[i][1] += w * dy;
+#if DIM == 3
+                grad[i][2] += w * dz;
+#endif
+            } else {
+                for (int alpha = 0; alpha < DIM; ++alpha) {
+                    grad[i][alpha] += (f[jIdx] - f[i])
+                                      * psijTilde_xi[j + i * MAX_NUM_INTERACTIONS][alpha];
+                }
             }
         }
 
         for (int j = 0; j < noiGhosts[i]; ++j) {
-            for (int alpha = 0; alpha < DIM; ++alpha) {
-                grad[i][alpha] += (fGhost[nnlGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS]] - f[i])
-                                  //* psijTilde_xiGhosts[nnlGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS]+i*MAX_NUM_GHOST_INTERACTIONS][alpha];
-                                  * psijTilde_xiGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS][alpha];
-                // if(i == 86){
-                //    Logger(DEBUG) << "psijTildeGhost_xi[" << alpha << "]@" << nnlGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS]
-                //              << " = " << ghostParticles.psijTilde_xi[nnlGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS]][alpha]
-                //              << ", fGhost[" << nnlGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS] << "] = " << fGhost[nnlGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS]];
-                //}
-                            }
+            int gIdx = nnlGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS];
+            if (useSPH){
+                const double dx = x[i] - ghostParticles.x[gIdx];
+                const double dy = y[i] - ghostParticles.y[gIdx];
+                double r2 = dx*dx + dy*dy;
+#if DIM == 3
+                const double dz = z[i] - ghostParticles.z[gIdx];
+                r2 += dz*dz;
+#endif
+                const double r = sqrt(r2);
+                if (r <= 0.) continue;
+                const double dW = Kernel::dWdr(r, sml[i]);
+                const double w  = ghostParticles.m[gIdx] * (fGhost[gIdx] - f[i])
+                                  * dW / (r * rho[i]);
+                grad[i][0] += w * dx;
+                grad[i][1] += w * dy;
+#if DIM == 3
+                grad[i][2] += w * dz;
+#endif
+            } else {
+                for (int alpha = 0; alpha < DIM; ++alpha) {
+                    grad[i][alpha] += (fGhost[gIdx] - f[i])
+                                      * psijTilde_xiGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS][alpha];
+                }
+            }
         }
 
         //Logger(DEBUG) << "        > grad[" << i << "] = [" << grad[i][0] << ", "
@@ -3711,12 +3899,10 @@ void Particles::compRiemannStatesLR(const double &dt,
 #endif // ELASTIC
 #endif // DIM == 3
 
-           //if (i == 46) // && iW == 28){
-           //     Logger(DEBUG) << "        j = " << j
-           //                   << ", rhoL = " << WijLGhosts[iW][0] << ", rhoR = " << WijRGhosts[iW][0]
-           //                   << ", uL = " << WijLGhosts[iW][2] << ", uR = " << WijRGhosts[iW][2]
-           //                   << ", PL = " << WijLGhosts[iW][1] << ", PR = " << WijRGhosts[iW][1];
-            //}
+            if (DENSITY_FLOOR > 0.){
+                if (WijRGhosts[iW][0] < DENSITY_FLOOR) WijRGhosts[iW][0] = DENSITY_FLOOR;
+                if (WijLGhosts[iW][0] < DENSITY_FLOOR) WijLGhosts[iW][0] = DENSITY_FLOOR;
+            }
 
         }
     }

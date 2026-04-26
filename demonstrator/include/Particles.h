@@ -182,6 +182,12 @@ public:
     /// h to 0 or blow it up past the NNS search radius.
     double smlHMin        { 0. };
     double smlHMax        { 0. };
+    /// Reference h (== config.kernelSize), set by MeshlessScheme. Used by the
+    /// Newton iteration to rescue particles whose derivative collapses to 0
+    /// (self-contribution dominates): V(h)*W(0,h) is h-invariant, so f' = 0
+    /// and no h solves f = 0. Resetting h to smlH0 keeps sml from being
+    /// frozen at a stale clamp value until the particle reacquires neighbors.
+    double smlH0          { 0. };
     /// Fraction of particles that may end the iteration in a bad state
     /// (unconverged or clamped at a bound) before WARN / ERROR+exit kicks in.
     double smlWarnFraction  { SML_WARN_FRACTION };

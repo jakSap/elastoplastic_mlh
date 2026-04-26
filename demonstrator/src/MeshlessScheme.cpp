@@ -27,6 +27,7 @@ MeshlessScheme::MeshlessScheme(Configuration config, Particles *particles,
     // Particles stores absolute bounds and does not need to know kernelSize.
     particles->smlHMin          = config.smlHMinFactor * config.kernelSize;
     particles->smlHMax          = config.smlHMaxFactor * config.kernelSize;
+    particles->smlH0            = config.kernelSize;
     particles->smlWarnFraction  = config.smlWarnFraction;
     particles->smlPanicFraction = config.smlPanicFraction;
 #endif
@@ -197,6 +198,42 @@ void MeshlessScheme::run(){
 #endif // SLOPE_LIMITING
 #else // PERIODIC_BOUNDARIES
         particles->compPsijTilde(helper);
+
+#if OUTPUT_CONDITION_NUMBER
+        // Diagnostic: identify the particles with the worst (largest)
+        // condition number. A high conditionNumber means the E matrix is
+        // near-singular and the gradient estimator is unreliable. We want
+        // to correlate bad gradients with the EXTREME reconstruction events.
+        {
+            const int TOP = 5;
+            int    worst[TOP];
+            double worstVal[TOP];
+            for (int k = 0; k < TOP; ++k) { worst[k] = -1; worstVal[k] = -1.; }
+            for (int i = 0; i < particles->N; ++i){
+                double c = particles->conditionNumber[i];
+                if (!(c > worstVal[TOP-1])) continue;
+                int k = TOP - 1;
+                while (k > 0 && c > worstVal[k-1]){
+                    worst[k] = worst[k-1];
+                    worstVal[k] = worstVal[k-1];
+                    --k;
+                }
+                worst[k] = i;
+                worstVal[k] = c;
+            }
+            for (int k = 0; k < TOP; ++k){
+                int i = worst[k];
+                if (i < 0) break;
+                Logger(DEBUG) << "      > worst cond[" << k << "] @ i=" << i
+                              << " cond=" << worstVal[k]
+                              << " x=[" << particles->x[i] << "," << particles->y[i] << "]"
+                              << " v=[" << particles->vx[i] << "," << particles->vy[i] << "]"
+                              << " rho=" << particles->rho[i]
+                              << " sml=" << particles->sml[i];
+            }
+        }
+#endif
+
         particles->gradient(particles->rho, particles->rhoGrad);
         particles->gradient(particles->vx, particles->vxGrad);
         particles->gradient(particles->vy, particles->vyGrad);

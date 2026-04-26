@@ -118,11 +118,18 @@ def get_output_prefix(args):
     else:                      return ""
 
 def plotKernelCircle(data, iHi, pos, ax):
-    h = float(data["sml"][iHi])
-    ax.scatter(pos[iHi, 0], pos[iHi, 1], s=5., marker='+', color='cyan', zorder=5)
+    sml = data["sml"][:]
+    h = float(sml[iHi])
+    h_avg = float(np.mean(sml))
+    print(f"  Particle {iHi}: h = {h:.6g}  |  avg h (all particles) = {h_avg:.6g}")
+    ax.scatter(pos[iHi, 0], pos[iHi, 1], s=5., marker='+', color='red', zorder=5)
     circle = Circle((pos[iHi, 0], pos[iHi, 1]), h, fill=False,
-                    edgecolor='cyan', linewidth=0.5, zorder=5)
+                    edgecolor='red', linewidth=0.5, zorder=5)
     ax.add_patch(circle)
+    ax.annotate(f"$h_i={h:.4g}$\n$\\bar{{h}}={h_avg:.4g}$",
+                xy=(pos[iHi, 0], pos[iHi, 1]),
+                xytext=(-40, 10), textcoords='offset points',
+                fontsize=6, color='red', zorder=6)
 
 def plotNNL(h5File, iNNL, pos, ax):
     data = h5.File(str(h5File).replace(".h5", "NNL.h5"), 'r')

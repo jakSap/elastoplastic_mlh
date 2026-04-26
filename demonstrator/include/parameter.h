@@ -162,4 +162,23 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 // Use density floor
 #define DENSITY_FLOOR .01
 
+// On particles whose E-matrix conditioning is so bad that the matrix-inverse
+// MFM gradient estimator amplifies noise, fall back to the standard
+// 0th-order-consistent SPH gradient (Hopkins 2015 prescription) computed with
+// the same `cubicSpline`/`dWdr` and `h_i` as MFM. Per-particle, all gradient
+// quantities (rho, P, v, S) switch together. Set to a negative value to
+// disable the fallback (gradient stays MFM regardless of conditioning).
+#define COND_MAX_FOR_GRADIENT 100.
+
+// Attempt-5 neighbor-side filters (skip a neighbor whose own E is sick or
+// whose stencil is sparse). DISABLED — Attempt 5 in
+// MA-Obsidian/DEBUG/colliding_rings_negative_density_reconstruction.md
+// found these filters made per-pair extremes worse, because the propagation
+// of sick lab-velocity values through Riemann fluxes is a separate physics
+// problem (free-surface tensile instability), not a gradient-estimator one.
+// Kept for future experimentation; set COND_MAX_NEIGHBOR_FOR_GRADIENT > 0
+// or MIN_NOI_FOR_NEIGHBOR_USE > 0 to re-enable.
+#define COND_MAX_NEIGHBOR_FOR_GRADIENT -1.
+#define MIN_NOI_FOR_NEIGHBOR_USE 0
+
 #endif //DEMONSTRATOR_PARAMETER_H
