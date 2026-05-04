@@ -406,16 +406,16 @@ void Particles::integrateStressTensor(const double &dt) {
         // --- RK2 midpoint method ---
         // k1 = f(S^n): Jaumann rotation terms depend on current S
 #if DIM == 2
-        double k1_xx = visc_xx - sxy*R_xy             + adv_xx;
-        double k1_yy = visc_yy + sxy*R_xy             + adv_yy;
-        double k1_xy = visc_xy + 0.5*(sxx-syy)*R_xy   + adv_xy;
+        double k1_xx = visc_xx - sxy*R_xy;
+        double k1_yy = visc_yy + sxy*R_xy;
+        double k1_xy = visc_xy + 0.5*(sxx-syy)*R_xy;
 #elif DIM == 3
-        double k1_xx = visc_xx - sxy*R_xy - sxz*R_xz                               + adv_xx;
-        double k1_yy = visc_yy + sxy*R_xy - syz*R_yz                               + adv_yy;
-        double k1_zz = visc_zz + sxz*R_xz + syz*R_yz                               + adv_zz;
-        double k1_xy = visc_xy + 0.5*(sxx-syy)*R_xy - 0.5*syz*R_xz - 0.5*sxz*R_yz + adv_xy;
-        double k1_xz = visc_xz + 0.5*(sxx-szz)*R_xz - 0.5*syz*R_xy + 0.5*sxy*R_yz + adv_xz;
-        double k1_yz = visc_yz + 0.5*(syy-szz)*R_yz + 0.5*sxz*R_xy + 0.5*sxy*R_xz + adv_yz;
+        double k1_xx = visc_xx - sxy*R_xy - sxz*R_xz;
+        double k1_yy = visc_yy + sxy*R_xy - syz*R_yz;
+        double k1_zz = visc_zz + sxz*R_xz + syz*R_yz;
+        double k1_xy = visc_xy + 0.5*(sxx-syy)*R_xy - 0.5*syz*R_xz - 0.5*sxz*R_yz;
+        double k1_xz = visc_xz + 0.5*(sxx-szz)*R_xz - 0.5*syz*R_xy + 0.5*sxy*R_yz;
+        double k1_yz = visc_yz + 0.5*(syy-szz)*R_yz + 0.5*sxz*R_xy + 0.5*sxy*R_xz;
 #endif
 
         // S_mid = S^n + (dt/2) * k1
@@ -430,16 +430,16 @@ void Particles::integrateStressTensor(const double &dt) {
 
         // k2 = f(S_mid): re-evaluate Jaumann terms at midpoint
 #if DIM == 2
-        double k2_xx = visc_xx - sxy_m*R_xy               + adv_xx;
-        double k2_yy = visc_yy + sxy_m*R_xy               + adv_yy;
-        double k2_xy = visc_xy + 0.5*(sxx_m-syy_m)*R_xy   + adv_xy;
+        double k2_xx = visc_xx - sxy_m*R_xy;
+        double k2_yy = visc_yy + sxy_m*R_xy;
+        double k2_xy = visc_xy + 0.5*(sxx_m-syy_m)*R_xy;
 #elif DIM == 3
-        double k2_xx = visc_xx - sxy_m*R_xy - sxz_m*R_xz                                   + adv_xx;
-        double k2_yy = visc_yy + sxy_m*R_xy - syz_m*R_yz                                   + adv_yy;
-        double k2_zz = visc_zz + sxz_m*R_xz + syz_m*R_yz                                   + adv_zz;
-        double k2_xy = visc_xy + 0.5*(sxx_m-syy_m)*R_xy - 0.5*syz_m*R_xz - 0.5*sxz_m*R_yz + adv_xy;
-        double k2_xz = visc_xz + 0.5*(sxx_m-szz_m)*R_xz - 0.5*syz_m*R_xy + 0.5*sxy_m*R_yz + adv_xz;
-        double k2_yz = visc_yz + 0.5*(syy_m-szz_m)*R_yz + 0.5*sxz_m*R_xy + 0.5*sxy_m*R_xz + adv_yz;
+        double k2_xx = visc_xx - sxy_m*R_xy - sxz_m*R_xz;
+        double k2_yy = visc_yy + sxy_m*R_xy - syz_m*R_yz;
+        double k2_zz = visc_zz + sxz_m*R_xz + syz_m*R_yz;
+        double k2_xy = visc_xy + 0.5*(sxx_m-syy_m)*R_xy - 0.5*syz_m*R_xz - 0.5*sxz_m*R_yz;
+        double k2_xz = visc_xz + 0.5*(sxx_m-szz_m)*R_xz - 0.5*syz_m*R_xy + 0.5*sxy_m*R_yz;
+        double k2_yz = visc_yz + 0.5*(syy_m-szz_m)*R_yz + 0.5*sxz_m*R_xy + 0.5*sxy_m*R_xz;
 #endif
 
         // S^{n+1} = S^n + dt * k2
