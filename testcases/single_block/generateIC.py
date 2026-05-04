@@ -25,6 +25,10 @@ if __name__ == "__main__":
                         default=0.025, help="particle spacing (default: 0.025)")
     parser.add_argument("--velocity", "-v", metavar="float", type=float,
                         default=0.059, help="x-velocity of the block (default: 0.059)")
+    parser.add_argument("--vy", metavar="float", type=float,
+                        default=0.0, help="y-velocity of the block (default: 0.0)")
+    parser.add_argument("--radius", "-r", metavar="float", type=float,
+                        default=0.25, help="half-size of the block (default: 0.25)")
     parser.add_argument("--density", metavar="float", type=float,
                         default=1.0, help="reference particle density (default: 1.0)")
     parser.add_argument("--u", metavar="float", type=float,
@@ -40,13 +44,14 @@ if __name__ == "__main__":
 
     delta_p = args.delta_p
     v_p     = args.velocity
+    vy_p    = args.vy
     density = args.density
     u_const = args.u
     fillUp  = args.fillUp
 
-    # Block: 0.5 x 0.5, centered at origin within the 1x1 domain
-    block_size = 0.5
-    half = block_size / 2.0  # 0.25
+    # Block centered at origin within the 1x1 domain
+    half = args.radius
+    block_size = 2.0 * half
 
     # 2D particle mass from area per particle
     mass = delta_p**2 * density
@@ -81,8 +86,12 @@ if __name__ == "__main__":
     else:
         vel[:, 0] = v_p
 
+    vel[:, 1] = vy_p
+
     mean_vx = np.mean(vel[:, 0])
     print('Mean vx: ', mean_vx)
+    mean_vy = np.mean(vel[:, 1])
+    print('Mean vy: ', mean_vy)
 
     m          = np.ones(N) * mass
     u          = np.ones(N) * u_const

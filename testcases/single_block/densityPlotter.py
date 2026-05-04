@@ -26,8 +26,8 @@ def setDomainLimits(ax, pos, h5File, openBorders):
             ax.set_xlim((pos[:,0].min() - margin, pos[:,0].max() + margin))
             ax.set_ylim((pos[:,1].min() - margin, pos[:,1].max() + margin))
     elif "Ghosts" not in str(h5File):
-        ax.set_xlim((0., 1.))
-        ax.set_ylim((0., 1.))
+        ax.set_xlim((-.5, .5))
+        ax.set_ylim((-.5, .5))
 
 def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1):
     data = h5.File(h5File, 'r')
