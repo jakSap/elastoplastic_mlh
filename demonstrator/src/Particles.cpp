@@ -1879,11 +1879,20 @@ void Particles::gradient(double *f, double (*grad)[DIM]){
             grad[i][alpha] = 0;
         }
 
-        // Hopkins 2015 fallback: when E is too ill-conditioned for the
-        // matrix-inverse MFM gradient, switch this particle to the
-        // 0th-order-consistent SPH kernel-sum gradient instead.
-        const bool useSPH = (COND_MAX_FOR_GRADIENT > 0.
-                             && conditionNumber[i] > COND_MAX_FOR_GRADIENT);
+        // Hopkins 2015 MFM <-> SPH blend weight from conditionNumber[i].
+        double wSPH = 0.;
+        if (COND_MAX_FOR_GRADIENT > 0.){
+            const double c = conditionNumber[i];
+            if (COND_BLEND_HI > COND_MAX_FOR_GRADIENT){
+                if      (c <= COND_MAX_FOR_GRADIENT) wSPH = 0.;
+                else if (c >= COND_BLEND_HI)         wSPH = 1.;
+                else wSPH = (c - COND_MAX_FOR_GRADIENT)
+                          / (COND_BLEND_HI - COND_MAX_FOR_GRADIENT);
+            } else {
+                wSPH = (c > COND_MAX_FOR_GRADIENT) ? 1. : 0.;
+            }
+        }
+        const double wMFM = 1. - wSPH;
 
         for (int j = 0; j < noi[i]; ++j) {
             int jIdx = nnl[j + i * MAX_NUM_INTERACTIONS];
@@ -1893,7 +1902,13 @@ void Particles::gradient(double *f, double (*grad)[DIM]){
             if (noi[jIdx] < MIN_NOI_FOR_NEIGHBOR_USE) {
                 continue;
             }
-            if (useSPH){
+            if (wMFM > 0.){
+                for (int alpha = 0; alpha < DIM; ++alpha) {
+                    grad[i][alpha] += wMFM * (f[jIdx] - f[i])
+                                      * psijTilde_xi[j + i * MAX_NUM_INTERACTIONS][alpha];
+                }
+            }
+            if (wSPH > 0.){
                 const double dx = x[i] - x[jIdx];
                 const double dy = y[i] - y[jIdx];
                 double r2 = dx*dx + dy*dy;
@@ -1904,17 +1919,12 @@ void Particles::gradient(double *f, double (*grad)[DIM]){
                 const double r = sqrt(r2);
                 if (r <= 0.) continue;
                 const double dW = Kernel::dWdr(r, sml[i]);
-                const double w  = m[jIdx] * (f[jIdx] - f[i]) * dW / (r * rho[i]);
+                const double w  = wSPH * m[jIdx] * (f[jIdx] - f[i]) * dW / (r * rho[i]);
                 grad[i][0] += w * dx;
                 grad[i][1] += w * dy;
 #if DIM == 3
                 grad[i][2] += w * dz;
 #endif
-            } else {
-                for (int alpha = 0; alpha < DIM; ++alpha) {
-                    grad[i][alpha] += (f[jIdx] - f[i])
-                                      * psijTilde_xi[j + i * MAX_NUM_INTERACTIONS][alpha];
-                }
             }
         }
     }
@@ -2912,6 +2922,37 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 }
 
 void Particles::collectFluxes(Helper &helper){
+#if DIAG_COND_ENABLE
+    static int diagStepCounter = 0;
+    static int diagActivatedAt = -1;
+    static int diagTarget = -1;
+    ++diagStepCounter;
+    bool diagActive = false;
+
+    if (diagTarget < 0) {
+        double worstCond = DIAG_COND_TRIGGER;
+        int worstIdx = -1;
+        for (int k = 0; k < N; ++k) {
+            if (conditionNumber[k] > worstCond) {
+                worstCond = conditionNumber[k];
+                worstIdx = k;
+            }
+        }
+        if (worstIdx >= 0) {
+            diagTarget = worstIdx;
+            diagActivatedAt = diagStepCounter;
+            Logger(DEBUG) << "TARGET DIAG LOCKED i=" << diagTarget
+                          << " cond=" << worstCond
+                          << " diagStep=" << diagStepCounter
+                          << " xi=[" << x[diagTarget] << "," << y[diagTarget] << "]"
+                          << " vi=[" << vx[diagTarget] << "," << vy[diagTarget] << "]";
+        }
+    }
+    if (diagTarget >= 0
+        && diagStepCounter - diagActivatedAt < DIAG_WINDOW_STEPS) {
+        diagActive = true;
+    }
+#endif
     for (int i=0; i<N; ++i){
         mF[i] = 0.;
 
@@ -2960,14 +3001,22 @@ void Particles::collectFluxes(Helper &helper){
 
             eF[i] += Fij[ii][1];
 
-            // if (i == 588){
-            //    // Logger(DEBUG) << "  > j = " << nnl[ii] << ", AijNorm = " << AijNorm
-            //    //           << ", vFrame = [" << vFrame[ii][0] << ", " << vFrame[ii][1] << "]";
-            //    Logger(DEBUG) << "  > j = " << nnl[ii] <<  " > Fm = " << Fij[ii][0] << ", Fv = [" << Fij[ii][2] << ", " << Fij[ii][3]
-            //                  << "], dFe = " << Fij[ii][1]
-            //                 //  << " v_ij = " << vFrame[ii][0] << " " << vFrame[i][1]
-            //                  ;
-            // }
+#if DIAG_COND_ENABLE
+            if (diagActive && i == diagTarget){
+                int jIdx = nnl[ii];
+                double dx = x[jIdx] - x[i];
+                double dy = y[jIdx] - y[i];
+                double rij = sqrt(dx*dx + dy*dy);
+                Logger(DEBUG) << "TARGET DIAG PAIR i=" << i
+                              << " j=" << jIdx
+                              << " dxij=[" << dx << "," << dy << "]"
+                              << " rij=" << rij
+                              << " Fxy_pair=[" << Fij[ii][2] << "," << Fij[ii][3] << "]"
+                              << " Aij=[" << Aij[ii][0] << "," << Aij[ii][1] << "]"
+                              << " cond_j=" << conditionNumber[jIdx]
+                              << " noi_j=" << noi[jIdx];
+            }
+#endif
 
         }
 
@@ -3020,6 +3069,23 @@ void Particles::collectFluxes(Helper &helper){
                             //  << " v_ij = " << vFrame[ii][0] << " " << vFrame[i][1]
                              ;
             }
+        }
+#endif
+
+#if DIAG_COND_ENABLE
+        if (diagActive && i == diagTarget){
+            // Per-step NET dump AFTER all neighbours summed. F_net = -vF
+            // because updateState does Q[1] -= dt*vF[i][0].
+            Logger(DEBUG) << "TARGET DIAG NET diagStep=" << diagStepCounter
+                          << " activatedAt=" << diagActivatedAt
+                          << " i=" << i
+                          << " xi=[" << x[i] << "," << y[i] << "]"
+                          << " vi=[" << vx[i] << "," << vy[i] << "]"
+                          << " rho=" << rho[i] << " P=" << P[i]
+                          << " sml=" << sml[i] << " noi=" << noi[i]
+                          << " cond=" << conditionNumber[i]
+                          << " vF=[" << vF[i][0] << "," << vF[i][1] << "]"
+                          << " Fnet=[" << -vF[i][0] << "," << -vF[i][1] << "]";
         }
 #endif
     }
@@ -3629,11 +3695,20 @@ void Particles::gradient(double *f, double (*grad)[DIM], double *fGhost, const P
             grad[i][alpha] = 0;
         }
 
-        // Hopkins 2015 fallback: when E is too ill-conditioned for the
-        // matrix-inverse MFM gradient, switch this particle to the
-        // 0th-order-consistent SPH kernel-sum gradient instead.
-        const bool useSPH = (COND_MAX_FOR_GRADIENT > 0.
-                             && conditionNumber[i] > COND_MAX_FOR_GRADIENT);
+        // Hopkins 2015 MFM <-> SPH blend weight from conditionNumber[i].
+        double wSPH = 0.;
+        if (COND_MAX_FOR_GRADIENT > 0.){
+            const double c = conditionNumber[i];
+            if (COND_BLEND_HI > COND_MAX_FOR_GRADIENT){
+                if      (c <= COND_MAX_FOR_GRADIENT) wSPH = 0.;
+                else if (c >= COND_BLEND_HI)         wSPH = 1.;
+                else wSPH = (c - COND_MAX_FOR_GRADIENT)
+                          / (COND_BLEND_HI - COND_MAX_FOR_GRADIENT);
+            } else {
+                wSPH = (c > COND_MAX_FOR_GRADIENT) ? 1. : 0.;
+            }
+        }
+        const double wMFM = 1. - wSPH;
 
         for (int j = 0; j < noi[i]; ++j) {
             int jIdx = nnl[j + i * MAX_NUM_INTERACTIONS];
@@ -3643,7 +3718,13 @@ void Particles::gradient(double *f, double (*grad)[DIM], double *fGhost, const P
             if (noi[jIdx] < MIN_NOI_FOR_NEIGHBOR_USE) {
                 continue;
             }
-            if (useSPH){
+            if (wMFM > 0.){
+                for (int alpha = 0; alpha < DIM; ++alpha) {
+                    grad[i][alpha] += wMFM * (f[jIdx] - f[i])
+                                      * psijTilde_xi[j + i * MAX_NUM_INTERACTIONS][alpha];
+                }
+            }
+            if (wSPH > 0.){
                 const double dx = x[i] - x[jIdx];
                 const double dy = y[i] - y[jIdx];
                 double r2 = dx*dx + dy*dy;
@@ -3654,23 +3735,24 @@ void Particles::gradient(double *f, double (*grad)[DIM], double *fGhost, const P
                 const double r = sqrt(r2);
                 if (r <= 0.) continue;
                 const double dW = Kernel::dWdr(r, sml[i]);
-                const double w  = m[jIdx] * (f[jIdx] - f[i]) * dW / (r * rho[i]);
+                const double w  = wSPH * m[jIdx] * (f[jIdx] - f[i]) * dW / (r * rho[i]);
                 grad[i][0] += w * dx;
                 grad[i][1] += w * dy;
 #if DIM == 3
                 grad[i][2] += w * dz;
 #endif
-            } else {
-                for (int alpha = 0; alpha < DIM; ++alpha) {
-                    grad[i][alpha] += (f[jIdx] - f[i])
-                                      * psijTilde_xi[j + i * MAX_NUM_INTERACTIONS][alpha];
-                }
             }
         }
 
         for (int j = 0; j < noiGhosts[i]; ++j) {
             int gIdx = nnlGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS];
-            if (useSPH){
+            if (wMFM > 0.){
+                for (int alpha = 0; alpha < DIM; ++alpha) {
+                    grad[i][alpha] += wMFM * (fGhost[gIdx] - f[i])
+                                      * psijTilde_xiGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS][alpha];
+                }
+            }
+            if (wSPH > 0.){
                 const double dx = x[i] - ghostParticles.x[gIdx];
                 const double dy = y[i] - ghostParticles.y[gIdx];
                 double r2 = dx*dx + dy*dy;
@@ -3681,18 +3763,13 @@ void Particles::gradient(double *f, double (*grad)[DIM], double *fGhost, const P
                 const double r = sqrt(r2);
                 if (r <= 0.) continue;
                 const double dW = Kernel::dWdr(r, sml[i]);
-                const double w  = ghostParticles.m[gIdx] * (fGhost[gIdx] - f[i])
+                const double w  = wSPH * ghostParticles.m[gIdx] * (fGhost[gIdx] - f[i])
                                   * dW / (r * rho[i]);
                 grad[i][0] += w * dx;
                 grad[i][1] += w * dy;
 #if DIM == 3
                 grad[i][2] += w * dz;
 #endif
-            } else {
-                for (int alpha = 0; alpha < DIM; ++alpha) {
-                    grad[i][alpha] += (fGhost[gIdx] - f[i])
-                                      * psijTilde_xiGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS][alpha];
-                }
             }
         }
 

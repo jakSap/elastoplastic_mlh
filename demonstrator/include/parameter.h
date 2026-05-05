@@ -17,8 +17,11 @@
 /// define Courant-Friedrichs-Levy number, should be smaller than 1
 #define CFL .2           // TODO: move to config
 
-/// maximum number of interactions for each particle
-#define MAX_NUM_INTERACTIONS 200
+/// maximum number of interactions for each particle.
+/// With hMaxFactor=4.0 (hMax=0.4), a tensile particle at the edge of
+/// initial-density material (rho=1.0, n=400/unit^2) has up to
+/// pi*0.16*400 ~ 200 neighbors; 400 gives safe headroom.
+#define MAX_NUM_INTERACTIONS 400
 
 /// use a per-particle, iteratively determined smoothing length (Hopkins 2015,
 /// see Martin's master thesis section 3.4.2). When 0, the global
@@ -151,6 +154,17 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 // Output per-particle condition number of the gradient estimation matrix E
 #define OUTPUT_CONDITION_NUMBER 1
 
+// Diagnostic: dump per-pair Riemann-flux contributions to the first particle
+// whose conditionNumber crosses DIAG_COND_TRIGGER. The target particle is
+// selected dynamically (highest cond above the threshold on the first step
+// where any particle exceeds it), then tracked for DIAG_WINDOW_STEPS further
+// calls to collectFluxes.
+// DIAG_COND_ENABLE: set to 1 to enable, 0 to disable.
+// DIAG_COND_TRIGGER: threshold as a double literal (not used in #if).
+#define DIAG_COND_ENABLE     1
+#define DIAG_COND_TRIGGER    1000.
+#define DIAG_WINDOW_STEPS    100
+
 // Use per-particle local reference density rho0 for Murnaghan EOS.
 // 1: rho0 is stored per particle and initialized from initial density (local rho0)
 // 0: rho0 from the global EOS parameter is used for all particles
@@ -162,13 +176,24 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 // Use density floor
 #define DENSITY_FLOOR .01
 
-// On particles whose E-matrix conditioning is so bad that the matrix-inverse
-// MFM gradient estimator amplifies noise, fall back to the standard
-// 0th-order-consistent SPH gradient (Hopkins 2015 prescription) computed with
-// the same `cubicSpline`/`dWdr` and `h_i` as MFM. Per-particle, all gradient
-// quantities (rho, P, v, S) switch together. Set to a negative value to
-// disable the fallback (gradient stays MFM regardless of conditioning).
+// Hopkins 2015 MFM <-> SPH gradient blend, controlled per particle by
+// conditionNumber[i]. The output gradient is
+//   grad = (1 - w) * grad_MFM + w * grad_SPH
+// with w determined by a linear ramp:
+//   cond <= COND_MAX_FOR_GRADIENT  -> w = 0  (pure MFM, bulk)
+//   cond >= COND_BLEND_HI          -> w = 1  (pure SPH, sick particle)
+//   in between                     -> w = (cond - lo) / (hi - lo)
+// When COND_BLEND_HI <= COND_MAX_FOR_GRADIENT, the ramp degenerates to a
+// hard switch at COND_MAX_FOR_GRADIENT (Attempt-6 behaviour). The SPH side
+// uses the same `cubicSpline`/`dWdr` and `h_i` as MFM. Per-particle, all
+// gradient quantities (rho, P, v, S) blend with the same w.
+// Set COND_MAX_FOR_GRADIENT to a negative value to disable the fallback
+// entirely (gradient stays MFM regardless of conditioning).
 #define COND_MAX_FOR_GRADIENT 100.
+// Negative -> blend disabled, hard switch at COND_MAX_FOR_GRADIENT.
+// (A7 with LO=100/HI=1000 and A8 with LO=10/HI=100 both regressed
+// vs Attempt 6's hard switch — see sph_fallback_attempts.md.)
+#define COND_BLEND_HI         -1.
 
 // Attempt-5 neighbor-side filters (skip a neighbor whose own E is sick or
 // whose stencil is sparse). DISABLED — Attempt 5 in
