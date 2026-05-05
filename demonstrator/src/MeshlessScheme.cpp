@@ -2,6 +2,8 @@
 // Created by Johannes Martin on 21.09.22.
 //
 
+#include <chrono>
+
 #include "../include/MeshlessScheme.h"
 
 
@@ -34,6 +36,7 @@ MeshlessScheme::MeshlessScheme(Configuration config, Particles *particles,
 }
 
 void MeshlessScheme::run(){
+    auto tStart = std::chrono::steady_clock::now();
     double t = 0;
     int step = 0;
 
@@ -436,6 +439,9 @@ void MeshlessScheme::run(){
         // END DEBUGGING
 
     } while(t<config.timeEnd+timeStep);
+
+    double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - tStart).count() / 60.0;
+    Logger(INFO) << "Total wall-clock time: " << elapsed << " min";
 }
 
 MeshlessScheme::~MeshlessScheme(){}
