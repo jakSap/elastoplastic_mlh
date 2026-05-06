@@ -106,13 +106,22 @@ int main(int argc, char *argv[]){
     Logger(INFO) << "    > Adiabatic index for ideal gas EOS hydro_gamma = " << config.hydro_gamma;
     EquationOfState MeshlessEOS(config.hydro_gamma);
 #elif EOS == 1
-    config.K0 = confP.getVal<double>("MURN_K0");
-    Logger(INFO) << "    > Bulk modulus for Murnaghan EOS K0 = " << config.K0;
-    config.murn_n = confP.getVal<double>("MURN_n");
-    Logger(INFO) << "    > Murnaghan exponent for Murnaghan EOS n = " << config.murn_n;
-    config.rho0 = confP.getVal<double>("MURN_rho0");
-    Logger(INFO) << "    > Relaxed density for Murnaghan EOS rho0 = " << config.rho0;
-    EquationOfState MeshlessEOS(config.K0, config.murn_n, config.rho0);
+    std::vector<MurnaghanMaterial> mats;
+    Logger(INFO) << "    > Reading Murnaghan EOS material table ...";
+    for (auto &mEntry : confP.getObjList("materials")) {
+        MurnaghanMaterial m;
+        int id   = mEntry.getVal<int>   ("matId");
+        m.K0     = mEntry.getVal<double>("K0");
+        m.n      = mEntry.getVal<double>("n");
+        m.rho0   = mEntry.getVal<double>("rho0");
+        m.mu     = mEntry.getVal<double>("mu");
+        if ((int)mats.size() <= id) mats.resize(id + 1);
+        mats[id] = m;
+        Logger(INFO) << "    > Material " << id
+                     << ": K0=" << m.K0 << ", n=" << m.n
+                     << ", rho0=" << m.rho0 << ", mu=" << m.mu;
+    }
+    EquationOfState MeshlessEOS(std::move(mats));
 #elif EOS == 2
     config.TIL_A = confP.getVal<double>("TIL_A");
     Logger(INFO) << "   > Tillotson EOS A_T = " << config.TIL_A;

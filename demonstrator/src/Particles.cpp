@@ -104,9 +104,6 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     rho = new double[numParticles];
     P = new double[numParticles];
     sml = new double[numParticles];
-#if EOS == 1 && LOCAL_RHO0
-    rho0 = new double[numParticles];
-#endif
     x = new double[numParticles];
     y = new double[numParticles];
     vx = new double[numParticles];
@@ -226,9 +223,6 @@ Particles::~Particles() {
     delete[] P;
     delete[] rho;
     delete[] sml;
-#if EOS == 1 && LOCAL_RHO0
-    delete[] rho0;
-#endif
     delete[] x;
     delete[] y;
     delete[] vx;
@@ -324,18 +318,14 @@ Particles::~Particles() {
 #endif
 }
 
-#if EOS == 1 && LOCAL_RHO0
-void Particles::initRho0(){
-    for (int i = 0; i < N; ++i) rho0[i] = rho[i];
-    Logger(INFO) << "   Initialized rho0 to rho locally";
-}
-#endif
-
 #if ELASTIC
 void Particles::integrateStressTensor(const double &dt) {
-    const double mu = SHEAR_MODULUS;
-
     for (int i = 0; i < N; ++i) {
+#if EOS == 1
+        const double mu = MeshlessEOS->EOSShearModulus(matId[i]);
+#else
+        const double mu = 0.;
+#endif
         // Velocity gradients
         const double dvx_dx = vxGrad[i][0];
         const double dvx_dy = vxGrad[i][1];
@@ -659,7 +649,11 @@ void Particles::gridNNS(Domain &domain, const double &kernelSize){
 // For comparable ICs: This sets the internal energies so that P = 2.5 everywhere
 void Particles::setInternalEnergy(double Pressure, const double hydro_gamma){
     for (int i = 0; i < N; i++){
+#if EOS == 1
+        u[i] = MeshlessEOS->EOSInternalEnergy(matId[i], rho[i], Pressure);
+#else
         u[i] = MeshlessEOS->EOSInternalEnergy(rho[i], Pressure);
+#endif
     }
 }
 
@@ -1932,13 +1926,11 @@ void Particles::gradient(double *f, double (*grad)[DIM]){
 
 void Particles::compPressure(){
     for (int i=0; i<N; ++i){
-#if EOS == 1 && LOCAL_RHO0
-        P[i] = MeshlessEOS->EOSPressure(rho[i], u[i], rho0[i]);
+#if EOS == 1
+        P[i] = MeshlessEOS->EOSPressure(matId[i], rho[i], u[i]);
 #else
         P[i] = MeshlessEOS->EOSPressure(rho[i], u[i]);
 #endif
-        // P[i] = MeshlessEOS->EOSPressure(rho[i], u[i]); // Use this for globally constant rho0
-        // std::cout << P[i] << std::endl;
 //#if DIM == 3
 //        P[i] = (hydro_gamma-1.)*rho[i]*(u[i]+.5*(vx[i]*vx[i]+vy[i]*vy[i]+vz[i]*vz[i]));
 //#else
@@ -2152,9 +2144,8 @@ double Particles::compGlobalTimestep(){
     double dt_ = std::numeric_limits<double>::max();
     for (int i=0; i<N; ++i){
         double vSig = std::numeric_limits<double>::min();
-        // double ci = sqrt(hydro_gamma*P[i]/rho[i]); // soundspeed @i
-#if EOS == 1 && LOCAL_RHO0
-        double ci = MeshlessEOS->EOSSoundSpeed(rho[i], -1, P[i], rho0[i]);
+#if EOS == 1
+        double ci = MeshlessEOS->EOSSoundSpeed(matId[i], rho[i], -1, P[i]);
 #else
         double ci = MeshlessEOS->EOSSoundSpeed(rho[i], -1, P[i]);
 #endif
@@ -2162,8 +2153,8 @@ double Particles::compGlobalTimestep(){
         for (int jn=0; jn<noi[i]; ++jn){
             int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
 
-#if EOS == 1 && LOCAL_RHO0
-            double cj = MeshlessEOS->EOSSoundSpeed(rho[j], -1, P[j], rho0[j]);
+#if EOS == 1
+            double cj = MeshlessEOS->EOSSoundSpeed(matId[j], rho[j], -1, P[j]);
 #else
             double cj = MeshlessEOS->EOSSoundSpeed(rho[j], -1, P[j]);
 #endif
@@ -2203,22 +2194,26 @@ double Particles::compElasticTimestep(){
         double vSig = std::numeric_limits<double>::min();
 
         // Elastic longitudinal wave speed (eq. 92)
-#if EOS == 1 && LOCAL_RHO0
-        double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i], rho0[i]);
+#if EOS == 1
+        double Ki  = MeshlessEOS->EOSBulkModulus(matId[i], rho[i], P[i]);
+        double mui = MeshlessEOS->EOSShearModulus(matId[i]);
 #else
-        double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
+        double Ki  = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
+        double mui = 0.;
 #endif
-        double ci = sqrt((Ki + 4.0/3.0 * SHEAR_MODULUS) / rho[i]);
+        double ci = sqrt((Ki + 4.0/3.0 * mui) / rho[i]);
 
         for (int jn=0; jn<noi[i]; ++jn){
             int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
 
-#if EOS == 1 && LOCAL_RHO0
-            double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j], rho0[j]);
+#if EOS == 1
+            double Kj  = MeshlessEOS->EOSBulkModulus(matId[j], rho[j], P[j]);
+            double muj = MeshlessEOS->EOSShearModulus(matId[j]);
 #else
-            double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j]);
+            double Kj  = MeshlessEOS->EOSBulkModulus(rho[j], P[j]);
+            double muj = 0.;
 #endif
-            double cj = sqrt((Kj + 4.0/3.0 * SHEAR_MODULUS) / rho[j]);
+            double cj = sqrt((Kj + 4.0/3.0 * muj) / rho[j]);
 
             double xij[DIM], vij[DIM];
             xij[0] = x[i] - x[j];
@@ -2492,9 +2487,9 @@ void Particles::compRiemannStatesLR(const double &dt){
             // energy
             // WijR[iW][1] -= dt/2. * (hydro_gamma*P[i] * viDiv + (vx[i]-vFrame[iW][0])*PGrad[i][0] + (vy[i]-vFrame[iW][1])*PGrad[i][1]);
             // WijL[iW][1] -= dt/2. * (hydro_gamma*P[j] * vjDiv + (vx[j]-vFrame[iW][0])*PGrad[j][0] + (vy[j]-vFrame[iW][1])*PGrad[j][1]);
-#if EOS == 1 && LOCAL_RHO0
-            double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i], rho0[i]);
-            double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j], rho0[j]);
+#if EOS == 1
+            double Ki = MeshlessEOS->EOSBulkModulus(matId[i], rho[i], P[i]);
+            double Kj = MeshlessEOS->EOSBulkModulus(matId[j], rho[j], P[j]);
 #else
             double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
             double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j]);
@@ -2796,7 +2791,15 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 double fSzzL = Szz[jj] + Helper::dotProduct(SzzGrad[jj], xijxj_loc);
 #endif
 #endif
-                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i, *MeshlessEOS
+#if USE_MATID
+                int matIdR_ii = matId[i];
+                int matIdL_ii = matId[nnl[ii]];
+#else
+                int matIdR_ii = 0;
+                int matIdL_ii = 0;
+#endif
+                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i,
+                                matIdL_ii, matIdR_ii, *MeshlessEOS
 #if ELASTIC
                                 , fSxxL, fSxyL, fSyyL
                                 , fSxxR, fSxyR, fSyyR
@@ -2808,7 +2811,15 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 };
                 solver.HLLCFlux(Fij[ii]);
 #else
-                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i, *MeshlessEOS};
+#if USE_MATID
+                int matIdR_ii = matId[i];
+                int matIdL_ii = matId[nnl[ii]];
+#else
+                int matIdR_ii = 0;
+                int matIdL_ii = 0;
+#endif
+                Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i,
+                                matIdL_ii, matIdR_ii, *MeshlessEOS};
                 solver.exact(Fij[ii]);
 #endif
             } else {
@@ -2893,7 +2904,15 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 double fSzzL = ghostParticles.Szz[jj] + Helper::dotProduct(ghostParticles.SzzGrad[jj], xijxj_loc);
 #endif
 #endif
-                Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i, *MeshlessEOS
+#if USE_MATID
+                int matIdR_g = matId[i];
+                int matIdL_g = ghostParticles.matId[nnlGhosts[ii]];
+#else
+                int matIdR_g = 0;
+                int matIdL_g = 0;
+#endif
+                Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i,
+                               matIdL_g, matIdR_g, *MeshlessEOS
 #if ELASTIC
                                , fSxxR, fSxyR, fSyyR
                                , fSxxL, fSxyL, fSyyL
@@ -2905,7 +2924,15 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 };
                 solver.HLLCFlux(FijGhosts[ii]);
 #else
-                Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i, *MeshlessEOS};
+#if USE_MATID
+                int matIdR_g = matId[i];
+                int matIdL_g = ghostParticles.matId[nnlGhosts[ii]];
+#else
+                int matIdR_g = 0;
+                int matIdL_g = 0;
+#endif
+                Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i,
+                               matIdL_g, matIdR_g, *MeshlessEOS};
                 solver.exact(FijGhosts[ii]);
 #endif
             } else {
@@ -3371,6 +3398,9 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
 void Particles::updateGhostState(Particles &ghostParticles){
     for (int i=0; i<N*(DIM+1); ++i){
         if (ghostMap[i] >= 0){
+#if USE_MATID
+            ghostParticles.matId[ghostMap[i]] = matId[i/(DIM+1)];
+#endif
             ghostParticles.rho[ghostMap[i]] = rho[i/(DIM+1)];
             ghostParticles.P[ghostMap[i]] = P[i/(DIM+1)];
             ghostParticles.omega[ghostMap[i]] = omega[i/(DIM+1)];
@@ -3939,9 +3969,9 @@ void Particles::compRiemannStatesLR(const double &dt,
             vjDiv += ghostParticles.vzGrad[j][2];
 #endif // DIM == 3
 
-#if EOS == 1 && LOCAL_RHO0
-            double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i], rho0[i]);
-            double Kj = MeshlessEOS->EOSBulkModulus(ghostParticles.rho[j], ghostParticles.P[j]);
+#if EOS == 1
+            double Ki = MeshlessEOS->EOSBulkModulus(matId[i], rho[i], P[i]);
+            double Kj = MeshlessEOS->EOSBulkModulus(ghostParticles.matId[j], ghostParticles.rho[j], ghostParticles.P[j]);
 #else
             double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
             double Kj = MeshlessEOS->EOSBulkModulus(ghostParticles.rho[j], ghostParticles.P[j]);

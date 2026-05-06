@@ -71,14 +71,15 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 
 /* Simulate elastic dynamics*/
 #define ELASTIC 1
-#define SHEAR_MODULUS 0.22
+// Shear modulus mu now lives per-material in the EOS material table
+// (see EquationOfState::MurnaghanMaterial.mu); look it up via
+// MeshlessEOS->EOSShearModulus(matId[i]).
 /// Enable von Mises plasticity (1 = on, 0 = off).
 /// When enabled, the deviatoric stress is clamped to the yield surface
 /// after each integration half-step via a radial return.
 #define PLASTICITY 0
 /// Von Mises yield stress Y0 (only used when PLASTICITY is 1).
 #define YIELD_STRESS 0.1
-// #define SHEAR_MODULUS 0
 /** maximum interactions with ghost particles
  *  ignored when `PERIODIC_BOUNDARIES` is not set
 **/
@@ -99,7 +100,10 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 #define MESHLESS_FINITE_MASS 1
 
 
-#define USE_MATID 0
+#define USE_MATID 1
+#if EOS == 1 && !USE_MATID
+#error "Murnaghan EOS (EOS == 1) requires USE_MATID == 1: per-particle matId drives the material table."
+#endif
 // Use HLLC or HLL solver for EOS != ideal gas
 #define USE_HLLC 1
 
@@ -164,11 +168,6 @@ For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
 #define DIAG_COND_ENABLE     1
 #define DIAG_COND_TRIGGER    1000.
 #define DIAG_WINDOW_STEPS    100
-
-// Use per-particle local reference density rho0 for Murnaghan EOS.
-// 1: rho0 is stored per particle and initialized from initial density (local rho0)
-// 0: rho0 from the global EOS parameter is used for all particles
-#define LOCAL_RHO0 0
 
 // using pressure floor to avoid predicting negative pressures
 //#define PRESSURE_FLOOR 1e-8

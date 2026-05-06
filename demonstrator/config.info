@@ -1,36 +1,38 @@
 ; h5 file containing the initial particle distribution
 ; generate with: python3 generateIC.py -d 0.025 -v 0.059 --plot
-initFile ../testcases/single_block/single_block_deltap0.005-2D.h5
+;initFile ../testcases/single_block/single_block_deltap0.005-2D_uniform.h5
 ;initFile ../testcases/single_block/single_block_deltap0.025-2D.h5
+initFile ../testcases/colliding_rings/vsml/rings_deltap0.05-2D.h5
 
 ; output directory for particle distribution h5 files
-outDir ../testcases/single_block/output
+;outDir ../testcases/single_block/uniform_v_run_0.025/output
+outDir ../testcases/colliding_rings/vsml/output
 
 ; fixed time step
 ; when ADAPTIVE_TIMESTEP is set in parameter.h,
 ; this gives the output timestep stride combined with h5DumpInterval
-timeStep 0.1
+timeStep 0.01
 
 ; end of the simulation
 timeEnd 40
 
 ; output particle distribution each h5DumpInterval steps
-h5DumpInterval 2
+h5DumpInterval 1
 
 ; periodic boundaries of box (1x1 domain centered at origin)
 ; ignored when PERIODIC_BOUNDARIES is not set in parameter.h
 periodicBoxLimits {
-    lowerX -0.25
-    lowerY -0.25
+    lowerX -0.5
+    lowerY -0.5
     lowerZ  0.
-    upperX  0.25
-    upperY  0.25
+    upperX  0.5
+    upperY  0.5
     upperZ  0.
 }
 
 ; kernel size for meshless scheme (roughly 2x mean particle distance)
 ; for delta_p = 0.025 -> kernelSize ~ 0.05
-kernelSize 0.02
+kernelSize 0.15
 
 ; variable smoothing length Newton iteration parameters.
 ; Only read when VARIABLE_SML is set to 1 in parameter.h; each key is
@@ -41,14 +43,14 @@ sml {
     ; relative convergence tolerance |dh|/h
     tol       1e-3
     ; hard cap on the number of Newton iterations per particle
-    maxIter   20
+    maxIter   200
     ; max allowed factor h_new/h_old per iteration (clamps overshoot)
     maxFactor 1.2
     ; hard lower / upper bound on h_i as a factor of kernelSize.
     ; Every Newton step clamps into [hMinFactor*kernelSize, hMaxFactor*kernelSize]
     ; so a single sick particle cannot collapse h to 0 or run it away.
     hMinFactor 0.1
-    hMaxFactor 4.0
+    hMaxFactor 3.0
     ; fraction of particles in a bad state (unconverged or clamped at a
     ; bound) at which the iteration logs a WARN / aborts the run.
     warnFraction  0.01
@@ -58,8 +60,15 @@ sml {
 ; adiabatic index (unused when EOS != 0, kept for config parser compatibility)
 hydro_gamma 1.6666666666666667
 
-; Murnaghan EOS parameters (used when EOS == 1 in parameter.h)
-; K0: bulk modulus, n: Murnaghan exponent, rho0: reference density
-MURN_K0   1.0
-MURN_n    2.0
-MURN_rho0 1.0
+; Murnaghan EOS material table (used when EOS == 1 in parameter.h).
+; Each entry binds a per-particle matId to its (K0, n, rho0, mu).
+; mu is the shear modulus used by ELASTIC; set to 0 for fluids.
+materials {
+    mat0 {
+        matId 0
+        K0    1.0
+        n     2.0
+        rho0  1.0
+        mu    0.22
+    }
+}

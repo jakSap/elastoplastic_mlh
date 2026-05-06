@@ -18,7 +18,8 @@ class Riemann {
 
 public:
     /// WR, WL and Aij must be pre-allocated
-    Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i, EquationOfState &MeshlessEOS
+    Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
+            int matIdR, int matIdL, EquationOfState &MeshlessEOS
 #if USE_HLLC && ELASTIC
             , double SxxR, double SxyR, double SyyR
             , double SxxL, double SxyL, double SyyL
@@ -64,6 +65,7 @@ private:
     EquationOfState MeshlessEOS;
 
     int i;
+    int matIdR, matIdL;
     double *WR, *WL, *vFrame, *Aij;
     double rhoSol, vSol[DIM], PSol, AijNorm;
     double hatAij[DIM];

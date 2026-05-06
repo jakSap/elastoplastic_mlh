@@ -7,9 +7,23 @@
 
 #include <cmath>
 #include <cassert>
+#include <vector>
 
 #include "parameter.h"
 #include "Logger.h"
+
+#if EOS == 1
+/// Per-material parameters for the Murnaghan EOS path. The shear modulus
+/// `mu` is bundled here even though it is a constitutive (not strictly EOS)
+/// quantity, so a single matId lookup yields all per-material parameters.
+/// Future plasticity work can extend this struct with Y0.
+struct MurnaghanMaterial {
+    double K0;       ///< bulk-modulus reference
+    double n;        ///< Murnaghan exponent
+    double rho0;     ///< reference density
+    double mu;       ///< shear modulus (constitutive)
+};
+#endif
 
 class EquationOfState {
 
@@ -18,10 +32,21 @@ public:
 #if EOS == 0
                 const double hydro_gamma
 #elif EOS == 1
-                const double K0, const double murn_n, const double rho0
+                std::vector<MurnaghanMaterial> mats
 #endif // EOS
     );
 
+#if EOS == 1
+    double EOSPressure(int matId, const double &rho, const double &u);
+    double EOSSoundSpeed(int matId, const double &rho, const double &u, const double &p);
+    double EOSInternalEnergy(int matId, const double &rho, const double &p);
+    double EOSEnergyFluxGamma(int matId, const double &rho, const double &p, const double &u);
+    double EOSAdiabaticSoundSpeed(int matId, const double &rho, const double &p);
+    double EOSGeneralGamma(int matId, const double &rho, const double &p);
+    double EOSBulkModulus(int matId, const double &rho, const double &p);
+    double EOSShearModulus(int matId);
+    const MurnaghanMaterial& EOSGetMaterial(int matId);
+#else
     double EOSPressure(const double &rho, const double &u);
     double EOSSoundSpeed(const double &rho, const double &u,
                         const double &p);
@@ -32,31 +57,17 @@ public:
     double EOSAdiabaticSoundSpeed(const double &rho, const double &p);
     double EOSGeneralGamma(const double &rho, const double &p);
     double EOSBulkModulus(const double &rho, const double &p);
-
-#if EOS == 1
-    // Overloads with explicit per-particle reference density (Murnaghan):
-    double EOSPressure(const double &rho, const double &u, const double &rho0_local);
-    double EOSSoundSpeed(const double &rho, const double &u, const double &p, const double &rho0_local);
-    double EOSInternalEnergy(const double &rho, const double &p, const double &rho0_local);
-    double EOSEnergyFluxGamma(const double &rho, const double &p, const double &u, const double &rho0_local);
-    double EOSAdiabaticSoundSpeed(const double &rho, const double &p, const double &rho0_local);
-    double EOSGeneralGamma(const double &rho, const double &p, const double &rho0_local);
-    double EOSBulkModulus(const double &rho, const double &p, const double &rho0_local);
-#endif
+#endif // EOS
 
 #if EOS == 0
     double EOSGetHydroGammaParam();
-#elif EOS == 1
-    double EOSGetMurnaghan_K0();
-    double EOSGetMurnaghan_n();
-    double EOSGetMurnaghan_rho0();
 #endif
 
 private:
 #if EOS == 0
     const double hydro_gamma;
 #elif EOS == 1
-    const double K0, murn_n, rho0;
+    std::vector<MurnaghanMaterial> materials;
 #endif
 };
 #endif // MESHLESSHYDRO_EQUATIONOFSTATE_H

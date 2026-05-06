@@ -42,11 +42,9 @@ public:
 #endif
 #if EOS == 0
         double hydro_gamma; // adiabatic index
-#elif EOS == 1
-        double K0;
-        double murn_n;
-        double rho0;
 #endif
+        // Note: Murnaghan parameters now live in the EOS material table
+        // (see EquationOfState::MurnaghanMaterial), keyed by per-particle matId.
     };
 
     MeshlessScheme(Configuration config, Particles *particles, Domain::Cell domain);

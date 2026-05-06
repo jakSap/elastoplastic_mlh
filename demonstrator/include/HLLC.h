@@ -34,18 +34,20 @@ public:
     // static void solveHLLC0(double *WL, double *WR, double *n, double *totflux,
     //         const double *vij, const double &hydro_gamma);
 
-    static void solveHLLC1(double *WL, double *WR, double *n, double *totflux,
+    static void solveHLLC1(int matIdL, int matIdR,
+            double *WR, double *WL, double *n, double *totflux,
             const double *vij, EquationOfState &MeshlessEOS);
-    
-    
+
+
 
     // States WR, WL must be pre-rotated (vx = normal) and pre-boosted
     // SijRotR, SijRotL are rotated stress tensors [DIM*DIM], row-major
-    static void xSplitElasticHLLC(double *WR, double *WL,
+    static void xSplitElasticHLLC(int matIdL, int matIdR,
+            double *WR, double *WL,
             double *SijRotR, double *SijRotL,
             double *totflux,
             EquationOfState &MeshlessEOS);
-    
+
     // HLL Solver
     static void HLL(double *WL, double *WR, double *totflux, const double &hydro_gamma);
     

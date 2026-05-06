@@ -293,12 +293,18 @@
 // Sole exeption: Structure of the state vector differs,
 // with pressure and momentum components exchange. Flux changes accordingly
 
-void HLLC::solveHLLC1(double *WR, double *WL, double *n,
+void HLLC::solveHLLC1(int matIdL, int matIdR,
+    double *WR, double *WL, double *n,
     double *totflux, const double *vij, EquationOfState &MeshlessEOS){
 
 #if HLLC_general_EOS == 1
+#if EOS == 1
+    const double GammaL = MeshlessEOS.EOSGeneralGamma(matIdL, WL[0], WL[1]);
+    const double GammaR = MeshlessEOS.EOSGeneralGamma(matIdR, WR[0], WR[1]);
+#else
     const double GammaL = MeshlessEOS.EOSGeneralGamma(WL[0], WL[1]);
     const double GammaR = MeshlessEOS.EOSGeneralGamma(WR[0], WR[1]);
+#endif
     const double hydro_gamma = 0.5 * (GammaL + GammaR);
 #else
     const double hydro_gamma = MeshlessEOS.EOSGetHydroGammaParam();
@@ -323,8 +329,13 @@ void HLLC::solveHLLC1(double *WR, double *WL, double *n,
     const double rhoRinv = (WR[0] > 0.0d) ? 1.0d / WR[0] : 0.0d;
 
 #if HLLC_general_EOS
+#if EOS == 1
+    const double aL = MeshlessEOS.EOSAdiabaticSoundSpeed(matIdL, WL[0], WL[1]);
+    const double aR = MeshlessEOS.EOSAdiabaticSoundSpeed(matIdR, WR[0], WR[1]);
+#else
     const double aL = MeshlessEOS.EOSAdiabaticSoundSpeed(WL[0], WL[1]);
     const double aR = MeshlessEOS.EOSAdiabaticSoundSpeed(WR[0], WR[1]);
+#endif
 #else
     const double aL = sqrtf(hydro_gamma * WL[1] * rhoLinv); //c.f. Toro eq. 1.35
     const double aR = sqrtf(hydro_gamma * WR[1] * rhoRinv);
@@ -575,15 +586,21 @@ void HLLC::solveHLLC1(double *WR, double *WL, double *n,
 
 }
 
-void HLLC::xSplitElasticHLLC(double *WR, double *WL,
+void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
+        double *WR, double *WL,
         double *SijRotR, double *SijRotL,
         double *totflux,
         EquationOfState &MeshlessEOS){
 
     // Step 0: EOS parameters (same pattern as solveHLLC1)
 #if HLLC_general_EOS == 1
+#if EOS == 1
+    const double GammaL = MeshlessEOS.EOSGeneralGamma(matIdL, WL[0], WL[1]);
+    const double GammaR = MeshlessEOS.EOSGeneralGamma(matIdR, WR[0], WR[1]);
+#else
     const double GammaL = MeshlessEOS.EOSGeneralGamma(WL[0], WL[1]);
     const double GammaR = MeshlessEOS.EOSGeneralGamma(WR[0], WR[1]);
+#endif
     const double hydro_gamma = 0.5 * (GammaL + GammaR);
 #else
     const double hydro_gamma = MeshlessEOS.EOSGetHydroGammaParam();
@@ -609,13 +626,27 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
 
     // Step 3: Elastic longitudinal wave speed (eq. 92)
 #if ELASTIC
-    const double KL = MeshlessEOS.EOSBulkModulus(WL[0], WL[1]);
-    const double KR = MeshlessEOS.EOSBulkModulus(WR[0], WR[1]);
-    const double aL = sqrt((KL + 4.0/3.0 * SHEAR_MODULUS) / WL[0]);
-    const double aR = sqrt((KR + 4.0/3.0 * SHEAR_MODULUS) / WR[0]);
+#if EOS == 1
+    const double KL  = MeshlessEOS.EOSBulkModulus(matIdL, WL[0], WL[1]);
+    const double KR  = MeshlessEOS.EOSBulkModulus(matIdR, WR[0], WR[1]);
+    const double muL = MeshlessEOS.EOSShearModulus(matIdL);
+    const double muR = MeshlessEOS.EOSShearModulus(matIdR);
+#else
+    const double KL  = MeshlessEOS.EOSBulkModulus(WL[0], WL[1]);
+    const double KR  = MeshlessEOS.EOSBulkModulus(WR[0], WR[1]);
+    const double muL = 0.;
+    const double muR = 0.;
+#endif
+    const double aL = sqrt((KL + 4.0/3.0 * muL) / WL[0]);
+    const double aR = sqrt((KR + 4.0/3.0 * muR) / WR[0]);
+#else
+#if EOS == 1
+    const double aL = MeshlessEOS.EOSAdiabaticSoundSpeed(matIdL, WL[0], WL[1]);
+    const double aR = MeshlessEOS.EOSAdiabaticSoundSpeed(matIdR, WR[0], WR[1]);
 #else
     const double aL = MeshlessEOS.EOSAdiabaticSoundSpeed(WL[0], WL[1]);
     const double aR = MeshlessEOS.EOSAdiabaticSoundSpeed(WR[0], WR[1]);
+#endif
 #endif
 
     // Step 4: PVRS traction estimate (pK -> tK = pK - SxxK, cf. Section 4.5)
@@ -675,9 +706,15 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
         // Elastic energy contribution
         const double S2L = SijRotL[0]*SijRotL[0] + 2.0*SijRotL[1]*SijRotL[1]
                 + SijRotL[DIM*DIM-1]*SijRotL[DIM*DIM-1];
-        const double eL = MeshlessEOS.EOSInternalEnergy(WL[0], WL[1])
-//                            + S2L / (4.0 * SHEAR_MODULUS * WL[0])
+#if EOS == 1
+        const double eL = MeshlessEOS.EOSInternalEnergy(matIdL, WL[0], WL[1])
                             + 0.5 * v2L;
+#else
+        const double eL = MeshlessEOS.EOSInternalEnergy(WL[0], WL[1])
+                            + 0.5 * v2L;
+#endif
+        // TODO: re-enabling the elastic-stress contribution requires the
+        // per-side shear modulus muL: + S2L / (4.0 * muL * WL[0])
         const double SL = SLmvL + vL;
 
         // Physical flux FL (eq. 43)
@@ -743,9 +780,15 @@ void HLLC::xSplitElasticHLLC(double *WR, double *WL,
         // Elastic energy
         const double S2R = SijRotR[0]*SijRotR[0] + 2.0*SijRotR[1]*SijRotR[1]
                  + SijRotR[DIM*DIM-1]*SijRotR[DIM*DIM-1];
-        const double eR = MeshlessEOS.EOSInternalEnergy(WR[0], WR[1])
-//                        + S2R / (4.0 * SHEAR_MODULUS * WR[0])
+#if EOS == 1
+        const double eR = MeshlessEOS.EOSInternalEnergy(matIdR, WR[0], WR[1])
                         + 0.5 * v2R;
+#else
+        const double eR = MeshlessEOS.EOSInternalEnergy(WR[0], WR[1])
+                        + 0.5 * v2R;
+#endif
+        // TODO: re-enabling the elastic-stress contribution requires the
+        // per-side shear modulus muR: + S2R / (4.0 * muR * WR[0])
         const double SR = SRmvR + vR;
 
         // Physical flux FR (eq. 43)

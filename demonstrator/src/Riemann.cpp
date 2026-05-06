@@ -4,7 +4,8 @@
 
 #include "../include/Riemann.h"
 //#include "../include/riemannhelper.h"
-Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i, EquationOfState &MeshlessEOS
+Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
+                 int matIdR, int matIdL, EquationOfState &MeshlessEOS
 #if USE_HLLC && ELASTIC
                  , double SxxR, double SxyR, double SyyR
                  , double SxxL, double SxyL, double SyyL
@@ -14,7 +15,8 @@ Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i, Equ
 #endif
 #endif
                  ) :
-                    WR { WR }, WL { WL }, vFrame { vFrame },  Aij { Aij }, i { i }, MeshlessEOS{MeshlessEOS}{
+                    WR { WR }, WL { WL }, vFrame { vFrame },  Aij { Aij }, i { i },
+                    matIdR { matIdR }, matIdL { matIdL }, MeshlessEOS{MeshlessEOS}{
 
     // compute norm of effective face
     // double AijNorm = sqrt(Helper::dotProduct(Aij, Aij));
@@ -209,7 +211,7 @@ void Riemann::HLLCFlux(double *Fij){
                     << " SijRotR=[Sxx=" << SijRotR[0] << ", Sxy=" << SijRotR[1] << "]";
     }
 #endif
-    HLLC::xSplitElasticHLLC(WR, WL, SijRotR, SijRotL, Fij, MeshlessEOS);
+    HLLC::xSplitElasticHLLC(matIdL, matIdR, WR, WL, SijRotR, SijRotL, Fij, MeshlessEOS);
 
     // Back-rotate momentum fluxes to lab frame (Lambda^{-1} = Lambda^T)
 #if DIM == 2
@@ -265,7 +267,7 @@ void Riemann::HLLCFlux(double *Fij){
         const double gamma = MeshlessEOS.EOSGetHydroGammaParam();
         HLLC::HLL(WR, WL, Fij, gamma);
 #else
-        HLLC::solveHLLC1(WR, WL, hatAij, Fij, vFrame, MeshlessEOS);
+        HLLC::solveHLLC1(matIdL, matIdR, WR, WL, hatAij, Fij, vFrame, MeshlessEOS);
 #endif  // USE_HLL
 
         // Logger(DEBUG) << "i = " << i << " mF = " << Fij[0];
