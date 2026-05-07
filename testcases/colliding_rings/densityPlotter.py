@@ -15,6 +15,21 @@ from multiprocessing import Pool
 
 #MAX_NUM_INTERACTIONS = 1000
 pref = 'S'
+
+# Envelope (matId=2) particles are rendered at 1/3 the marker size of the main
+# material so the solid ring stays visually dominant.
+ENVELOPE_MATID = 2
+ENVELOPE_SCALE = 1.0 / 3.0
+
+def _marker_sizes(data, markerSize):
+    """Return a per-particle size array if a materialId field is present,
+    scaling envelope particles down. Otherwise return the scalar markerSize."""
+    if "materialId" not in data:
+        return markerSize
+    matId = data["materialId"][:]
+    sizes = np.full(matId.shape, float(markerSize))
+    sizes[matId == ENVELOPE_MATID] = float(markerSize) * ENVELOPE_SCALE
+    return sizes
 def setDomainLimits(ax, pos, h5File, openBorders):
     if openBorders:
         margin = 0.05 * max(pos[:,0].max() - pos[:,0].min(), pos[:,1].max() - pos[:,1].min())
@@ -29,7 +44,7 @@ def setDomainLimits(ax, pos, h5File, openBorders):
         ax.set_xlim((0., 1.))
         ax.set_ylim((0., 1.))
 
-def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1):
+def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
 
@@ -45,13 +60,13 @@ def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=Fals
         cm = rho
     #P = data["P"][()]
     plt.rcParams.update({'font.size': 18})
-    fig, ax = plt.subplots(figsize=(7,5), dpi=500)
+    fig, ax = plt.subplots(figsize=(7,5), dpi=dpi)
     #rhoPlt = ax.scatter(pos[:,0], pos[:,1], c=rho, s=500.) # good for ~100 particles
     #rhoPlt = ax.scatter(pos[:,0], pos[:,1], c=rho, s=150.) # good for ~400 particles
     #rhoPlt = ax.scatter(pos[:,0], pos[:,1], c=rho, s=100.) # good for ~900 particles
     # rhoPlt = ax.scatter(pos[:,0], pos[:,1], c=rho, s=12.) # good for 10**4 particles
     # rhoPlt = ax.scatter(pos[:,0], pos[:,1], c=rho, s=5.) # good for 128**2 particles
-    rhoPlt = ax.scatter(pos[:,0], pos[:,1], c=cm, s=markerSize)#, vmin=vmin, vmax=vmax) # good for 128**2 particles
+    rhoPlt = ax.scatter(pos[:,0], pos[:,1], c=cm, s=_marker_sizes(data, markerSize))#, vmin=vmin, vmax=vmax) # good for 128**2 particles
 
     setDomainLimits(ax, pos, h5File, openBorders)
 
@@ -93,7 +108,7 @@ def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=Fals
     if stress:
         plt.savefig(outDir +'/'+ pref + pathlib.Path(h5File).stem + ".png")
     else:
-        plt.savefig(outDir + "/" + pathlib.Path(h5File).stem + ".png")    
+        plt.savefig(outDir + "/" + pathlib.Path(h5File).stem + ".png", dpi=dpi)
     plt.close()
     #plt.show()
 
@@ -137,15 +152,15 @@ def plotNNL(h5File, iNNL, pos, ax):
     ax.scatter(pos[iNNL,0], pos[iNNL,1], s=5., marker='x', color='r')
     ax.scatter(posNNL[:,0], posNNL[:,1], s=5, marker='x', color='m')
 
-def createEnergyPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1):
+def createEnergyPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
 
     u = data["u"][()]
-    fig, ax = plt.subplots(figsize=(8,6), dpi=200)
+    fig, ax = plt.subplots(figsize=(8,6), dpi=dpi)
     #uPlt = ax.scatter(pos[:,0], pos[:,1], c=u, s=100.) # good for ~900 particles
     #uPlt = ax.scatter(pos[:,0], pos[:,1], c=u, s=200.) # good for ~400 particles
-    uPlt = ax.scatter(pos[:,0], pos[:,1], c=u, s=markerSize, vmin=vmin, vmax=vmax)
+    uPlt = ax.scatter(pos[:,0], pos[:,1], c=u, s=_marker_sizes(data, markerSize), vmin=vmin, vmax=vmax)
 
     setDomainLimits(ax, pos, h5File, openBorders)
 
@@ -161,7 +176,7 @@ def createEnergyPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, ma
     plt.savefig(outDir + "/u" + pathlib.Path(h5File).stem + ".png")
     plt.close()
 
-def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1):
+def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
 
@@ -170,12 +185,12 @@ def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, 
     P = data["P"][()]
 
     plt.rcParams.update({'font.size': 18})
-    fig, ax = plt.subplots(figsize=(7,6), dpi=200)
+    fig, ax = plt.subplots(figsize=(7,6), dpi=dpi)
     #fig, ax = plt.subplots(figsize=(8,6), dpi=200)
     #PPlt = ax.scatter(pos[:,0], pos[:,1], c=P, s=200.) # good for ~400 particles
     #PPlt = ax.scatter(pos[:,0], pos[:,1], c=P, s=100.) # good for ~900 particles
     #PPlt = ax.scatter(pos[:,0], pos[:,1], c=P, s=10.) # good for 10**4 particles
-    PPlt = ax.scatter(pos[:,0], pos[:,1], c=P, s=markerSize, vmin=vmin, vmax=vmax)
+    PPlt = ax.scatter(pos[:,0], pos[:,1], c=P, s=_marker_sizes(data, markerSize), vmin=vmin, vmax=vmax)
 
     setDomainLimits(ax, pos, h5File, openBorders)
 
@@ -200,13 +215,13 @@ def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, 
     plt.savefig(outDir + "/P" + pathlib.Path(h5File).stem + ".png")
     plt.close()
 
-def createNoiPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1):
+def createNoiPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
 
     noi = data["noi"][()]
-    fig, ax = plt.subplots(figsize=(8,6), dpi=200)
-    noiPlt = ax.scatter(pos[:,0], pos[:,1], c=noi, s=markerSize, vmin=vmin, vmax=vmax)
+    fig, ax = plt.subplots(figsize=(8,6), dpi=dpi)
+    noiPlt = ax.scatter(pos[:,0], pos[:,1], c=noi, s=_marker_sizes(data, markerSize), vmin=vmin, vmax=vmax)
 
     setDomainLimits(ax, pos, h5File, openBorders)
 
@@ -222,15 +237,15 @@ def createNoiPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, marke
     plt.savefig(outDir + "/noi" + pathlib.Path(h5File).stem + ".png")
     plt.close()
 
-def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., threshold=None, iHi=-1):
+def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., threshold=None, iHi=-1, dpi=200):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
     time = data["time"][0]
     ncond = data["conditionNumber"][()]
 
     plt.rcParams.update({'font.size': 18})
-    fig, ax = plt.subplots(figsize=(7,6), dpi=200)
-    ncondPlt = ax.scatter(pos[:,0], pos[:,1], c=ncond, s=markerSize, vmin=vmin, vmax=vmax)
+    fig, ax = plt.subplots(figsize=(7,6), dpi=dpi)
+    ncondPlt = ax.scatter(pos[:,0], pos[:,1], c=ncond, s=_marker_sizes(data, markerSize), vmin=vmin, vmax=vmax)
 
     if threshold is not None:
         mask = ncond > threshold[0]
@@ -270,7 +285,7 @@ def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax
     # Histogram of condition numbers and eigenvector components
     has_eigvec = "eigenvecMin" in data
     nrows = 2 if has_eigvec else 1
-    fig, axes = plt.subplots(nrows, 1, figsize=(7, 5 * nrows), dpi=400)
+    fig, axes = plt.subplots(nrows, 1, figsize=(7, 5 * nrows), dpi=dpi)
     if nrows == 1:
         axes = [axes]
 
@@ -308,7 +323,7 @@ def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax
         lambdaMin = data["lambdaMin"][()]
         lambdaMax = data["lambdaMax"][()]
 
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5), dpi=200)
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5), dpi=dpi)
         for ax, vals, label in zip(axes, [lambdaMin, lambdaMax],
                                    [r"$\lambda_{\min}$", r"$\lambda_{\max}$"]):
             sc = ax.scatter(pos[:,0], pos[:,1], c=vals, s=markerSize)
@@ -329,7 +344,7 @@ def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax
     # Eigenvector quiver plot
     if "eigenvecMin" in data:
         eigvec = data["eigenvecMin"][:]
-        fig, ax = plt.subplots(figsize=(7, 6), dpi=200)
+        fig, ax = plt.subplots(figsize=(7, 6), dpi=dpi)
         sc = ax.scatter(pos[:,0], pos[:,1], c=ncond, s=markerSize, vmin=vmin, vmax=vmax)
         step = max(1, len(pos) // 1000)
         ax.quiver(pos[::step,0], pos[::step,1],
@@ -350,7 +365,7 @@ def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax
         plt.close()
 
 def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSize=1.,
-                       diff=False, first_frame_data=None, diff_vminmax=None, iHi=-1):
+                       diff=False, first_frame_data=None, diff_vminmax=None, iHi=-1, dpi=200):
     data = h5.File(h5File, 'r')
     pos  = data["x"][:]
     time = data["time"][0]
@@ -367,7 +382,7 @@ def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSi
 
     plt.rcParams.update({'font.size': 12})
     show_diff = diff and first_frame_data is not None
-    fig, axes = plt.subplots(2, 3, figsize=(10, 6), dpi=300)
+    fig, axes = plt.subplots(2, 3, figsize=(10, 6), dpi=dpi)
     axes_flat = axes.flatten()
 
     if show_diff:
@@ -407,7 +422,7 @@ def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSi
                 vlo, vhi = vlo - 0.5, vhi + 0.5
             # Replace NaN values with 0 to avoid matplotlib StopIteration error
             vals = np.where(np.isfinite(vals), vals, 0.)
-            sc = ax.scatter(pos[:,0], pos[:,1], c=vals, s=markerSize, vmin=vlo, vmax=vhi)
+            sc = ax.scatter(pos[:,0], pos[:,1], c=vals, s=_marker_sizes(data, markerSize), vmin=vlo, vmax=vhi)
 
             setDomainLimits(ax, pos, h5File, openBorders)
             if iHi > -1:
@@ -432,20 +447,20 @@ def _worker(task):
     (h5File, outDir, grad, vel, stress, iNNL, borders, vmin, vmax,
      pressure, energy, noi, conditionNumber, condThreshold,
      combined, combined_vminmax,
-     markerSize, diff, first_frame_data, diff_vminmax, iHi) = task
+     markerSize, diff, first_frame_data, diff_vminmax, iHi, dpi) = task
     if combined:
         createCombinedPlot(h5File, outDir, borders, combined_vminmax, markerSize,
-                           diff, first_frame_data, diff_vminmax, iHi)
+                           diff, first_frame_data, diff_vminmax, iHi, dpi)
     elif pressure:
-        createPressurePlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi)
+        createPressurePlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi, dpi)
     elif energy:
-        createEnergyPlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi)
+        createEnergyPlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi, dpi)
     elif noi:
-        createNoiPlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi)
+        createNoiPlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi, dpi)
     elif conditionNumber:
-        createConditionNumberPlot(h5File, outDir, borders, vmin, vmax, markerSize, condThreshold, iHi)
+        createConditionNumberPlot(h5File, outDir, borders, vmin, vmax, markerSize, condThreshold, iHi, dpi)
     else:
-        createPlot(h5File, outDir, grad, vel, stress, iNNL, borders, vmin, vmax, markerSize, iHi)
+        createPlot(h5File, outDir, grad, vel, stress, iNNL, borders, vmin, vmax, markerSize, iHi, dpi)
 
 
 if __name__=="__main__":
@@ -477,6 +492,8 @@ if __name__=="__main__":
                         help="only plot files with simulation time >= tstart")
     parser.add_argument("--diff", "-D", action="store_true",
                         help="(with --combined) add two rows showing log-scale |diff to first frame|")
+    parser.add_argument("--dpi", metavar="int", type=int, default=200,
+                        help="output resolution in dots per inch (default: 200)")
 
     args = parser.parse_args()
 
@@ -583,7 +600,7 @@ if __name__=="__main__":
               args.iNNL, args.openBorders, vmin, vmax,
               args.pressure, args.energy, args.noi, args.conditionNumber,
               args.threshold, args.combined, combined_vminmax,
-              args.markerSize, args.diff, first_frame_data, diff_vminmax, args.hi)
+              args.markerSize, args.diff, first_frame_data, diff_vminmax, args.hi, args.dpi)
              for f in h5Files]
 
     nworkers = min(args.workers, len(tasks)) if tasks else 1
