@@ -52,6 +52,13 @@ if __name__ == "__main__":
                         default=2.5, help="pressure constant (default: 2.5)")
     parser.add_argument("--gamma", metavar="float", type=float,
                         default=5.0/3.0, help="adiabatic index (default: 5/3)")
+    parser.add_argument("--envelope", "-e", metavar="float", type=float,
+                        default=None,
+                        help="if set, add inner and outer envelope rings of this thickness (matId=2)")
+    parser.add_argument("--envelope_density", metavar="float", type=float,
+                        default=None,
+                        help="reference density of envelope particles (default: same as --density). "
+                             "Must match the rho0 of mat2 in config.info to start at zero pressure.")
     parser.add_argument("--fillUp", "-f", action="store_true",
                         help="fill up coordinates to 3D with z=0")
     parser.add_argument("--plot", action="store_true",
@@ -72,18 +79,43 @@ if __name__ == "__main__":
     # centre-to-centre separation so outer surfaces are 'distance' apart
     x_shift = r_outer + distance / 2.0
 
-    mass    = delta_p**2 * density
-    u_const = P / ((gamma - 1.0) * density)
+    env_density = args.envelope_density if args.envelope_density is not None else density
+    mass_main   = delta_p**2 * density
+    mass_env    = delta_p**2 * env_density
+    u_const     = P / ((gamma - 1.0) * density)
 
     print("Generating colliding rings initial conditions (concentric method) ...")
     print(f"  delta_p = {delta_p}, r_inner = {r_inner}, r_outer = {r_outer}")
     print(f"  distance = {distance}  →  x_shift = {x_shift}")
     print(f"  v_p = {v_p}, density = {density}")
-    print(f"  mass = {mass}, u = {u_const}")
+    print(f"  mass_main = {mass_main}, u = {u_const}")
+    if args.envelope is not None:
+        print(f"  envelope_density = {env_density}, mass_env = {mass_env}")
 
-    xs, ys = make_ring(r_inner, r_outer, delta_p)
-    N = len(xs)
+    xs_main, ys_main = make_ring(r_inner, r_outer, delta_p)
 
+    if args.envelope is not None:
+        e = args.envelope
+        xs_in,  ys_in  = make_ring(r_inner - e, r_inner - delta_p, delta_p)
+        xs_out, ys_out = make_ring(r_outer + delta_p, r_outer + e, delta_p)
+        xs_ring = np.concatenate((xs_in, xs_main, xs_out))
+        ys_ring = np.concatenate((ys_in, ys_main, ys_out))
+        mat_ring = np.concatenate((
+            np.full(len(xs_in),   2, dtype=np.int8),
+            np.full(len(xs_main), 1, dtype=np.int8),
+            np.full(len(xs_out),  2, dtype=np.int8),
+        ))
+        m_ring = np.concatenate((
+            np.full(len(xs_in),   mass_env),
+            np.full(len(xs_main), mass_main),
+            np.full(len(xs_out),  mass_env),
+        ))
+    else:
+        xs_ring, ys_ring = xs_main, ys_main
+        mat_ring = np.full(len(xs_main), 1, dtype=np.int8)
+        m_ring   = np.full(len(xs_main), mass_main)
+
+    N = len(xs_ring)
     dim_out = DIM + 1 if fillUp else DIM
 
     r_ring1 = np.zeros((N, dim_out))
@@ -91,23 +123,26 @@ if __name__ == "__main__":
     v1      = np.zeros((N, dim_out))
     v2      = np.zeros((N, dim_out))
 
-    r_ring1[:, 0] = xs - x_shift
-    r_ring1[:, 1] = ys
+    r_ring1[:, 0] = xs_ring - x_shift
+    r_ring1[:, 1] = ys_ring
     v1[:, 0]      = v_p
 
-    r_ring2[:, 0] = xs + x_shift
-    r_ring2[:, 1] = ys
+    r_ring2[:, 0] = xs_ring + x_shift
+    r_ring2[:, 1] = ys_ring
     v2[:, 0]      = -v_p
 
     r_final = np.concatenate((r_ring1, r_ring2))
     v_final = np.concatenate((v1, v2))
 
-    m          = np.ones(2 * N) * mass
-    materialId = np.zeros(2 * N, dtype=np.int8)
+    m          = np.concatenate((m_ring, m_ring))
+    materialId = np.concatenate((mat_ring, mat_ring))
     u          = np.ones(2 * N) * u_const
 
     suffix   = "3D" if fillUp else "2D"
-    filename = f"rings_concentric_deltap{delta_p}-{suffix}.h5"
+    env_tag  = f"-env{args.envelope}" if args.envelope is not None else ""
+    if args.envelope is not None and args.envelope_density is not None:
+        env_tag += f"-rho{env_density}"
+    filename = f"rings_concentric_deltap{delta_p}{env_tag}-{suffix}.h5"
 
     outH5 = h5.File(filename, "w")
     outH5.create_dataset("x",          data=r_final)
@@ -124,12 +159,12 @@ if __name__ == "__main__":
     if args.plot:
         print("Plotting initial configuration ...")
         fig, ax = plt.subplots(figsize=(10, 5), dpi=200)
-        ax.scatter(r_final[:, 0], r_final[:, 1], s=1.5, linewidths=0)
+        ax.scatter(r_final[:, 0], r_final[:, 1], s=1.5, linewidths=0, c=materialId, cmap="viridis")
         ax.set_aspect("equal")
         ax.set_title("Colliding rings IC – concentric method")
         ax.set_xlabel("$x$")
         ax.set_ylabel("$y$")
         plt.tight_layout()
-        plotname = f"rings_concentric_deltap{delta_p}-{suffix}.png"
+        plotname = f"rings_concentric_deltap{delta_p}{env_tag}-{suffix}.png"
         plt.savefig(plotname)
         print(f"... saved to {plotname}")
