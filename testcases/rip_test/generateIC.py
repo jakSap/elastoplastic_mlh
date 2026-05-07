@@ -10,8 +10,10 @@ Creates an IC for the rip test: two horizontal bars of the same length stacked
 above each other separated by a gap.  The upper bar has width w; the lower bar
 has width w + 2h with symmetric V-shaped cuts of depth h on both its top and
 bottom faces, centred in x.  At the centre the two cuts together remove 2h,
-leaving exactly thickness w.  An optional rigid-body velocity and/or velocity
-gradient in y can be applied to pull the bars apart.
+leaving exactly thickness w.  An initial x-velocity profile splits each bar
+into three equal parts: the inner third is at rest, while the outer thirds ramp
+linearly from zero at the inner boundary to ±v_max at the bar ends (left end
+moves left, right end moves right).
 """
 
 DIM = 2
@@ -51,13 +53,9 @@ if __name__ == "__main__":
                         help="gap between the two bars in y (default: 1.0)")
     parser.add_argument("--velocity", "-v", metavar="float", type=float,
                         default=0.0,
-                        help="rigid-body separation velocity: upper bar gets +v, "
-                             "lower bar gets -v in y (default: 0.0)")
-    parser.add_argument("--gradient", metavar="float", type=float,
-                        default=0.0,
-                        help="initial velocity gradient in y: v_y = gradient * y "
-                             "applied to all particles; positive pulls bars apart "
-                             "(default: 0.0)")
+                        help="max pulling velocity: the outer thirds of each bar "
+                             "ramp linearly from 0 at x=±L/6 to ±v at x=±L/2 "
+                             "(left end −v, right end +v) (default: 0.0)")
     parser.add_argument("--density", metavar="float", type=float,
                         default=1.0, help="particle density (default: 1.0)")
     parser.add_argument("--pressure", "-P", metavar="float", type=float,
@@ -77,8 +75,7 @@ if __name__ == "__main__":
     h           = args.cut_depth   # also the extra width of the wide bar
     cw          = args.cut_width
     gap         = args.gap
-    v_rigid     = args.velocity
-    strain_rate = args.gradient
+    v_max       = args.velocity
     density     = args.density
     P           = args.pressure
     gamma       = args.gamma
@@ -93,7 +90,7 @@ if __name__ == "__main__":
     print(f"  Wide bar:    length={L},  width={w + h}  (= w + h)")
     print(f"  V-cut:       depth={h},   width={cw}  →  tip thickness = {w}")
     print(f"  Gap = {gap}")
-    print(f"  v_rigid = {v_rigid},  strain_rate = {strain_rate}")
+    print(f"  v_max = {v_max}  (outer-third ramp in x)")
     print(f"  mass = {mass:.4g},  u = {u_const:.4g}")
 
     # ---- Narrow bar (upper): y in [gap/2, gap/2 + w], x in [-L/2, L/2] ----
@@ -127,10 +124,24 @@ if __name__ == "__main__":
     r2[:, 0] = xs2
     r2[:, 1] = ys2
 
+    # x-velocity profile: three equal segments of length L/3.
+    # Inner third  |x| < L/6          : v_x = 0
+    # Left outer   x in [-L/2, -L/6]  : v_x ramps from 0 to -v_max
+    # Right outer  x in [ L/6,  L/2]  : v_x ramps from 0 to +v_max
+    x_inner = L / 6.0
+
+    def vx_profile(xs):
+        v = np.zeros(len(xs))
+        left  = xs < -x_inner
+        right = xs >  x_inner
+        v[left]  = v_max * (xs[left]  + x_inner) * 3.0 / L
+        v[right] = v_max * (xs[right] - x_inner) * 3.0 / L
+        return v
+
     v1 = np.zeros((N1, dim_out))
     v2 = np.zeros((N2, dim_out))
-    v1[:, 1] = +v_rigid + strain_rate * ys1
-    v2[:, 1] = -v_rigid + strain_rate * ys2
+    v1[:, 0] = vx_profile(xs1)
+    v2[:, 0] = vx_profile(xs2)
 
     r_final = np.concatenate((r1, r2))
     v_final = np.concatenate((v1, v2))
