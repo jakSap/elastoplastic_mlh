@@ -23,6 +23,24 @@ struct MurnaghanMaterial {
     double rho0;     ///< reference density
     double mu;       ///< shear modulus (constitutive)
 };
+#elif EOS == 2
+/// Per-material parameters for the Tillotson EOS path. The shear modulus
+/// `mu` is bundled here for the same reason as in MurnaghanMaterial.
+/// References: Tillotson (1962); Melosh, "Impact Cratering", Appendix B;
+/// Benz & Asphaug (1995).
+struct TillotsonMaterial {
+    double rho0;    ///< reference density
+    double A;       ///< bulk modulus at rho0
+    double B;       ///< nonlinear compression coefficient
+    double u0;      ///< reference specific internal energy
+    double a;       ///< Tillotson coefficient (compressed/cold)
+    double b;       ///< Tillotson coefficient (compressed/cold)
+    double alpha;   ///< exponential decay parameter (expanded regime)
+    double beta;    ///< exponential decay parameter (expanded regime)
+    double u_iv;    ///< specific energy of incipient vaporization
+    double u_cv;    ///< specific energy of complete vaporization
+    double mu;      ///< shear modulus (constitutive)
+};
 #endif
 
 class EquationOfState {
@@ -33,10 +51,12 @@ public:
                 const double hydro_gamma
 #elif EOS == 1
                 std::vector<MurnaghanMaterial> mats
+#elif EOS == 2
+                std::vector<TillotsonMaterial> mats
 #endif // EOS
     );
 
-#if EOS == 1
+#if EOS == 1 || EOS == 2
     double EOSPressure(int matId, const double &rho, const double &u);
     double EOSSoundSpeed(int matId, const double &rho, const double &u, const double &p);
     double EOSInternalEnergy(int matId, const double &rho, const double &p);
@@ -45,7 +65,11 @@ public:
     double EOSGeneralGamma(int matId, const double &rho, const double &p);
     double EOSBulkModulus(int matId, const double &rho, const double &p);
     double EOSShearModulus(int matId);
+#if EOS == 1
     const MurnaghanMaterial& EOSGetMaterial(int matId);
+#else
+    const TillotsonMaterial& EOSGetMaterial(int matId);
+#endif
 #else
     double EOSPressure(const double &rho, const double &u);
     double EOSSoundSpeed(const double &rho, const double &u,
@@ -68,6 +92,8 @@ private:
     const double hydro_gamma;
 #elif EOS == 1
     std::vector<MurnaghanMaterial> materials;
+#elif EOS == 2
+    std::vector<TillotsonMaterial> materials;
 #endif
 };
 #endif // MESHLESSHYDRO_EQUATIONOFSTATE_H

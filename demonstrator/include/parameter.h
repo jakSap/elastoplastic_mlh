@@ -64,10 +64,10 @@
 #define SML_PANIC_FRACTION 0.1
 
 /* Define which equation of state to use.
-For now, ideal gas (=0) and murnaghan EOS (=1) are supported: */
+Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // #define EOS 0 // Ideal gas EOS
-#define EOS 1 // Murnaghan EOS
-// #define EOS 2 // Tillotson EOS
+// #define EOS 1 // Murnaghan EOS
+#define EOS 2 // Tillotson EOS
 
 /* Simulate elastic dynamics*/
 #define ELASTIC 1

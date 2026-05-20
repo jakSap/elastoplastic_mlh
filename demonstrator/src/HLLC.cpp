@@ -298,7 +298,7 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
     double *totflux, const double *vij, EquationOfState &MeshlessEOS){
 
 #if HLLC_general_EOS == 1
-#if EOS == 1
+#if EOS == 1 || EOS == 2
     const double GammaL = MeshlessEOS.EOSGeneralGamma(matIdL, WL[0], WL[1]);
     const double GammaR = MeshlessEOS.EOSGeneralGamma(matIdR, WR[0], WR[1]);
 #else
@@ -329,7 +329,7 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
     const double rhoRinv = (WR[0] > 0.0d) ? 1.0d / WR[0] : 0.0d;
 
 #if HLLC_general_EOS
-#if EOS == 1
+#if EOS == 1 || EOS == 2
     const double aL = MeshlessEOS.EOSAdiabaticSoundSpeed(matIdL, WL[0], WL[1]);
     const double aR = MeshlessEOS.EOSAdiabaticSoundSpeed(matIdR, WR[0], WR[1]);
 #else
@@ -594,7 +594,7 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
 
     // Step 0: EOS parameters (same pattern as solveHLLC1)
 #if HLLC_general_EOS == 1
-#if EOS == 1
+#if EOS == 1 || EOS == 2
     const double GammaL = MeshlessEOS.EOSGeneralGamma(matIdL, WL[0], WL[1]);
     const double GammaR = MeshlessEOS.EOSGeneralGamma(matIdR, WR[0], WR[1]);
 #else
@@ -626,7 +626,7 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
 
     // Step 3: Elastic longitudinal wave speed (eq. 92)
 #if ELASTIC
-#if EOS == 1
+#if EOS == 1 || EOS == 2
     const double KL  = MeshlessEOS.EOSBulkModulus(matIdL, WL[0], WL[1]);
     const double KR  = MeshlessEOS.EOSBulkModulus(matIdR, WR[0], WR[1]);
     const double muL = MeshlessEOS.EOSShearModulus(matIdL);
@@ -640,7 +640,7 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
     const double aL = sqrt((KL + 4.0/3.0 * muL) / WL[0]);
     const double aR = sqrt((KR + 4.0/3.0 * muR) / WR[0]);
 #else
-#if EOS == 1
+#if EOS == 1 || EOS == 2
     const double aL = MeshlessEOS.EOSAdiabaticSoundSpeed(matIdL, WL[0], WL[1]);
     const double aR = MeshlessEOS.EOSAdiabaticSoundSpeed(matIdR, WR[0], WR[1]);
 #else
@@ -706,7 +706,7 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
         // Elastic energy contribution
         const double S2L = SijRotL[0]*SijRotL[0] + 2.0*SijRotL[1]*SijRotL[1]
                 + SijRotL[DIM*DIM-1]*SijRotL[DIM*DIM-1];
-#if EOS == 1
+#if EOS == 1 || EOS == 2
         const double eL = MeshlessEOS.EOSInternalEnergy(matIdL, WL[0], WL[1])
                             + 0.5 * v2L;
 #else
@@ -780,7 +780,7 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
         // Elastic energy
         const double S2R = SijRotR[0]*SijRotR[0] + 2.0*SijRotR[1]*SijRotR[1]
                  + SijRotR[DIM*DIM-1]*SijRotR[DIM*DIM-1];
-#if EOS == 1
+#if EOS == 1 || EOS == 2
         const double eR = MeshlessEOS.EOSInternalEnergy(matIdR, WR[0], WR[1])
                         + 0.5 * v2R;
 #else

@@ -123,26 +123,32 @@ int main(int argc, char *argv[]){
     }
     EquationOfState MeshlessEOS(std::move(mats));
 #elif EOS == 2
-    config.TIL_A = confP.getVal<double>("TIL_A");
-    Logger(INFO) << "   > Tillotson EOS A_T = " << config.TIL_A;
-    config.TIL_B = confP.getVal<double>("TIL_B");
-    Logger(INFO) << "   > Tillotson EOS B_T = " << config.TIL_B;
-    config.TIL_u0 = confP.getVal<double>("TIL_u0");
-    Logger(INFO) << "   > Tillotson EOS TIL_u0 = " << config.TIL_u0;
-    config.TIL_a = confP.getVal<double>("TIL_a");
-    Logger(INFO) << "   > Tillotson EOS TIL_a = " << config.TIL_a;
-    config.TIL_b = confP.getVal<double>("TIL_b");
-    Logger(INFO) << "   > Tillotson EOS TIL_b = " << config.TIL_b;
-    config.TIL_alpha = confP.getVal<double>("TIL_alpha");
-    Logger(INFO) << "   > Tillotson EOS TIL_alpha = " << config.TIL_alpha;
-    config.TIL_beta = confP.getVal<double>("TIL_beta");
-    Logger(INFO) << "   > Tillotson EOS TIL_beta = " << config.TIL_beta;
-    config.TIL_u_iv = confP.getVal<double>("TIL_u_iv");
-    Logger(INFO) << "   > Energy of incipient vaporization Tillotson EOS TIL_u_iv = " << config.TIL_u_iv;
-    config.TIL_u_cv = confP.getVal<double>("TIL_u_cv");
-    Logger(INFO) << "   > Energy of complete vaporization Tillotson EOS TIL_u_cv = " << config.TIL_u_cv;
-    EquationOfState MeshlessEOS(config.TIL_A, config.TIL_B, config.TIL_u0, config.TIL_a,
-                    config.TIL_b, config.TIL_alpha, config.TIL_beta, config.TIL_u_iv, config.TIL_u_cv);
+    std::vector<TillotsonMaterial> mats;
+    Logger(INFO) << "    > Reading Tillotson EOS material table ...";
+    for (auto &mEntry : confP.getObjList("materials")) {
+        TillotsonMaterial m;
+        int id    = mEntry.getVal<int>   ("matId");
+        m.rho0    = mEntry.getVal<double>("rho0");
+        m.A       = mEntry.getVal<double>("A");
+        m.B       = mEntry.getVal<double>("B");
+        m.u0      = mEntry.getVal<double>("u0");
+        m.a       = mEntry.getVal<double>("a");
+        m.b       = mEntry.getVal<double>("b");
+        m.alpha   = mEntry.getVal<double>("alpha");
+        m.beta    = mEntry.getVal<double>("beta");
+        m.u_iv    = mEntry.getVal<double>("u_iv");
+        m.u_cv    = mEntry.getVal<double>("u_cv");
+        m.mu      = mEntry.getVal<double>("mu");
+        if ((int)mats.size() <= id) mats.resize(id + 1);
+        mats[id] = m;
+        Logger(INFO) << "    > Material " << id
+                     << ": rho0=" << m.rho0 << ", A=" << m.A << ", B=" << m.B
+                     << ", u0=" << m.u0 << ", a=" << m.a << ", b=" << m.b
+                     << ", alpha=" << m.alpha << ", beta=" << m.beta
+                     << ", u_iv=" << m.u_iv << ", u_cv=" << m.u_cv
+                     << ", mu=" << m.mu;
+    }
+    EquationOfState MeshlessEOS(std::move(mats));
 #endif // EOS
     Logger(INFO) << "    > Initialized Equation Of State";
 #if PERIODIC_BOUNDARIES

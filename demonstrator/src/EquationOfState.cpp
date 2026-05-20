@@ -10,8 +10,7 @@ EquationOfState::EquationOfState(
 #elif EOS == 1
     std::vector<MurnaghanMaterial> mats
 #elif EOS == 2
-    const double TIL_A, const double TIL_B, const double TIL_u0, const double TIL_a, const double TIL_b,
-        const double TIL_alpha, const double TIL_beta, const double u_iv, const double TIL_u_cv
+    std::vector<TillotsonMaterial> mats
 #endif // EOS
     ) :
 # if EOS == 0
@@ -19,8 +18,7 @@ EquationOfState::EquationOfState(
 #elif EOS == 1
     materials { std::move(mats) }
 #elif EOS == 2
-    TIL_A {TIL_A}, TIL_B {TIL_B}, TIL_u0 {TIL_u0}, TIL_a {TIL_a}, TIL_b {TIL_b}, TIL_alpha {TIL_alpha}, TIL_beta {TIL_beta},
-        TIL_u_iv {TIL_u_iv}, TIL_u_cv {TIL_u_cv}
+    materials { std::move(mats) }
 #endif //EOS
     {
 #if EOS == 0
@@ -35,10 +33,16 @@ EquationOfState::EquationOfState(
                          << ", mu=" << materials[k].mu;
         }
 #elif EOS == 2
-        Logger(INFO) << "Using Tillotson EOS, parameter: ";
-        Logger(INFO) << "TIL_A = " << TIL_A << "TIL_B =" << TIL_B << "TIL_u0 = " << TIL_u0;
-        Logger(INFO) << "TIL_a = " << TIL_a << ", TIL_b = "<< TIL_b;
-        Logger(INFO) << "TIL_alpha = " << TIL_alpha} << ", TIL_beta = " << TIL_beta ", TIL_u_iv =" <<TIL_u_iv << ", TIL_u_cv = " <<TIL_u_cv;
+        Logger(INFO) << "Using Tillotson EOS with " << materials.size() << " material(s):";
+        for (size_t k = 0; k < materials.size(); ++k){
+            const TillotsonMaterial &m = materials[k];
+            Logger(INFO) << "    > Material " << k
+                         << ": rho0=" << m.rho0 << ", A=" << m.A << ", B=" << m.B
+                         << ", u0=" << m.u0 << ", a=" << m.a << ", b=" << m.b
+                         << ", alpha=" << m.alpha << ", beta=" << m.beta
+                         << ", u_iv=" << m.u_iv << ", u_cv=" << m.u_cv
+                         << ", mu=" << m.mu;
+        }
 #endif //EOS
 }
 
@@ -124,62 +128,240 @@ const MurnaghanMaterial& EquationOfState::EOSGetMaterial(int matId){
 #endif
     return materials[matId];
 }
-#else // EOS != 1
+
+#elif EOS == 2
+// ============================================================================
+// Tillotson EOS implementation. References: Tillotson (1962); Melosh,
+// "Impact Cratering", Appendix B; Benz & Asphaug (1995). Piecewise across
+// three regimes (compressed/cold, hot expanded, mixed). The shared helpers
+// below return P together with dP/drho|_u and dP/du|_rho so the analytic
+// sound-speed expression and the Newton inverter all use one code path.
+// ============================================================================
+
+namespace {
+
+inline void tillotsonCompressed(const TillotsonMaterial &m,
+                                 const double rho, const double u,
+                                 double &P, double &dPdrho, double &dPdu) {
+    const double eta = rho / m.rho0;
+    const double mu  = eta - 1.0;
+    const double inv_u0_eta2 = 1.0 / (m.u0 * eta * eta);
+    const double omega = u * inv_u0_eta2 + 1.0;
+    const double inv_omega  = 1.0 / omega;
+    const double inv_omega2 = inv_omega * inv_omega;
+    const double om_m1 = omega - 1.0;
+
+    P      = (m.a + m.b * inv_omega) * rho * u + m.A * mu + m.B * mu * mu;
+    dPdu   = (m.a + m.b * inv_omega2) * rho;
+    dPdrho = (m.a + m.b * inv_omega) * u
+             + 2.0 * m.b * u * om_m1 * inv_omega2
+             + (m.A + 2.0 * m.B * mu) / m.rho0;
+}
+
+inline void tillotsonExpanded(const TillotsonMaterial &m,
+                               const double rho, const double u,
+                               double &P, double &dPdrho, double &dPdu) {
+    const double eta = rho / m.rho0;
+    const double mu  = eta - 1.0;
+    const double inv_u0_eta2 = 1.0 / (m.u0 * eta * eta);
+    const double omega = u * inv_u0_eta2 + 1.0;
+    const double inv_omega  = 1.0 / omega;
+    const double inv_omega2 = inv_omega * inv_omega;
+    const double om_m1 = omega - 1.0;
+
+    const double z    = 1.0 / eta - 1.0;          // rho0/rho - 1
+    const double zp1  = z + 1.0;                  // 1/eta
+    const double exp1 = std::exp(-m.beta * z);
+    const double exp2 = std::exp(-m.alpha * z * z);
+
+    const double Q = m.b * rho * u * inv_omega + m.A * mu * exp1;
+    P = m.a * rho * u + Q * exp2;
+
+    dPdu = m.a * rho + (m.b * rho * inv_omega2) * exp2;
+
+    const double dQdrho = m.b * u * inv_omega
+                          + 2.0 * m.b * u * om_m1 * inv_omega2
+                          + m.A * exp1 / m.rho0
+                          + m.A * mu * m.beta * exp1 * zp1 / rho;
+    const double dexp2_drho = 2.0 * m.alpha * z * zp1 / rho * exp2;
+    dPdrho = m.a * u + dQdrho * exp2 + Q * dexp2_drho;
+}
+
+inline void tillotsonPressureAndDerivs(const TillotsonMaterial &m,
+                                        const double rho, const double u,
+                                        double &P, double &dPdrho, double &dPdu) {
+    const double eta = rho / m.rho0;
+    if (eta >= 1.0 || u <= m.u_iv) {
+        tillotsonCompressed(m, rho, u, P, dPdrho, dPdu);
+    } else if (u >= m.u_cv) {
+        tillotsonExpanded(m, rho, u, P, dPdrho, dPdu);
+    } else {
+        double Pc, dPcdrho, dPcdu;
+        double Pe, dPedrho, dPedu;
+        tillotsonCompressed(m, rho, u, Pc, dPcdrho, dPcdu);
+        tillotsonExpanded(m, rho, u, Pe, dPedrho, dPedu);
+        const double inv_du = 1.0 / (m.u_cv - m.u_iv);
+        const double w  = (u - m.u_iv) * inv_du;
+        P      = w * Pe + (1.0 - w) * Pc;
+        dPdrho = w * dPedrho + (1.0 - w) * dPcdrho;
+        dPdu   = w * dPedu   + (1.0 - w) * dPcdu + (Pe - Pc) * inv_du;
+    }
+}
+
+/// Newton-Raphson solve P_tillotson(rho, u) = p_target for u.
+/// Seeded from a compressed-regime linearization. Used by every method that
+/// receives (rho, p) but needs u — namely the post-HLLC reconstruction path
+/// and the IC-init pressure-to-energy step.
+double tillotsonInternalEnergy(const TillotsonMaterial &m,
+                                const double rho, const double p_target) {
+    const double eta = rho / m.rho0;
+    const double mu  = eta - 1.0;
+    // Cold-region linearization: ignore the b/omega term to get an initial
+    // guess. P_c ~ (a + b) * rho * u + A*mu + B*mu^2  when omega ~ 1.
+    double u = (p_target - m.A * mu - m.B * mu * mu) / ((m.a + m.b) * rho);
+    if (!std::isfinite(u) || u < 0.0) u = 0.0;
+
+    const double tol = 1e-10 * std::max(std::abs(p_target), 1.0);
+    for (int iter = 0; iter < 25; ++iter) {
+        double P, dPdrho, dPdu;
+        tillotsonPressureAndDerivs(m, rho, u, P, dPdrho, dPdu);
+        const double resid = P - p_target;
+        if (std::abs(resid) < tol) return u;
+        if (std::abs(dPdu) < 1e-300) break;
+        double du = -resid / dPdu;
+        // Damped step: keep u >= 0 (Tillotson is undefined for u < 0).
+        if (u + du < 0.0) du = -0.5 * u;
+        u += du;
+    }
+    return u;
+}
+
+inline double tillotsonSoundSpeedSquared(const TillotsonMaterial &m,
+                                          const double rho, const double u) {
+    double P, dPdrho, dPdu;
+    tillotsonPressureAndDerivs(m, rho, u, P, dPdrho, dPdu);
+    double cs2 = dPdrho + P / (rho * rho) * dPdu;
+    if (cs2 < 0.0) cs2 = 0.0;
+    return cs2;
+}
+
+} // anonymous namespace
+
+double EquationOfState::EOSPressure(int matId, const double &rho, const double &u){
+#if DEBUG_LVL >= 1
+    assert(matId >= 0 && matId < (int)materials.size());
+#endif
+    const TillotsonMaterial &m = materials[matId];
+    double P, dPdrho, dPdu;
+    tillotsonPressureAndDerivs(m, rho, u, P, dPdrho, dPdu);
+    return P;
+}
+
+double EquationOfState::EOSSoundSpeed(int matId, const double &rho, const double &u, const double &p){
+#if DEBUG_LVL >= 1
+    assert(matId >= 0 && matId < (int)materials.size());
+#endif
+    const TillotsonMaterial &m = materials[matId];
+    // u < 0 is the caller's sentinel for "use p instead" (see Particles.cpp:2148).
+    const double u_use = (u >= 0.0) ? u : tillotsonInternalEnergy(m, rho, p);
+    return tillotsonSoundSpeedSquared(m, rho, u_use);
+}
+
+double EquationOfState::EOSInternalEnergy(int matId, const double &rho, const double &p){
+#if DEBUG_LVL >= 1
+    assert(matId >= 0 && matId < (int)materials.size());
+#endif
+    return tillotsonInternalEnergy(materials[matId], rho, p);
+}
+
+double EquationOfState::EOSEnergyFluxGamma(int matId, const double &rho, const double &p, const double &u){
+#if DEBUG_LVL >= 1
+    assert(matId >= 0 && matId < (int)materials.size());
+#endif
+    const TillotsonMaterial &m = materials[matId];
+    const double cs2 = tillotsonSoundSpeedSquared(m, rho, u);
+    return cs2 * rho / p;
+}
+
+double EquationOfState::EOSAdiabaticSoundSpeed(int matId, const double &rho, const double &p){
+#if DEBUG_LVL >= 1
+    assert(matId >= 0 && matId < (int)materials.size());
+#endif
+    const TillotsonMaterial &m = materials[matId];
+    const double u   = tillotsonInternalEnergy(m, rho, p);
+    const double cs2 = tillotsonSoundSpeedSquared(m, rho, u);
+    return cs2 * rho / p;
+}
+
+double EquationOfState::EOSGeneralGamma(int matId, const double &rho, const double &p){
+#if DEBUG_LVL >= 1
+    assert(matId >= 0 && matId < (int)materials.size());
+#endif
+    const TillotsonMaterial &m = materials[matId];
+    const double u   = tillotsonInternalEnergy(m, rho, p);
+    const double cs2 = tillotsonSoundSpeedSquared(m, rho, u);
+    return cs2 * rho / p;
+}
+
+double EquationOfState::EOSBulkModulus(int matId, const double &rho, const double &p){
+#if DEBUG_LVL >= 1
+    assert(matId >= 0 && matId < (int)materials.size());
+#endif
+    const TillotsonMaterial &m = materials[matId];
+    const double u   = tillotsonInternalEnergy(m, rho, p);
+    const double cs2 = tillotsonSoundSpeedSquared(m, rho, u);
+    return rho * cs2;
+}
+
+double EquationOfState::EOSShearModulus(int matId){
+#if DEBUG_LVL >= 1
+    assert(matId >= 0 && matId < (int)materials.size());
+#endif
+    return materials[matId].mu;
+}
+
+const TillotsonMaterial& EquationOfState::EOSGetMaterial(int matId){
+#if DEBUG_LVL >= 1
+    assert(matId >= 0 && matId < (int)materials.size());
+#endif
+    return materials[matId];
+}
+
+#else // EOS == 0
 
 double EquationOfState::EOSPressure(const double &rho, const double &u){
-#if EOS == 0 // Ideal gas
     return (hydro_gamma - 1) * u * rho;
-#elif EOS == 2 // Tillotson
-    return -1
-#endif // EOS
 }
 
 double EquationOfState::EOSSoundSpeed(const double &rho, const double &u,
                         const double &p){
-#if EOS == 0 // Ideal gas
     return sqrt(hydro_gamma * p / rho);
-#elif EOS == 2 // Tillotson
-    return -1; // TODO
-#endif // EOS
 }
 
 double EquationOfState::EOSInternalEnergy(const double &rho, const double &p){
-#if EOS == 0 // Ideal gas
     return p /((hydro_gamma - 1) * rho);
-#endif // EOS
 }
 
 double EquationOfState::EOSEnergyFluxGamma(const double &rho, const double &p, const double &u){
-#if EOS == 0
     return hydro_gamma;
-#endif
 }
 
 double EquationOfState::EOSAdiabaticSoundSpeed(const double &rho, const double &p){
-    double cs = 0;
-#if EOS == 0
-    cs = sqrt(hydro_gamma * p / rho);
-#endif
+    double cs = sqrt(hydro_gamma * p / rho);
     assert(cs >= 0 && "Negative sound speed encountered");
     assert(cs > 0 && "Zero sound speed encountered");
     return cs;
 }
 
 double EquationOfState::EOSBulkModulus(const double &rho, const double &p){
-#if EOS == 0
     return hydro_gamma * p;
-#endif
 }
 
 double EquationOfState::EOSGeneralGamma(const double &rho, const double &p){
-#if EOS == 0
     return hydro_gamma;
-#endif
 }
-#endif // EOS == 1
 
-#if EOS == 0
 double EquationOfState::EOSGetHydroGammaParam(){
     return hydro_gamma;
 }
-#endif
+#endif // EOS
