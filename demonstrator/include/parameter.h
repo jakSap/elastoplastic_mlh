@@ -158,6 +158,29 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // Output per-particle condition number of the gradient estimation matrix E
 #define OUTPUT_CONDITION_NUMBER 1
 
+// Hopkins/GIZMO surface volume closure correction (Reinhardt & Stadel 2017,
+// arXiv:1701.08296, Fig. 3 calibration; GIZMO flag HYDRO_KERNEL_SURFACE_VOLCORR).
+// When 1, each particle's kernel-sum density is divided by a per-particle
+// FaceClosureError(FCE), computed from the asymmetry of its kernel neighbour
+// distribution:
+//   xi_i  = |sum_j W_ij r_ij| / (h_i * Omega_i)         (dimensionless)
+//   FCE_i = clamp(SURFACE_VOLCORR_A - SURFACE_VOLCORR_B*xi_i,
+//                 SURFACE_VOLCORR_FLOOR, 1.0)
+//   rho_i = m_i * Omega_i / FCE_i
+// FCE = 1 in the bulk (symmetric stencil), drops to ~0.65 at a flat free
+// surface, and the floor 0.344 caps the maximum bump (~ x3) at 2D corners.
+// The corrected (FCE/Omega) is also used as the volume V_i in compEffectiveFace
+// and sumVolume, mirroring GIZMO's downstream use of `Density` as 1/V.
+// Set to 0 to disable the correction entirely (rho_i = m_i*Omega_i).
+#define SURFACE_VOLCORR 1
+#define SURFACE_VOLCORR_A 1.0259
+#define SURFACE_VOLCORR_B 2.52444
+#define SURFACE_VOLCORR_FLOOR 0.344301
+
+#if SURFACE_VOLCORR && PERIODIC_BOUNDARIES
+#error "SURFACE_VOLCORR is only implemented for the non-periodic path. The closure asymmetry sum currently ignores ghost neighbours, which would spuriously trigger the correction at periodic boundaries. Set SURFACE_VOLCORR to 0 for periodic runs."
+#endif
+
 // Diagnostic: dump per-pair Riemann-flux contributions to the first particle
 // whose conditionNumber crosses DIAG_COND_TRIGGER. The target particle is
 // selected dynamically (highest cond above the threshold on the first step
@@ -188,7 +211,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // gradient quantities (rho, P, v, S) blend with the same w.
 // Set COND_MAX_FOR_GRADIENT to a negative value to disable the fallback
 // entirely (gradient stays MFM regardless of conditioning).
-#define COND_MAX_FOR_GRADIENT 100.
+#define COND_MAX_FOR_GRADIENT 1.0e7
 // Negative -> blend disabled, hard switch at COND_MAX_FOR_GRADIENT.
 // (A7 with LO=100/HI=1000 and A8 with LO=10/HI=100 both regressed
 // vs Attempt 6's hard switch — see sph_fallback_attempts.md.)

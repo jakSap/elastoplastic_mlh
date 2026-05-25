@@ -166,6 +166,10 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     vzGrad = new double[numParticles][DIM];
 #endif
     omega = new double[numParticles];
+#if SURFACE_VOLCORR
+    fce = new double[numParticles];
+    for (int i=0; i<numParticles; ++i) fce[i] = 1.;
+#endif
 #if OUTPUT_CONDITION_NUMBER
     conditionNumber = new double[numParticles];
 #if DIM == 2
@@ -232,6 +236,9 @@ Particles::~Particles() {
     delete[] vyGrad;
     delete[] PGrad;
     delete[] omega;
+#if SURFACE_VOLCORR
+    delete[] fce;
+#endif
 #if OUTPUT_CONDITION_NUMBER
     delete[] conditionNumber;
 #if DIM == 2
@@ -1480,7 +1487,13 @@ void Particles::compDensity(){
     for(int i=0; i<N; ++i){
 //#if PERIODIC_BOUNDARIES
         compOmega(i);
+#if SURFACE_VOLCORR
+        // Hopkins/GIZMO surface volume closure: lift kernel-sum density at
+        // free surfaces by 1/FCE_i so the boundary is single-cell-wide in rho.
+        rho[i] = m[i]*omega[i] / fce[i];
+#else
         rho[i] = m[i]*omega[i];
+#endif
         if(rho[i] <= 0.){
             if (DENSITY_FLOOR < 0){
                 Logger(DEBUG) << "Negative density encountered, i = " << i << ". Aborting for debugging.";
@@ -1735,26 +1748,53 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
 void Particles::compOmega(int i){
     const double hi = sml[i];
     double omg = 0.;
+#if SURFACE_VOLCORR
+    // Asymmetry of the neighbour kernel sum: S_i = sum_j W_ij * (x_i - x_j).
+    // Zero in a symmetric (bulk) stencil; nonzero at a free surface where
+    // half the support is empty. xi_i = |S_i| / (h_i Omega_i) is the
+    // dimensionless closure asymmetry from Reinhardt & Stadel 2017.
+    double sx = 0., sy = 0.;
+#if DIM == 3
+    double sz = 0.;
+#endif
+#endif
     int iP;
     for (int j=0; j<noi[i]; ++j){
         iP = nnl[j+i*MAX_NUM_INTERACTIONS];
-        double dSqr = pow(x[i] - x[iP], 2)
-                    + pow(y[i] - y[iP], 2);
+        double dx = x[i] - x[iP];
+        double dy = y[i] - y[iP];
+        double dSqr = dx*dx + dy*dy;
 #if DIM == 3
-        dSqr += pow(z[i] - z[iP], 2);
+        double dz = z[i] - z[iP];
+        dSqr += dz*dz;
 #endif
         double r = sqrt(dSqr);
-        omg += kernel(r, hi);
-
-        //Logger(DEBUG) << "x[" << i << "] = [" << x[i] << ", " <<  y[i] << "], x["
-        //          << iP << "] = [" << x[iP] << ", "
-        //          << y[iP] << "]";
-
+        double wij = kernel(r, hi);
+        omg += wij;
+#if SURFACE_VOLCORR
+        sx += wij * dx;
+        sy += wij * dy;
+#if DIM == 3
+        sz += wij * dz;
+#endif
+#endif
     }
     omega[i] = omg + kernel(0., hi); // add self interaction to normalization factor
     if (omega[i] < 0){
         Logger(WARN) << "Negative Omega encountered, i = " << i;
     }
+#if SURFACE_VOLCORR
+    // Self-contribution to S_i is zero (r_ii = 0), so no diagonal term.
+    double S2 = sx*sx + sy*sy;
+#if DIM == 3
+    S2 += sz*sz;
+#endif
+    double xi_asym = sqrt(S2) / (hi * omega[i]);
+    double fce_raw = SURFACE_VOLCORR_A - SURFACE_VOLCORR_B * xi_asym;
+    if (fce_raw > 1.0) fce_raw = 1.0;
+    if (fce_raw < SURFACE_VOLCORR_FLOOR) fce_raw = SURFACE_VOLCORR_FLOOR;
+    fce[i] = fce_raw;
+#endif
 }
 
 void Particles::compPsijTilde(Helper &helper){
@@ -1957,9 +1997,20 @@ void Particles::compEffectiveFace(){
             for(ij=0; ij<noi[ji]; ++ij){
                 if (nnl[ij+ji*MAX_NUM_INTERACTIONS] == i) break;
             }
+#if SURFACE_VOLCORR
+            // V_i = m_i/rho_i = FCE_i/Omega_i with the closure correction
+            // applied to the density; propagate the same factor here so the
+            // effective face geometry tracks the corrected volume (mirrors
+            // GIZMO's downstream use of Density as 1/V in face assembly).
+            const double Vi  = fce[i]  / omega[i];
+            const double Vji = fce[ji] / omega[ji];
+#else
+            const double Vi  = 1. / omega[i];
+            const double Vji = 1. / omega[ji];
+#endif
             for (int alpha=0; alpha<DIM; ++alpha){
-                Aij[i*MAX_NUM_INTERACTIONS+j][alpha] = 1./omega[i]*psijTilde_xi[i*MAX_NUM_INTERACTIONS+j][alpha]
-                        - 1./omega[ji]*psijTilde_xi[ij+ji*MAX_NUM_INTERACTIONS][alpha];
+                Aij[i*MAX_NUM_INTERACTIONS+j][alpha] = Vi*psijTilde_xi[i*MAX_NUM_INTERACTIONS+j][alpha]
+                        - Vji*psijTilde_xi[ij+ji*MAX_NUM_INTERACTIONS][alpha];
             }
 
             //if(i < 10){
@@ -4225,7 +4276,11 @@ void Particles::dumpNNL(std::string filename){
 double Particles::sumVolume(){
     double V = 0.;
     for (int i=0; i<N; ++i){
+#if SURFACE_VOLCORR
+        V += fce[i] / omega[i];
+#else
         V += 1./omega[i];
+#endif
     }
     return V;
 }
@@ -4411,6 +4466,9 @@ void Particles::dump2file(std::string filename, double simTime){
     HighFive::DataSet eigenvecMinDataSet = h5File.createDataSet<double>("/eigenvecMin", HighFive::DataSpace(dataSpaceDims));
 #endif
 #endif
+#if SURFACE_VOLCORR
+    HighFive::DataSet fceDataSet = h5File.createDataSet<double>("/fce", HighFive::DataSpace(N));
+#endif
 #if ELASTIC
     HighFive::DataSet SxxDataSet = h5File.createDataSet<double>("/Sxx", HighFive::DataSpace(N));
     HighFive::DataSet SxyDataSet = h5File.createDataSet<double>("/Sxy", HighFive::DataSpace(N));
@@ -4501,6 +4559,12 @@ void Particles::dump2file(std::string filename, double simTime){
         smlDataSet.write(smlVec);
     }
     noiDataSet.write(noi);
+#if SURFACE_VOLCORR
+    {
+        std::vector<double> fceVec(fce, fce+N);
+        fceDataSet.write(fceVec);
+    }
+#endif
 #if OUTPUT_CONDITION_NUMBER
     std::vector<double> condVec(conditionNumber, conditionNumber+N);
     condDataSet.write(condVec);

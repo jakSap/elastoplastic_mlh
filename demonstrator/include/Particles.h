@@ -55,6 +55,15 @@ public:
 #endif
 #endif
 
+#if SURFACE_VOLCORR
+    /// Per-particle FaceClosureError (Reinhardt & Stadel 2017). 1 in the bulk;
+    /// drops to ~0.65 at a flat free surface; floor 0.344 caps the bump at
+    /// corners. Used to lift kernel-sum density at free surfaces:
+    ///     rho_i = m_i * Omega_i / fce[i]
+    /// Also used as FCE_i/Omega_i for V_i in compEffectiveFace / sumVolume.
+    double *fce;
+#endif
+
 #if ELASTIC
     double *Sxx, *Sxy, *Syy;
     double (*SxxGrad)[DIM], (*SxyGrad)[DIM], (*SyyGrad)[DIM];
