@@ -21,6 +21,35 @@ pref = 'S'
 ENVELOPE_MATID = 2
 ENVELOPE_SCALE = 1.0 / 3.0
 
+
+def is_gizmo_file(path):
+    """GADGET-style snapshot (PartType0/...) vs the demonstrator's flat layout.
+    We use the .hdf5 extension as the cheap discriminator; demonstrator writes .h5."""
+    return str(path).endswith('.hdf5')
+
+
+def open_snapshot(path):
+    """Open a snapshot in either format. For demonstrator files, returns the
+    h5py.File (so all existing data['key'][...] calls work). For GIZMO files,
+    returns a dict-of-ndarrays that supports the same access pattern under the
+    demonstrator's key names. GIZMO snapshots lack stress / gradient / NNL
+    fields, so plot modes that need those will fall back to a clear KeyError."""
+    if is_gizmo_file(path):
+        with h5.File(path, 'r') as f:
+            coords = f['PartType0/Coordinates'][:]
+            out = {
+                'x'   : coords[:, :2],
+                'rho' : f['PartType0/Density'][:],
+                'm'   : f['PartType0/Masses'][:],
+                'time': np.array([float(f['Header'].attrs['Time'])]),
+            }
+            if 'PartType0/Velocities'      in f: out['v']   = f['PartType0/Velocities'][:, :2]
+            if 'PartType0/Pressure'        in f: out['P']   = f['PartType0/Pressure'][:]
+            if 'PartType0/InternalEnergy'  in f: out['u']   = f['PartType0/InternalEnergy'][:]
+            if 'PartType0/SmoothingLength' in f: out['sml'] = f['PartType0/SmoothingLength'][:]
+        return out
+    return h5.File(path, 'r')
+
 def _marker_sizes(data, markerSize):
     """Return a per-particle size array if a materialId field is present,
     scaling envelope particles down. Otherwise return the scalar markerSize."""
@@ -45,11 +74,14 @@ def setDomainLimits(ax, pos, h5File, openBorders):
         ax.set_ylim((0., 1.))
 
 def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
-    data = h5.File(h5File, 'r')
+    data = open_snapshot(h5File)
+    gizmo = is_gizmo_file(h5File)
     pos = data["x"][:]
 
     time = data["time"][0]
     if stress:
+        if gizmo:
+            raise KeyError("--stress is unavailable for GIZMO snapshots (no Sxx/Sxy/Syy fields)")
         Sxx = np.array(data["Sxx"][:])
         Sxy = np.array(data["Sxy"][:])
         Syy = np.array(data["Syy"][:])
@@ -72,7 +104,10 @@ def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=Fals
 
     # Plot gradient
     if plotGrad and not plotVel:
-        plotGradient(data["rhoGrad"][:], pos, ax)
+        if gizmo:
+            print(f"WARNING: --plotGradient unavailable for GIZMO snapshot {h5File}, skipping.")
+        else:
+            plotGradient(data["rhoGrad"][:], pos, ax)
     elif not plotGrad and plotVel:
         plotVelocity(data["v"][:], pos, ax)
     elif plotGrad and plotVel:
@@ -80,7 +115,10 @@ def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=Fals
 
     # plot NNL for particle i
     if iNNL > -1 and "Ghosts" not in str(h5File):
-        plotNNL(h5File, iNNL, pos, ax)
+        if gizmo:
+            print(f"WARNING: --iNNL unavailable for GIZMO snapshot {h5File}, skipping.")
+        else:
+            plotNNL(h5File, iNNL, pos, ax)
 
     # plot kernel circle for particle i
     if iHi > -1 and "Ghosts" not in str(h5File):
@@ -506,7 +544,9 @@ if __name__=="__main__":
     
     print("Examining files in", args.simOutputDir, "...")
 
-    h5Files = sorted([f for f in pathlib.Path(args.simOutputDir).glob('*.h5')
+    # Pick up both demonstrator (.h5) and GIZMO (.hdf5) snapshots.
+    h5Files = sorted([f for f in list(pathlib.Path(args.simOutputDir).glob('*.h5'))
+                                  + list(pathlib.Path(args.simOutputDir).glob('*.hdf5'))
                        if "NNL" not in str(f) and (args.plotGhosts or "Ghost" not in str(f))])
     all_h5Files = list(h5Files)  # full sorted list, before --continue filtering
 
@@ -523,15 +563,19 @@ if __name__=="__main__":
     if args.tstart is not None:
         before = len(h5Files)
         h5Files = [f for f in h5Files
-                    if h5.File(f, 'r')["time"][0] >= args.tstart]
+                    if open_snapshot(f)["time"][0] >= args.tstart]
         print(f"--tstart={args.tstart}: kept {len(h5Files)}/{before} file(s) with t >= {args.tstart}")
 
     def prescan_quantity(files, key):
         lo, hi = None, None
         for f in files:
-            with h5.File(f, 'r') as d:
-                vals = d[key][()]
-            flo, fhi = float(vals.min()), float(vals.max())
+            d = open_snapshot(f)
+            if key not in d:
+                # GIZMO snapshots lack the demonstrator-only fields (rhoGrad,
+                # Sxx, conditionNumber, ...); skip rather than crash.
+                continue
+            vals = d[key][()] if hasattr(d[key], 'shape') else np.asarray(d[key])
+            flo, fhi = float(np.nanmin(vals)), float(np.nanmax(vals))
             if lo is None or flo < lo: lo = flo
             if hi is None or fhi > hi: hi = fhi
         if lo is None or np.isnan(lo): lo = 0.
