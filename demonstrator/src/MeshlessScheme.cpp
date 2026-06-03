@@ -126,6 +126,13 @@ void MeshlessScheme::run(){
         particles->compDensity(ghostParticles);
 #endif
 
+#if EXPLICIT_VOL_INTEGRATION
+        // GIZMO HYDRO_EXPLICITLY_INTEGRATE_VOLUME: from step 1 onward, rho
+        // downstream is the explicitly-integrated value, not the kernel sum.
+        Logger(DEBUG) << "      > Explicit-volume override (substitute rho)";
+        particles->applyExplicitVolumeOverride();
+#endif
+
         Logger(INFO) << "    > Computing pressure";
         particles->compPressure();
         //particles->printDensity(config.gamma);
@@ -268,6 +275,13 @@ void MeshlessScheme::run(){
         particles->updateGhostState(ghostParticles);
 #endif
 #endif // ELASTIC
+#if EXPLICIT_VOL_INTEGRATION
+        // Half-step kick A: advance rhoExplicit by dt/2 using pre-flux gradients.
+        // finalize=false: under EXPLICIT_VOL_FREEZE_RHO the working rho is left
+        // frozen for the flux pass (GIZMO mode==0).
+        Logger(DEBUG) << "      > Explicit-volume half-step kick A";
+        particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/false);
+#endif
         Logger(INFO) << "    > Preparing Riemann solver";
         Logger(DEBUG) << "      > Computing effective faces";
         particles->compEffectiveFace();
@@ -405,6 +419,13 @@ void MeshlessScheme::run(){
 
         Logger(INFO) << "    > Performing stress integration 2 / 2";
         particles->integrateStressTensor(timeStep / 2.0);
+
+#if EXPLICIT_VOL_INTEGRATION
+        // Half-step kick B: advance rhoExplicit by dt/2 using post-update gradients.
+        // finalize=true: end-of-step swap rho <- rhoExplicit (GIZMO mode==1).
+        Logger(DEBUG) << "      > Explicit-volume half-step kick B";
+        particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/true);
+#endif
 
         //Logger(INFO) << "    > Moving particles";
         Logger(INFO) << "    > Moving particles";

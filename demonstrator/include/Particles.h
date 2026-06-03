@@ -64,6 +64,33 @@ public:
     double *fce;
 #endif
 
+#if EXPLICIT_VOL_INTEGRATION
+    /// Explicitly-integrated density (GIZMO Density_ExplicitInt). After the
+    /// first compDensity() call this replaces `rho` everywhere downstream and
+    /// is evolved by div-v half-kicks.
+    double *rhoExplicit;
+    /// Per-step stash of the kernel-sum density (with SURFACE_VOLCORR applied
+    /// if enabled). Used as the relaxation target in integrateExplicitVolume().
+    double *rhoKernel;
+    /// False before the first applyExplicitVolumeOverride() call. On the first
+    /// call we seed rhoExplicit from the kernel density rather than overwriting
+    /// rho; on every subsequent call we substitute rho <- rhoExplicit.
+    bool explicitVolInitialized { false };
+
+    /// Replace rho with rhoExplicit (after stashing kernel rho in rhoKernel),
+    /// or seed rhoExplicit from rho on the first call. Must be called right
+    /// after compDensity() and before pressure / gradients see rho.
+    void applyExplicitVolumeOverride();
+
+    /// Half-step kick of rhoExplicit: advect by exp(-clamp(div_v * dt, +-cap))
+    /// then relax in log-space toward rhoKernel over delta = COEF * dt * c_eff / L_grad.
+    /// Pass dt = full_step / 2 to get GIZMO's half-step semantics.
+    /// `finalize` marks the end-of-step kick (GIZMO kicks.c:395, mode==1): under
+    /// EXPLICIT_VOL_FREEZE_RHO only the finalize kick writes rho <- rhoExplicit, so
+    /// the working density stays frozen through the hydro pass.
+    void integrateExplicitVolumeHalfStep(const double &dt, bool finalize = false);
+#endif
+
 #if ELASTIC
     double *Sxx, *Sxy, *Syy;
     double (*SxxGrad)[DIM], (*SxyGrad)[DIM], (*SyyGrad)[DIM];

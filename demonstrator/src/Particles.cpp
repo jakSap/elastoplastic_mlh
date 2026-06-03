@@ -170,6 +170,10 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     fce = new double[numParticles];
     for (int i=0; i<numParticles; ++i) fce[i] = 1.;
 #endif
+#if EXPLICIT_VOL_INTEGRATION
+    rhoExplicit = new double[numParticles]();
+    rhoKernel   = new double[numParticles]();
+#endif
 #if OUTPUT_CONDITION_NUMBER
     conditionNumber = new double[numParticles];
 #if DIM == 2
@@ -238,6 +242,10 @@ Particles::~Particles() {
     delete[] omega;
 #if SURFACE_VOLCORR
     delete[] fce;
+#endif
+#if EXPLICIT_VOL_INTEGRATION
+    delete[] rhoExplicit;
+    delete[] rhoKernel;
 #endif
 #if OUTPUT_CONDITION_NUMBER
     delete[] conditionNumber;
@@ -1504,12 +1512,114 @@ void Particles::compDensity(){
                 rho[i] = DENSITY_FLOOR;
             }
         }
-        
+
         //if ((i - 0) % 30 == 0){
         //    Logger(DEBUG) << "density from ghosts: i = " << i << ", dnst = " << rho[i];
         //}
     }
 }
+
+#if EXPLICIT_VOL_INTEGRATION
+void Particles::applyExplicitVolumeOverride(){
+    // Mirror of GIZMO master/hydro/density.c:982-987. The kernel-sum density
+    // is the relaxation target; downstream physics sees the integrated value.
+    if (!explicitVolInitialized){
+        for (int i = 0; i < N; ++i){
+            rhoKernel[i]   = rho[i];
+            rhoExplicit[i] = rho[i];
+        }
+        explicitVolInitialized = true;
+    } else {
+        for (int i = 0; i < N; ++i){
+            rhoKernel[i] = rho[i];
+            // floor-protect: if a particle got density-floored above, do not
+            // poison rhoExplicit. Keep evolving the integrated value instead.
+            if (rhoExplicit[i] > 0.) rho[i] = rhoExplicit[i];
+            else                     rhoExplicit[i] = rho[i];
+        }
+    }
+}
+
+void Particles::integrateExplicitVolumeHalfStep(const double &dt, bool finalize){
+    // Mirror of GIZMO master/kicks.c:308-318. Called twice per outer step
+    // with dt = full_step / 2 to bracket the flux/updateState block.
+    for (int i = 0; i < N; ++i){
+        // Advection step: d ln rho / dt = -div v.
+        double divV = vxGrad[i][0] + vyGrad[i][1];
+#if DIM == 3
+        divV += vzGrad[i][2];
+#endif
+        double arg = divV * dt;
+        if (arg >  EXPLICIT_VOL_DIVV_CLAMP) arg =  EXPLICIT_VOL_DIVV_CLAMP;
+        if (arg < -EXPLICIT_VOL_DIVV_CLAMP) arg = -EXPLICIT_VOL_DIVV_CLAMP;
+        rhoExplicit[i] *= std::exp(-arg);
+
+        // Relaxation toward the kernel-sum density in log-space.
+        double drho2 = rhoGrad[i][0]*rhoGrad[i][0]
+                     + rhoGrad[i][1]*rhoGrad[i][1];
+#if DIM == 3
+        drho2 += rhoGrad[i][2]*rhoGrad[i][2];
+#endif
+        if (drho2 > 0. && rhoExplicit[i] > 0. && rhoKernel[i] > 0.){
+            double Lgrad = rho[i] / std::sqrt(drho2);
+            if (Lgrad < sml[i]) Lgrad = sml[i];
+
+#if EOS == 1 || EOS == 2
+            double cEff = MeshlessEOS->EOSSoundSpeed(matId[i], rhoExplicit[i], u[i], P[i]);
+#else
+            double cEff = MeshlessEOS->EOSSoundSpeed(rhoExplicit[i], u[i], P[i]);
+#endif
+#if ELASTIC && (EOS == 1 || EOS == 2)
+            // Deviatoric-wave speed sqrt(mu/rho) may set a stricter
+            // restoring-force timescale (GIZMO kicks.c:313-315).
+            const double mu = MeshlessEOS->EOSShearModulus(matId[i]);
+            if (mu > 0.){
+                const double csDev = std::sqrt(mu / rhoExplicit[i]);
+                if (csDev < cEff) cEff = csDev;
+            }
+#endif
+            const double delta = EXPLICIT_VOL_RELAX_COEF * dt * cEff / Lgrad;
+            const double q0 = std::log(rhoExplicit[i]);
+            const double q1 = std::log(rhoKernel[i]);
+            double qn;
+            if (delta > 0.005){
+                const double e = std::exp(-delta);
+                qn = q0 * e + q1 * (1. - e);
+            } else {
+                qn = q0 + (q1 - q0) * delta * (1. - 0.5 * delta);
+            }
+#if EXPLICIT_VOL_RELAX
+            // Relaxation toward the kernel-sum density actually fires.
+            rhoExplicit[i] = std::exp(qn);
+#else
+            // GIZMO kicks.c:317 behaviour: discard the relaxation and keep the
+            // pure-advection (Monaghan continuity) density. Matches the GIZMO
+            // baseline that bounces; relaxing toward the surface-noisy kernel
+            // density destabilises the free surface. (qn is computed above but
+            // intentionally unused, mirroring GIZMO's dead-code block.)
+            (void)qn;
+            rhoExplicit[i] = std::exp(q0);
+#endif
+        }
+
+#if EXPLICIT_VOL_FREEZE_RHO
+        // GIZMO freezes the working density through the whole hydro pass and only
+        // finalises Density <- Density_ExplicitInt at end-of-step (kicks.c:395,
+        // mode==1). Mid-pass (kick A) we leave rho untouched so pressure,
+        // gradients, faces and Riemann reconstruction all see the single override
+        // density set by applyExplicitVolumeOverride(); rhoExplicit still
+        // accumulates both half-kick advections and is swapped in next step.
+        if (finalize) rho[i] = rhoExplicit[i];
+#else
+        // Legacy: keep the working rho synchronised with the just-updated
+        // integrated value after every half-kick (desyncs P and rho for the flux
+        // pass, since pressure was computed before kick A).
+        (void)finalize;
+        rho[i] = rhoExplicit[i];
+#endif
+    }
+}
+#endif // EXPLICIT_VOL_INTEGRATION
 
 #if VARIABLE_SML
 double Particles::hMax() const {
@@ -1997,17 +2107,25 @@ void Particles::compEffectiveFace(){
             for(ij=0; ij<noi[ji]; ++ij){
                 if (nnl[ij+ji*MAX_NUM_INTERACTIONS] == i) break;
             }
-#if SURFACE_VOLCORR
-            // V_i = m_i/rho_i = FCE_i/Omega_i with the closure correction
-            // applied to the density; propagate the same factor here so the
-            // effective face geometry tracks the corrected volume (mirrors
-            // GIZMO's downstream use of Density as 1/V in face assembly).
-            const double Vi  = fce[i]  / omega[i];
-            const double Vji = fce[ji] / omega[ji];
-#else
-            const double Vi  = 1. / omega[i];
-            const double Vji = 1. / omega[ji];
-#endif
+            // V_i = m_i/rho_i, exactly GIZMO's Mass/Density in face assembly
+            // (hydro_core_meshless.h:46, hydro_evaluate.h:80,311). Deriving the
+            // face volume from rho -- rather than the kernel value fce/omega --
+            // keeps the geometry consistent with whatever density the rest of
+            // the hydro pass sees:
+            //   SURFACE_VOLCORR on, explicit off : rho = m*omega/fce
+            //                                       -> m/rho = fce/omega (unchanged)
+            //   SURFACE_VOLCORR off              : rho = m*omega
+            //                                       -> m/rho = 1/omega   (unchanged)
+            //   EXPLICIT_VOL_INTEGRATION on      : rho = rhoExplicit
+            //                                       -> m/rho = m/rhoExplicit
+            // The last case is the fix: with the explicit override the faces
+            // must track rhoExplicit too, or the cell carries one density for
+            // pressure and another for its volume, which injects a spurious
+            // net outward flux (the "bloat"). GIZMO avoids this by overwriting
+            // Density with Density_ExplicitInt (density.c:985) before building
+            // the faces from Mass/Density.
+            const double Vi  = m[i]  / rho[i];
+            const double Vji = m[ji] / rho[ji];
             for (int alpha=0; alpha<DIM; ++alpha){
                 Aij[i*MAX_NUM_INTERACTIONS+j][alpha] = Vi*psijTilde_xi[i*MAX_NUM_INTERACTIONS+j][alpha]
                         - Vji*psijTilde_xi[ij+ji*MAX_NUM_INTERACTIONS][alpha];
@@ -4276,11 +4394,11 @@ void Particles::dumpNNL(std::string filename){
 double Particles::sumVolume(){
     double V = 0.;
     for (int i=0; i<N; ++i){
-#if SURFACE_VOLCORR
-        V += fce[i] / omega[i];
-#else
-        V += 1./omega[i];
-#endif
+        // V_i = m_i/rho_i, mirroring compEffectiveFace and GIZMO's Mass/Density.
+        // Tracks rhoExplicit under EXPLICIT_VOL_INTEGRATION and reduces to
+        // fce/omega (SURFACE_VOLCORR) or 1/omega otherwise -- see the comment in
+        // compEffectiveFace for the equivalences.
+        V += m[i] / rho[i];
     }
     return V;
 }
@@ -4469,6 +4587,10 @@ void Particles::dump2file(std::string filename, double simTime){
 #if SURFACE_VOLCORR
     HighFive::DataSet fceDataSet = h5File.createDataSet<double>("/fce", HighFive::DataSpace(N));
 #endif
+#if EXPLICIT_VOL_INTEGRATION
+    HighFive::DataSet rhoExplicitDataSet = h5File.createDataSet<double>("/rhoExplicit", HighFive::DataSpace(N));
+    HighFive::DataSet rhoKernelDataSet   = h5File.createDataSet<double>("/rhoKernel",   HighFive::DataSpace(N));
+#endif
 #if ELASTIC
     HighFive::DataSet SxxDataSet = h5File.createDataSet<double>("/Sxx", HighFive::DataSpace(N));
     HighFive::DataSet SxyDataSet = h5File.createDataSet<double>("/Sxy", HighFive::DataSpace(N));
@@ -4563,6 +4685,14 @@ void Particles::dump2file(std::string filename, double simTime){
     {
         std::vector<double> fceVec(fce, fce+N);
         fceDataSet.write(fceVec);
+    }
+#endif
+#if EXPLICIT_VOL_INTEGRATION
+    {
+        std::vector<double> rhoExplicitVec(rhoExplicit, rhoExplicit+N);
+        std::vector<double> rhoKernelVec(rhoKernel,     rhoKernel+N);
+        rhoExplicitDataSet.write(rhoExplicitVec);
+        rhoKernelDataSet.write(rhoKernelVec);
     }
 #endif
 #if OUTPUT_CONDITION_NUMBER

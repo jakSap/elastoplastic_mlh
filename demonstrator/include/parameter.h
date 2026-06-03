@@ -181,6 +181,64 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #error "SURFACE_VOLCORR is only implemented for the non-periodic path. The closure asymmetry sum currently ignores ghost neighbours, which would spuriously trigger the correction at periodic boundaries. Set SURFACE_VOLCORR to 0 for periodic runs."
 #endif
 
+// GIZMO HYDRO_EXPLICITLY_INTEGRATE_VOLUME port (Monaghan 2000 continuity).
+// When 1, the kernel-sum density rho_kern produced by compDensity() is
+// replaced everywhere downstream (pressure, gradients, Riemann, fluxes,
+// stress integration, output) by an explicitly-integrated density rhoExplicit
+// evolving by
+//     d ln rhoExplicit / dt = - div v
+// The integrated value is relaxed back toward rho_kern in log-space on the
+// timescale t_relax ~ (1/EXPLICIT_VOL_RELAX_COEF) * L_grad / c_eff with
+//     L_grad = max(rho/|grad rho|, sml)
+//     c_eff  = min(c_sound, sqrt(mu/rho))  (deviatoric-wave speed if ELASTIC)
+// The advection step's argument is clamped to +/-EXPLICIT_VOL_DIVV_CLAMP so a
+// single rogue gradient cannot collapse or blow up the density.
+// Two half-step kicks bracket the flux/updateState block in MeshlessScheme::run(),
+// mirroring GIZMO's drift-kick-drift structure (each half-kick uses the
+// gradients available at that point: pre-update for kick A, post-update for B).
+// Bisection on the colliding-rings test (MA-Obsidian/2026-05-25-bisection-results.md)
+// identified this as the single highest-impact missing GIZMO feature for elastic
+// rebound; without it the rings stick instead of bouncing.
+#define EXPLICIT_VOL_INTEGRATION 1
+/// Maximum |div v * dt/2| inside the half-step exponential. Caps the per-step
+/// density change at exp(EXPLICIT_VOL_DIVV_CLAMP) ~ 4.5 (matches GIZMO).
+#define EXPLICIT_VOL_DIVV_CLAMP 1.5
+/// Coefficient in delta = COEF * (dt/2) * c_eff / L_grad. 0.1 gives
+/// t_relax ~ 10 * L_grad / c_eff, the GIZMO default.
+#define EXPLICIT_VOL_RELAX_COEF 0.1
+/// Whether the log-space relaxation toward the kernel-sum density actually
+/// fires. GIZMO's kicks.c:317 computes the relaxed value `qn` but then sets
+/// Density_ExplicitInt = exp(q0) -- i.e. it discards the relaxation and keeps
+/// the PURE-ADVECTION (Monaghan continuity) density. The colliding-rings
+/// baseline that bounces (ring_sep=18.4) runs with this advection-only form.
+/// Enabling the relaxation (qn) drags rhoExplicit toward the FCE-bumped,
+/// surface-noisy kernel density every step; at the free surface this injects
+/// noise into the evolved density and triggers the rim instability that
+/// crashed the first port at t~51 (Surface_issiues/experiment_setup_20260602.md).
+/// 0 = advection only (exp(q0), matches GIZMO -- DEFAULT); 1 = relax (exp(qn),
+/// legacy demonstrator behaviour). When 0 the relaxation block (Lgrad / cEff /
+/// rhoGrad) is dead code, so the stale-gradient concerns there are moot.
+#define EXPLICIT_VOL_RELAX 0
+/// Whether the working `rho` stays frozen at the once-per-step override value
+/// during the hydro pass. GIZMO freezes Density throughout density->pressure->
+/// gradients->Riemann->flux (the swap to Density_ExplicitInt happens once in
+/// density.c:982-987 and is finalised once at kicks.c:395, mode==1); the
+/// advection only accumulates into Density_ExplicitInt across the two half-kicks.
+/// 1 = freeze: half-step kick A leaves `rho` untouched so pressure, gradients,
+///     faces and Riemann reconstruction all see a single self-consistent density;
+///     `rho` is finalised from rhoExplicit only at end-of-step (kick B). DEFAULT.
+/// 0 = legacy: re-sync rho = rhoExplicit inside every half-kick (desyncs P and
+///     rho for the flux pass, since pressure was computed before kick A).
+#define EXPLICIT_VOL_FREEZE_RHO 1
+
+#if EXPLICIT_VOL_INTEGRATION && PERIODIC_BOUNDARIES
+#error "EXPLICIT_VOL_INTEGRATION currently only wires the non-periodic path. The periodic gradient-recompute hooks would need additional ghost updates of rhoExplicit/rhoKernel. Set EXPLICIT_VOL_INTEGRATION to 0 for periodic runs."
+#endif
+
+#if EXPLICIT_VOL_INTEGRATION && !ELASTIC
+#error "EXPLICIT_VOL_INTEGRATION currently only wires the ELASTIC branch of MeshlessScheme::run(). The non-ELASTIC path uses updateStateAndPosition() with no post-update gradient recompute, so the half-step splitting has no second-kick anchor. Wire a single full-step kick before updateStateAndPosition and lift this guard if you need !ELASTIC."
+#endif
+
 // Diagnostic: dump per-pair Riemann-flux contributions to the first particle
 // whose conditionNumber crosses DIAG_COND_TRIGGER. The target particle is
 // selected dynamically (highest cond above the threshold on the first step
