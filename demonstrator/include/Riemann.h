@@ -21,6 +21,9 @@ public:
     Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
             int matIdR, int matIdL, EquationOfState &MeshlessEOS
 #if USE_HLLC && ELASTIC
+#if TENSILE_CORRECTION
+            , double fabMonaghan
+#endif
             , double SxxR, double SxyR, double SyyR
             , double SxxL, double SxyL, double SyyL
 #if DIM == 3
@@ -76,6 +79,10 @@ private:
     };
 #if USE_HLLC
 #if ELASTIC
+#if TENSILE_CORRECTION
+    double fabMonaghan;
+    double tensileCorrectionFactor; ///< Monaghan tensile-correction factor, used in HLLCFlux
+#endif
     double SijRotR[DIM*DIM]; ///< rotated stress tensor, right state
     double SijRotL[DIM*DIM]; ///< rotated stress tensor, left state
     double Lambda_[DIM*DIM]; ///< rotation matrix, stored for flux back-rotation

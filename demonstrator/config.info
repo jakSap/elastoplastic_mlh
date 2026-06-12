@@ -14,7 +14,7 @@ outDir ../testcases/colliding_rings/vsml/output
 timeStep 0.01
 
 ; end of the simulation
-timeEnd 40
+timeEnd 120
 
 ; output particle distribution each h5DumpInterval steps
 h5DumpInterval 1

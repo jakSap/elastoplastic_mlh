@@ -117,6 +117,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     // value-initialize (zero) so stress starts at the Murnaghan equilibrium
     // for u = 0. Uninitialized memory here breaks stationary ICs where no
     // velocity gradient exists to wash out the garbage.
+#if TENSILE_CORRECTION
+    fabMonaghan = new double[numParticles*MAX_NUM_INTERACTIONS]();
+#endif
     Sxx = new double[numParticles]();
     Sxy = new double[numParticles]();
     Syy = new double[numParticles]();
@@ -257,6 +260,9 @@ Particles::~Particles() {
 #endif
 
 #if ELASTIC
+#if TENSILE_CORRECTION
+    delete[] fabMonaghan;
+#endif
     delete[] Sxx;
     delete[] Sxy;
     delete[] Syy;
@@ -334,6 +340,35 @@ Particles::~Particles() {
 }
 
 #if ELASTIC
+#if TENSILE_CORRECTION
+void Particles::computeFabMonaghan(){
+    // Get normalized mean particle distance within kernel length
+    // Eqivalent to \Delta p in Monaghan paper
+    double deltaP = sqrt(3.14159 / smlNNNTarget);
+    // And take the Kernel
+    double kernelDeltaP = Kernel::cubicSpline(deltaP, 1.);
+
+    // Now loop through the interaction pairs:
+    for(int i = 0; i < N; ++i){
+        for(int jn = 0; jn < noi[i]; ++jn){
+            // This way of looping means recomputing...
+            int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
+            // Now work with i and j.
+            double r2 = pow(x[j] - x[i], 2) + pow(y[j] - y[i], 2);
+#if DIM == 3
+            r2 += pow(z[j] - z[i], 2);
+#endif
+            double r = sqrt(r2);
+            // q = r_ab / max(h_a, h_b) following Monaghan and GIZMO
+            double q = r / std::max(sml[i], sml[j]);
+            // Take the kernel, again..
+            double kernelQ = Kernel::cubicSpline(q, 1.);
+            // To be consistent with Monaghan, dont apply the power of n here.
+            fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = kernelQ / kernelDeltaP;
+        }
+    }
+}
+#endif // TENSILE_CORRECTION
 void Particles::integrateStressTensor(const double &dt) {
     for (int i = 0; i < N; ++i) {
 #if EOS == 1 || EOS == 2
@@ -2802,7 +2837,6 @@ void Particles::compRiemannStatesLR(const double &dt){
                 if (WijR[iW][0] < DENSITY_FLOOR) WijR[iW][0] = DENSITY_FLOOR;
                 if (WijL[iW][0] < DENSITY_FLOOR) WijL[iW][0] = DENSITY_FLOOR;
             }
-
         }
     }
 }
@@ -2970,6 +3004,9 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i,
                                 matIdL_ii, matIdR_ii, *MeshlessEOS
 #if ELASTIC
+#if TENSILE_CORRECTION
+                                , fabMonaghan[ii]
+#endif
                                 , fSxxL, fSxyL, fSyyL
                                 , fSxxR, fSxyR, fSyyR
 #if DIM == 3

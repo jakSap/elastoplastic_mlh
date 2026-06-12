@@ -46,7 +46,8 @@ public:
             double *WR, double *WL,
             double *SijRotR, double *SijRotL,
             double *totflux,
-            EquationOfState &MeshlessEOS);
+            EquationOfState &MeshlessEOS,
+            double &Sstar);
 
     // HLL Solver
     static void HLL(double *WL, double *WR, double *totflux, const double &hydro_gamma);

@@ -590,7 +590,8 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
         double *WR, double *WL,
         double *SijRotR, double *SijRotL,
         double *totflux,
-        EquationOfState &MeshlessEOS){
+        EquationOfState &MeshlessEOS,
+        double &Sstar){
 
     // Step 0: EOS parameters (same pattern as solveHLLC1)
 #if HLLC_general_EOS == 1
@@ -670,8 +671,9 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
     const double SRmvR =  aR * qR;   // SR - vR
 
     // Step 6: Elastic contact wave speed S* (eq. 58, traction continuity)
-    const double Sstar = (tR - tL + WL[0] * vL * SLmvL - WR[0] * vR * SRmvR)
-                       / (WL[0] * SLmvL - WR[0] * SRmvR);
+    // Written to the output reference so the caller can reuse the interface speed.
+    Sstar = (tR - tL + WL[0] * vL * SLmvL - WR[0] * vR * SRmvR)
+          / (WL[0] * SLmvL - WR[0] * SRmvR);
 
     // Step 7: HLLC flux computation (eqs. 43, 94-98)
     // Flux layout: [mass, energy, vx-mom, vy-mom [, vz-mom]]

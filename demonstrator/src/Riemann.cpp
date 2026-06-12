@@ -7,6 +7,9 @@
 Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
                  int matIdR, int matIdL, EquationOfState &MeshlessEOS
 #if USE_HLLC && ELASTIC
+#if TENSILE_CORRECTION
+                 , double fabMonaghan
+#endif
                  , double SxxR, double SxyR, double SyyR
                  , double SxxL, double SxyL, double SyyL
 #if DIM == 3
@@ -16,11 +19,17 @@ Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
 #endif
                  ) :
                     WR { WR }, WL { WL }, vFrame { vFrame },  Aij { Aij }, i { i },
-                    matIdR { matIdR }, matIdL { matIdL }, MeshlessEOS{MeshlessEOS}{
+                    matIdR { matIdR }, matIdL { matIdL }, MeshlessEOS{MeshlessEOS}
+#if USE_HLLC && ELASTIC && TENSILE_CORRECTION
+                    , fabMonaghan{fabMonaghan}
+#endif
+                    {
 
-    // compute norm of effective face
-    // double AijNorm = sqrt(Helper::dotProduct(Aij, Aij));
-
+#if USE_HLLC && ELASTIC && TENSILE_CORRECTION
+    // Monaghan tensile-correction factor, only computed when TENSILE_CORRECTION is set
+    tensileCorrectionFactor = TENSILE_CORRECTION_PREFAC
+                    * pow(fabMonaghan, TENSILE_CORRECTION_POWER);
+#endif
     // compute norm of effective face
     AijNorm = sqrt(Helper::dotProduct(Aij, Aij));
     
@@ -211,8 +220,32 @@ void Riemann::HLLCFlux(double *Fij){
                     << " SijRotR=[Sxx=" << SijRotR[0] << ", Sxy=" << SijRotR[1] << "]";
     }
 #endif
-    HLLC::xSplitElasticHLLC(matIdL, matIdR, WR, WL, SijRotR, SijRotL, Fij, MeshlessEOS);
 
+#if TENSILE_CORRECTION && TENSILE_CORRECTION_1
+    // As implemented by Hopkins in GIZMO, before the Riemann solver, add a dummy pressure to make the Riemann problem well-behaved.
+    // Check if tension actually exists. We need effective pressure: p - S_rot^xx
+    double pEffR = WR[1] - SijRotR[0];
+    double pEffL = WL[1] - SijRotL[0];
+    double pDummy = 0;
+    if (pEffR < 0 | pEffL < 0){
+        pDummy = -1. * std::min(pEffR, pEffL);
+    }
+    WR[1] += 2 * pDummy;
+    WL[1] += 2 * pDummy;
+    SijRotR[0] += 2*pDummy;
+    SijRotL[0] += 2*pDummy;
+    pDummy *= (1 - tensileCorrectionFactor);
+#endif
+
+    double Sstar = 0.;
+    HLLC::xSplitElasticHLLC(matIdL, matIdR, WR, WL, SijRotR, SijRotL, Fij, MeshlessEOS, Sstar);
+
+#if TENSILE_CORRECTION && TENSILE_CORRECTION_1
+    if (pDummy > 0){
+        Fij[2] -= pDummy;
+        Fij[1] -= pDummy * Sstar;
+    }
+#endif
     // Back-rotate momentum fluxes to lab frame (Lambda^{-1} = Lambda^T)
 #if DIM == 2
     double FijBuf[DIM] = { Fij[2], Fij[3] };

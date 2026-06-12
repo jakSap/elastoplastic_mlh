@@ -288,6 +288,12 @@ void MeshlessScheme::run(){
 #if PERIODIC_BOUNDARIES
         particles->compEffectiveFace(ghostParticles);
 #endif // PERIODIC_BOUNDARIES
+
+#if TENSILE_CORRECTION
+        Logger(INFO) << "       > Computing fabMonaghan";
+        particles->computeFabMonaghan();
+#endif
+
         Logger(DEBUG) << "      > Computing fluxes";
         particles->compRiemannStatesLR(timeStep);
 

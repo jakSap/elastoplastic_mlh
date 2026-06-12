@@ -80,6 +80,16 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define PLASTICITY 0
 /// Von Mises yield stress Y0 (only used when PLASTICITY is 1).
 #define YIELD_STRESS 0.1
+
+// Enable tensile correction. This activates computation of f_ab
+#define TENSILE_CORRECTION 1
+// Easiest form of tensile correction: Reduce effective Pressure after Riemann problem.
+// Using f_ab calculated as in Monaghan et al, 2000, implemented as in GIZMO.
+#define TENSILE_CORRECTION_1 1
+// Two Parameters for the tensile correction facor, as in Monaghan, 2000
+#define TENSILE_CORRECTION_PREFAC 0.2
+#define TENSILE_CORRECTION_POWER 4.
+
 /** maximum interactions with ghost particles
  *  ignored when `PERIODIC_BOUNDARIES` is not set
 **/
@@ -199,7 +209,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // Bisection on the colliding-rings test (MA-Obsidian/2026-05-25-bisection-results.md)
 // identified this as the single highest-impact missing GIZMO feature for elastic
 // rebound; without it the rings stick instead of bouncing.
-#define EXPLICIT_VOL_INTEGRATION 1
+#define EXPLICIT_VOL_INTEGRATION 0
 /// Maximum |div v * dt/2| inside the half-step exponential. Caps the per-step
 /// density change at exp(EXPLICIT_VOL_DIVV_CLAMP) ~ 4.5 (matches GIZMO).
 #define EXPLICIT_VOL_DIVV_CLAMP 1.5
