@@ -134,4 +134,12 @@ test-kernel: | $(TRGTDIR)
 	@echo "Running 3D test ..."
 	@$(TRGTDIR)/test_kernel_3d
 
-.PHONY: all debug clean cleaner install prepare-run binac binac-load-modules test-kernel
+# Solid-failure unit test. Links the real Helper/EquationOfState/Logger sources
+# and uses parameter.h as configured (DIM / EOS / *_PLASTICITY).
+test-damage: | $(TRGTDIR)
+	@echo "Building damage/plasticity unit test ..."
+	@g++ -std=c++11 -O2 -I$(INCLDIR) tests/test_damage.cpp src/Helper.cpp src/EquationOfState.cpp src/Logger.cpp -o $(TRGTDIR)/test_damage -llapack -lblas
+	@echo "Running damage/plasticity test ..."
+	@$(TRGTDIR)/test_damage
+
+.PHONY: all debug clean cleaner install prepare-run binac binac-load-modules test-kernel test-damage

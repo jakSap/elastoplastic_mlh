@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 
+import os
+import sys
+
 import numpy as np
 import matplotlib.pyplot as plt
 import h5py
+
+# shared Grady-Kipp Weibull flaw generator (testcases/weibull_flaws.py)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from weibull_flaws import write_flaws
 
 """
 this program creates two 2-D rings (z = 0) around the origin which are then shifted to their final positions
@@ -132,6 +139,15 @@ v_p = 0.059 # should be for testcase with AS
 density = 1
 mass = delta_p**2 * density
 
+# --- Grady-Kipp Weibull flaws (only read by the solver when FRAGMENTATION=1) ---
+# Writing them is harmless when FRAGMENTATION is off. max_flaws MUST match
+# MAX_NUM_FLAWS in demonstrator/include/parameter.h.
+WRITE_FLAWS = True
+weibull_k = 1.0e4      # [length^-DIM]; tune with weibull_m to the material
+weibull_m = 8.0
+max_flaws = 1
+flaw_seed = 0
+
 # ----------------------------------------------------------------------
 # Constants for specific internal energy (same as in generateIC.py)
 P = 2.5                     # pressure constant
@@ -232,6 +248,11 @@ h5f.create_dataset("m", data=m)
 h5f.create_dataset("u", data=u)               # specific internal energy
 h5f.create_dataset("materialId", data=materialId)
 h5f.create_dataset("time", data=0.0*m)             # time (scalar, set to zero)
+
+if WRITE_FLAWS:
+    # per-particle volume = mass / density (constant here)
+    volumes = m / density
+    write_flaws(h5f, volumes, weibull_k, weibull_m, max_flaws, flaw_seed)
 
 h5f.close()
 print("Number of particles: ", 2*N)

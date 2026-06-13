@@ -31,6 +31,17 @@ InitialDistribution::InitialDistribution(const std::string &file){
         smlSet.read(sml);
         hasSml = true;
     }
+#if FRAGMENTATION
+    // Grady-Kipp Weibull flaws (required when FRAGMENTATION is on).
+    if (h5file.exist("/flaws") && h5file.exist("/numFlaws")) {
+        h5file.getDataSet("/flaws").read(flaws);
+        h5file.getDataSet("/numFlaws").read(numFlaws);
+        hasFlaws = true;
+    } else {
+        throw std::runtime_error("FRAGMENTATION is enabled but the IC file has no "
+                                 "/flaws and /numFlaws datasets.");
+    }
+#endif
     // sanity check
     if (x.size() == v.size() && x.size() == m.size() && x.size() == u.size()
 #if USE_MATID
@@ -47,6 +58,12 @@ void InitialDistribution::getAllParticles(Particles &particles, double defaultSm
     if (hasSml && (int)sml.size() != numberOfParticles){
         throw std::length_error("Length of /sml dataset does not match number of particles.");
     }
+#if FRAGMENTATION
+    if (!hasFlaws || (int)flaws.size() != numberOfParticles
+                  || (int)numFlaws.size() != numberOfParticles){
+        throw std::length_error("Length of /flaws or /numFlaws does not match number of particles.");
+    }
+#endif
     std::vector<std::vector<double>>::iterator xit = x.begin();
     std::vector<std::vector<double>>::iterator vit = v.begin();
     std::vector<double>::iterator mit = m.begin();
@@ -67,6 +84,17 @@ void InitialDistribution::getAllParticles(Particles &particles, double defaultSm
         particles.vy[pCounter] = (*vit)[1];
 #if USE_MATID
         particles.matId[pCounter] = *matIdIt;
+#endif
+#if FRAGMENTATION
+        {
+            const std::vector<double> &fl = flaws[pCounter];
+            int nf = numFlaws[pCounter];
+            if (nf > (int)fl.size()) nf = (int)fl.size();
+            if (nf > MAX_NUM_FLAWS)  nf = MAX_NUM_FLAWS;
+            particles.numFlaws[pCounter] = nf;
+            for (int k = 0; k < nf; ++k)
+                particles.flaws[pCounter*MAX_NUM_FLAWS + k] = fl[k];
+        }
 #endif
 #if DIM == 3
         particles.z[pCounter] = (*xit)[2];

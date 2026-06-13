@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 
 import argparse
+import os
+import sys
+
 import numpy as np
 import matplotlib.pyplot as plt
 import h5py as h5
+
+# shared Grady-Kipp Weibull flaw generator (testcases/weibull_flaws.py)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from weibull_flaws import write_flaws
 
 """
 Creates an IC for the rip test: two horizontal bars of the same length stacked
@@ -160,6 +167,9 @@ if __name__ == "__main__":
     outH5.create_dataset("u",          data=u)
     outH5.create_dataset("materialId", data=materialId)
     outH5.create_dataset("time",       data=0.0 * m)
+    # Grady-Kipp Weibull flaws (read by the solver only when FRAGMENTATION=1;
+    # harmless otherwise). max_flaws MUST match MAX_NUM_FLAWS in parameter.h.
+    write_flaws(outH5, m / density, k=1.0e4, m=8.0, max_flaws=1, seed=0)
     outH5.close()
 
     print(f"  N_narrow = {N1},  N_wide = {N2},  N_total = {N_total}")

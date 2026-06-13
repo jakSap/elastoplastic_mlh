@@ -54,6 +54,14 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     SyzGrad = new double[numParticles][DIM]();
     SzzGrad = new double[numParticles][DIM]();
 #endif // DIM == 3
+#if FRAGMENTATION
+    damage         = new double[numParticles]();
+    dddt           = new double[numParticles]();
+    damageTotal    = new double[numParticles]();
+    flaws          = new double[numParticles*MAX_NUM_FLAWS]();
+    numFlaws       = new int[numParticles]();
+    numActiveFlaws = new int[numParticles]();
+#endif // FRAGMENTATION
 #endif // ELASTIC
 
 #if RUNSPH
@@ -196,6 +204,14 @@ Particles::~Particles() {
     delete[] SyzGrad;
     delete[] SzzGrad;
 #endif // DIM == 3
+#if FRAGMENTATION
+    delete[] damage;
+    delete[] dddt;
+    delete[] damageTotal;
+    delete[] flaws;
+    delete[] numFlaws;
+    delete[] numActiveFlaws;
+#endif // FRAGMENTATION
 #endif // ELASTIC
 #if RUNSPH
 	//delete[] unimportant;
@@ -409,30 +425,103 @@ void Particles::integrateStressTensor(const double &dt) {
         Syz[i] = syz + dt*k2_yz;
 #endif
 
-#if PLASTICITY
-        // --- Von Mises yield criterion (radial return) ---
+#if PLASTICITY_ANY
+        // --- Yield criterion: radial return to the von-Mises-equivalent Y ---
         {
+#if PLASTICITY_MODEL_COUNT
+            // Per-material yield strength Y(P, D, u). For Collins, D blends the
+            // intact and damaged strength curves.
+#if FRAGMENTATION
+            const double Dtot = damageTotal[i];
+#else
+            const double Dtot = 0.;
+#endif
+            const double Y = MeshlessEOS->EOSYieldStrength(matId[i], P[i], Dtot, u[i]);
+#else
+            const double Y = YIELD_STRESS;   // legacy constant von Mises
+#endif
 #if DIM == 2
             const double J2 = 0.5 * (Sxx[i]*Sxx[i] + Syy[i]*Syy[i]
                                       + 2.0*Sxy[i]*Sxy[i]);
-            const double Y2_over_d = YIELD_STRESS * YIELD_STRESS / 2.0;
+            const double Y2_over_d = Y * Y / 2.0;
 #else
             const double J2 = 0.5 * (Sxx[i]*Sxx[i] + Syy[i]*Syy[i] + Szz[i]*Szz[i]
                                       + 2.0*(Sxy[i]*Sxy[i] + Sxz[i]*Sxz[i] + Syz[i]*Syz[i]));
-            const double Y2_over_d = YIELD_STRESS * YIELD_STRESS / 3.0;
+            const double Y2_over_d = Y * Y / 3.0;
 #endif
-            if (J2 > Y2_over_d) {
-                const double f = Y2_over_d / J2;
+            // Radial return: scale S so that J2 -> Y2_over_d. Since J2 is
+            // quadratic in S, the factor is the square root of the ratio.
+            if (J2 > Y2_over_d && J2 > 0.0) {
+                const double f = std::sqrt(Y2_over_d / J2);
                 Sxx[i] *= f;  Syy[i] *= f;  Sxy[i] *= f;
 #if DIM == 3
                 Szz[i] *= f;  Sxz[i] *= f;  Syz[i] *= f;
 #endif
             }
         }
-#endif // PLASTICITY
+#endif // PLASTICITY_ANY
 
     }
 }
+
+#if FRAGMENTATION
+// Grady-Kipp damage evolution (Benz & Asphaug 1995). Advances the DIM-root
+// damage variable `damage`; full damage is damageTotal = clamp(damage^DIM,0,1).
+void Particles::integrateDamage(const double &dt){
+    for (int i = 0; i < N; ++i){
+        if (numFlaws[i] <= 0) { dddt[i] = 0.0; continue; }
+        const double E   = MeshlessEOS->EOSYoungModulus(matId[i]);
+        const double K   = MeshlessEOS->EOSGetMaterial(matId[i]).A;
+        const double muS = MeshlessEOS->EOSShearModulus(matId[i]);
+        const double Di  = damageTotal[i];
+
+        // Maximum tensile principal stress of sigma = -P I + S.
+        double sigma[DIM*DIM];
+#if DIM == 2
+        sigma[0] = -P[i] + Sxx[i]; sigma[1] = Sxy[i];
+        sigma[2] = Sxy[i];         sigma[3] = -P[i] + Syy[i];
+#else
+        sigma[0]=-P[i]+Sxx[i]; sigma[1]=Sxy[i];       sigma[2]=Sxz[i];
+        sigma[3]=Sxy[i];       sigma[4]=-P[i]+Syy[i]; sigma[5]=Syz[i];
+        sigma[6]=Sxz[i];       sigma[7]=Syz[i];       sigma[8]=-P[i]+Szz[i];
+#endif
+        const double sigMax = Helper::maxEigenvalueSym(sigma);
+
+        // Only tension (positive max principal stress) grows cracks.
+        if (sigMax <= 0.0 || E <= 0.0) { dddt[i] = 0.0; continue; }
+
+        // Local scalar strain, softened by the already-accumulated damage.
+        const double local_strain = sigMax / ((1.0 - Di) * E);
+
+        // Count flaws whose activation strain is exceeded (monotone in time).
+        int nActive = 0;
+        for (int k = 0; k < numFlaws[i]; ++k){
+            if (flaws[i*MAX_NUM_FLAWS + k] < local_strain) ++nActive;
+        }
+        if (nActive > numActiveFlaws[i]) numActiveFlaws[i] = nActive;
+        nActive = numActiveFlaws[i];
+
+        if (nActive > 0){
+            // Crack-growth speed: 0.4 x longitudinal elastic wave speed.
+            const double cl2 = (K + 4.0/3.0 * muS * (1.0 - Di)) / rho[i];
+            const double cg  = 0.4 * std::sqrt(cl2 > 0.0 ? cl2 : 0.0);
+            dddt[i] = nActive * cg / sml[i];   // d(damage)/dt; damage is DIM-root
+            damage[i] += dt * dddt[i];
+        } else {
+            dddt[i] = 0.0;
+        }
+
+        // Cap by the active-flaw fraction, then recompute the total damage.
+        const double cap = std::pow((double)numActiveFlaws[i] / (double)numFlaws[i],
+                                    1.0 / (double)DIM);
+        if (damage[i] > cap) damage[i] = cap;
+        if (damage[i] < 0.0) damage[i] = 0.0;
+        double Dt = std::pow(damage[i], (double)DIM);
+        if (Dt > 1.0) Dt = 1.0;
+        damageTotal[i] = Dt;
+    }
+}
+#endif // FRAGMENTATION
 #endif // ELASTIC
 
 #if !PERIODIC_BOUNDARIES
@@ -2930,6 +3019,10 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                                 , fSxzL, fSyzL, fSzzL
                                 , fSxzR, fSyzR, fSzzR
 #endif
+#if FRAGMENTATION
+                                // R-slot = j-side, L-slot = i-side (matches Sij order)
+                                , damageTotal[jj], damageTotal[i]
+#endif
 #endif
                 };
                 solver.HLLCFlux(Fij[ii]);
@@ -3042,6 +3135,10 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #if DIM == 3
                                , fSxzR, fSyzR, fSzzR
                                , fSxzL, fSyzL, fSzzL
+#endif
+#if FRAGMENTATION
+                               // R-slot = i-side here; ghost-side damage is not tracked.
+                               , damageTotal[i], 0.0
 #endif
 #endif
                 };
@@ -4554,6 +4651,11 @@ void Particles::dump2file(std::string filename, double simTime){
     HighFive::DataSet SyzDataSet = h5File.createDataSet<double>("/Syz", HighFive::DataSpace(N));
     HighFive::DataSet SzzDataSet = h5File.createDataSet<double>("/Szz", HighFive::DataSpace(N));
 #endif
+#if FRAGMENTATION
+    HighFive::DataSet damageDataSet      = h5File.createDataSet<double>("/damage", HighFive::DataSpace(N));
+    HighFive::DataSet damageTotalDataSet = h5File.createDataSet<double>("/damageTotal", HighFive::DataSpace(N));
+    HighFive::DataSet numActiveFlawsDataSet = h5File.createDataSet<int>("/numActiveFlaws", HighFive::DataSpace(N));
+#endif
 #endif
 
     // containers for particle data
@@ -4583,6 +4685,11 @@ void Particles::dump2file(std::string filename, double simTime){
     std::vector<double> SxzVec(Sxz, Sxz+N);
     std::vector<double> SyzVec(Syz, Syz+N);
     std::vector<double> SzzVec(Szz, Szz+N);
+#endif
+#if FRAGMENTATION
+    std::vector<double> damageVec(damage, damage+N);
+    std::vector<double> damageTotalVec(damageTotal, damageTotal+N);
+    std::vector<int> numActiveFlawsVec(numActiveFlaws, numActiveFlaws+N);
 #endif
 #endif // ELASTIC
 
@@ -4682,5 +4789,10 @@ void Particles::dump2file(std::string filename, double simTime){
     SyzDataSet.write(SyzVec);
     SzzDataSet.write(SzzVec);
 #endif
-#endif    
+#if FRAGMENTATION
+    damageDataSet.write(damageVec);
+    damageTotalDataSet.write(damageTotalVec);
+    numActiveFlawsDataSet.write(numActiveFlawsVec);
+#endif
+#endif
 }

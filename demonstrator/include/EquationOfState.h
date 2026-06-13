@@ -40,6 +40,15 @@ struct TillotsonMaterial {
     double u_iv;    ///< specific energy of incipient vaporization
     double u_cv;    ///< specific energy of complete vaporization
     double mu;      ///< shear modulus (constitutive)
+    // --- Solid-failure parameters (all default 0 => model inactive) ---
+    double weibull_k;     ///< Weibull coefficient k [length^-DIM] (FRAGMENTATION)
+    double weibull_m;     ///< Weibull exponent m (dimensionless)
+    double Y0;            ///< cohesion / yield strength at zero pressure
+    double mu_i;          ///< coefficient of internal friction (intact, Collins)
+    double mu_d;          ///< coefficient of friction (damaged, Collins)
+    double Y_M;           ///< von Mises limit / yield at high pressure
+    double frictionAngle; ///< friction angle [rad] (Mohr-Coulomb / Drucker-Prager)
+    double u_melt;        ///< melt specific energy (Collins melt degradation)
 };
 #endif
 
@@ -69,6 +78,14 @@ public:
     const MurnaghanMaterial& EOSGetMaterial(int matId);
 #else
     const TillotsonMaterial& EOSGetMaterial(int matId);
+    /// Static (reference) Young's modulus E = 9Kmu/(3K+mu) with K = A (the
+    /// reference bulk modulus). Used by the Grady-Kipp damage model.
+    double EOSYoungModulus(int matId);
+    /// Per-material yield strength Y(P, damage, u) selected at compile time by
+    /// the *_PLASTICITY flags. `damage` is the full damage D in [0,1].
+    /// Returns a large value when no per-material model is active.
+    double EOSYieldStrength(int matId, const double &P, const double &damage,
+                            const double &u);
 #endif
 #else
     double EOSPressure(const double &rho, const double &u);

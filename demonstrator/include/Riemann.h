@@ -30,6 +30,9 @@ public:
             , double SxzR, double SyzR, double SzzR
             , double SxzL, double SyzL, double SzzL
 #endif
+#if FRAGMENTATION
+            , double damageTotalR, double damageTotalL
+#endif
 #endif
     );
 

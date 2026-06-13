@@ -39,6 +39,18 @@ public:
     static void matMul(double *A, double *B, double *C);
 
     /**
+     * @brief Largest eigenvalue of a symmetric DIM x DIM matrix.
+     *
+     * 2D uses the closed-form quadratic; 3D uses the analytic trigonometric
+     * method for symmetric 3x3 matrices (Smith 1961). Used by the Grady-Kipp
+     * damage model to find the maximum tensile principal stress.
+     *
+     * @param[in] S symmetric matrix, row-major [DIM*DIM]
+     * @return the maximum eigenvalue
+     */
+    static double maxEigenvalueSym(const double *S);
+
+    /**
      * good resource for 3D implementation: https://math.stackexchange.com/a/897677
      *
      * @param[in] a normed vector to be aligned with b

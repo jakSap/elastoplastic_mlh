@@ -49,6 +49,38 @@ void Helper::matMul(double *A, double *B, double *C){
     }
 }
 
+double Helper::maxEigenvalueSym(const double *S){
+#if DIM == 2
+    // S = [[a, b], [b, c]]; eigenvalues = mean +- sqrt(((a-c)/2)^2 + b^2).
+    const double a = S[0], b = S[1], c = S[3];
+    const double mean = 0.5 * (a + c);
+    const double diff = 0.5 * (a - c);
+    return mean + std::sqrt(diff*diff + b*b);
+#else // DIM == 3
+    // Analytic eigenvalues of a symmetric 3x3 matrix (Smith 1961).
+    const double a = S[0], b = S[4], c = S[8];   // diagonal
+    const double d = S[1], e = S[5], f = S[2];   // S01, S12, S02
+    const double p1 = d*d + e*e + f*f;
+    if (p1 <= 0.0) {                              // already diagonal
+        return std::max(a, std::max(b, c));
+    }
+    const double q = (a + b + c) / 3.0;
+    const double aa = a - q, bb = b - q, cc = c - q;
+    const double p2 = aa*aa + bb*bb + cc*cc + 2.0*p1;
+    const double p = std::sqrt(p2 / 6.0);
+    // B = (1/p) (S - q I); r = det(B)/2
+    const double b00 = aa/p, b11 = bb/p, b22 = cc/p;
+    const double b01 = d/p, b12 = e/p, b02 = f/p;
+    double r = 0.5 * (b00*(b11*b22 - b12*b12)
+                      - b01*(b01*b22 - b12*b02)
+                      + b02*(b01*b12 - b11*b02));
+    if (r < -1.0) r = -1.0; else if (r > 1.0) r = 1.0;
+    const double phi = std::acos(r) / 3.0;
+    // largest eigenvalue corresponds to the smallest acos argument
+    return q + 2.0 * p * std::cos(phi);
+#endif
+}
+
 void Helper::rotationMatrix2D(double *a, double *b, double *Lambda){
     Lambda[0] = a[0]*b[0] + a[1]*b[1];
     Lambda[1] = -(a[0]*b[1] - a[1]*b[0]);

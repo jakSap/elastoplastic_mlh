@@ -74,12 +74,71 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // Shear modulus mu now lives per-material in the EOS material table
 // (see EquationOfState::MurnaghanMaterial.mu); look it up via
 // MeshlessEOS->EOSShearModulus(matId[i]).
-/// Enable von Mises plasticity (1 = on, 0 = off).
-/// When enabled, the deviatoric stress is clamped to the yield surface
-/// after each integration half-step via a radial return.
+/// Legacy von Mises plasticity (1 = on, 0 = off). When enabled (and no
+/// per-material plasticity model below is selected) the deviatoric stress is
+/// clamped to a constant yield surface YIELD_STRESS via a radial return after
+/// each stress half-step. Kept for backward compatibility; new work should use
+/// the per-material *_PLASTICITY models below.
 #define PLASTICITY 0
-/// Von Mises yield stress Y0 (only used when PLASTICITY is 1).
+/// Constant von Mises yield stress Y0 used by the legacy PLASTICITY path.
 #define YIELD_STRESS 0.1
+
+// --- Solid failure suite (ported from miluphcuda; published model equations) ---
+
+/// Grady-Kipp fragmentation/damage model, following Benz & Asphaug (1995).
+/// Weibull-distributed activation-strain flaws are read from the IC HDF5
+/// (/numFlaws, /flaws). Damage always reduces (negative) pressure; it reduces
+/// the deviatoric stress only if DAMAGE_ACTS_ON_S is set.
+#define FRAGMENTATION 0
+#define DAMAGE_ACTS_ON_S 0
+/// Maximum number of activation thresholds stored per particle. Only relevant
+/// for FRAGMENTATION; keep at 1 otherwise so the flaw array stays tiny.
+#define MAX_NUM_FLAWS 1
+
+/// Per-material plasticity yield models (mutually exclusive). The yield
+/// strength Y(P, damage, u) is supplied by EquationOfState::EOSYieldStrength
+/// and fed to the same radial return as the legacy path.
+/// Constant von Mises yield strength (per-material Y0).
+#define VON_MISES_PLASTICITY 0
+/// Mohr-Coulomb: Y = min(Y0 + mu_fric * P, Y_M).
+#define MOHR_COULOMB_PLASTICITY 0
+/// Drucker-Prager cone fitted to Mohr-Coulomb (cohesion + friction angle).
+#define DRUCKER_PRAGER_PLASTICITY 0
+/// Pressure-dependent strength following Collins et al. (2004), Jutzi (2015):
+/// damage blends intact and damaged yield curves.
+#define COLLINS_PLASTICITY 0
+/// Simplified Collins (Lundborg strength representation only).
+#define COLLINS_PLASTICITY_SIMPLE 0
+/// Degrade the Collins yield strength with melt energy (uses u vs u_melt).
+#define COLLINS_PLASTICITY_INCLUDE_MELT_ENERGY 0
+
+/// Number of per-material plasticity models selected; must be 0 or 1.
+#define PLASTICITY_MODEL_COUNT (VON_MISES_PLASTICITY + MOHR_COULOMB_PLASTICITY \
+                                + DRUCKER_PRAGER_PLASTICITY + COLLINS_PLASTICITY)
+/// True when any radial-return plasticity (legacy or per-material) is active.
+#define PLASTICITY_ANY (PLASTICITY || PLASTICITY_MODEL_COUNT)
+
+#if PLASTICITY_MODEL_COUNT > 1
+#error "Select at most one of VON_MISES/MOHR_COULOMB/DRUCKER_PRAGER/COLLINS_PLASTICITY."
+#endif
+#if (COLLINS_PLASTICITY_SIMPLE || COLLINS_PLASTICITY_INCLUDE_MELT_ENERGY) && !COLLINS_PLASTICITY
+#error "COLLINS_PLASTICITY_SIMPLE / _INCLUDE_MELT_ENERGY require COLLINS_PLASTICITY."
+#endif
+#if PLASTICITY_MODEL_COUNT && !ELASTIC
+#error "Per-material plasticity requires ELASTIC == 1."
+#endif
+#if PLASTICITY_MODEL_COUNT && EOS != 2
+#error "Per-material plasticity (EOSYieldStrength) is only implemented for the Tillotson EOS (EOS == 2)."
+#endif
+#if FRAGMENTATION && (!ELASTIC || EOS != 2)
+#error "FRAGMENTATION requires ELASTIC == 1 and the Tillotson EOS (EOS == 2)."
+#endif
+#if COLLINS_PLASTICITY && !FRAGMENTATION
+#error "COLLINS_PLASTICITY blends intact/damaged curves and requires FRAGMENTATION."
+#endif
+#if MAX_NUM_FLAWS < 1
+#error "MAX_NUM_FLAWS must be >= 1."
+#endif
 
 // Kernel for the MFM path, GIZMO numbering (GIZMO kernel.h KERNEL_FUNCTION):
 // 3 = cubic spline (default), 6 = Wendland C2, 7 = Wendland C4, 9 = Wendland C6.

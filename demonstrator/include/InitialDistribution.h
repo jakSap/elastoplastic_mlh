@@ -25,6 +25,13 @@ private:
     std::vector<std::vector<double>> x {}, v {};
     std::vector<int> matId {};
     bool hasSml { false };
+#if FRAGMENTATION
+    // Per-particle Weibull activation strains (ragged, padded to MAX_NUM_FLAWS
+    // on copy) and how many slots are populated per particle.
+    std::vector<std::vector<double>> flaws {};
+    std::vector<int> numFlaws {};
+    bool hasFlaws { false };
+#endif
     int numberOfParticles { 0 };
 };
 

@@ -327,6 +327,66 @@ const TillotsonMaterial& EquationOfState::EOSGetMaterial(int matId){
     return materials[matId];
 }
 
+double EquationOfState::EOSYoungModulus(int matId){
+#if DEBUG_LVL >= 1
+    assert(matId >= 0 && matId < (int)materials.size());
+#endif
+    // Static elastic moduli: bulk K = A (Tillotson reference bulk modulus),
+    // shear = mu. E = 9 K mu / (3 K + mu) (Benz & Asphaug 1995 damage model).
+    const TillotsonMaterial &m = materials[matId];
+    const double K = m.A;
+    if (3.0 * K + m.mu <= 0.0) return 0.0;
+    return 9.0 * K * m.mu / (3.0 * K + m.mu);
+}
+
+double EquationOfState::EOSYieldStrength(int matId, const double &P,
+                                         const double &damage, const double &u){
+#if DEBUG_LVL >= 1
+    assert(matId >= 0 && matId < (int)materials.size());
+#endif
+    const TillotsonMaterial &m = materials[matId];
+    double Y = 1e30; // no per-material model active => effectively no yielding
+#if VON_MISES_PLASTICITY
+    Y = m.Y0;
+#elif MOHR_COULOMB_PLASTICITY
+    // von-Mises-equivalent strength Y = cohesion + tan(phi) * P, capped at Y_M.
+    Y = m.Y0 + std::tan(m.frictionAngle) * P;
+    if (m.Y_M > 0.0 && Y > m.Y_M) Y = m.Y_M;
+#elif DRUCKER_PRAGER_PLASTICITY
+    // Drucker-Prager cone matched to Mohr-Coulomb (outer edges), expressed as a
+    // von-Mises-equivalent strength: Y = (2 sinphi P + 6 c cosphi)/(3 - sinphi).
+    const double s = std::sin(m.frictionAngle), c = std::cos(m.frictionAngle);
+    const double denom = (3.0 - s);
+    Y = (denom > 0.0) ? (2.0 * s * P + 6.0 * m.Y0 * c) / denom : m.Y0;
+    if (m.Y_M > 0.0 && Y > m.Y_M) Y = m.Y_M;
+#elif COLLINS_PLASTICITY
+    // Lundborg intact strength curve (Collins et al. 2004; Jutzi 2015).
+    const double dY = (m.Y_M > m.Y0) ? (m.Y_M - m.Y0) : 1e30;
+    const double Yi = m.Y0 + m.mu_i * P / (1.0 + m.mu_i * P / dY);
+#if COLLINS_PLASTICITY_SIMPLE
+    Y = Yi;
+#else
+    // Damaged (granular) strength, never above the intact curve.
+    double Yd = m.mu_d * P;
+    if (Yd > Yi) Yd = Yi;
+    Y = (1.0 - damage) * Yi + damage * Yd;
+#endif
+#if COLLINS_PLASTICITY_INCLUDE_MELT_ENERGY
+    // Thermal softening toward the melt energy (simplified linear degradation).
+    if (m.u_melt > 0.0){
+        double fmelt = 1.0 - u / m.u_melt;
+        if (fmelt < 0.0) fmelt = 0.0;
+        if (fmelt > 1.0) fmelt = 1.0;
+        Y *= fmelt;
+    }
+#endif
+#else
+    (void)P; (void)damage; (void)u;
+#endif
+    if (Y < 0.0) Y = 0.0;
+    return Y;
+}
+
 #else // EOS == 0
 
 double EquationOfState::EOSPressure(const double &rho, const double &u){

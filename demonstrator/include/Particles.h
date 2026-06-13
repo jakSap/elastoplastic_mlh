@@ -92,6 +92,20 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     void computeFabMonaghan();
 #endif
     void integrateStressTensor(const double &dt);
+#if FRAGMENTATION
+    /// Grady-Kipp damage state (Benz & Asphaug 1995).
+    /// `damage` is the DIM-th root of the tensile damage; full damage is
+    /// `damageTotal = clamp(damage^DIM, 0, 1)`. `flaws` holds, per particle,
+    /// up to MAX_NUM_FLAWS Weibull activation strains; `numFlaws` is how many
+    /// of those slots are populated and `numActiveFlaws` how many have been
+    /// exceeded so far (monotone).
+    double *damage, *dddt, *damageTotal;
+    double *flaws;            // size N*MAX_NUM_FLAWS
+    int *numFlaws, *numActiveFlaws;
+    /// Advance the damage variable by dt: local strain from the current stress,
+    /// active-flaw count, crack-growth speed and the active-flaw cap.
+    void integrateDamage(const double &dt);
+#endif // FRAGMENTATION
 #endif // ELASTIC
     void assignParticlesAndCells(Domain &domain);
     void gridNNS(Domain &domain, const double &kernelSize);

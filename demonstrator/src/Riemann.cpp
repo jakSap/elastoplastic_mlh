@@ -46,6 +46,9 @@ Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
                  , double SxzR, double SyzR, double SzzR
                  , double SxzL, double SyzL, double SzzL
 #endif
+#if FRAGMENTATION
+                 , double damageTotalR, double damageTotalL
+#endif
 #endif
                  ) :
                     WR { WR }, WL { WL }, vFrame { vFrame },  Aij { Aij }, i { i },
@@ -104,6 +107,18 @@ Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
     SijL[0] = SxxL; SijL[1] = SxyL; SijL[2] = SxzL;
     SijL[3] = SxyL; SijL[4] = SyyL; SijL[5] = SyzL;
     SijL[6] = SxzL; SijL[7] = SyzL; SijL[8] = SzzL;
+#endif
+
+#if FRAGMENTATION
+    // Grady-Kipp damage: tension is carried by weakened material. Reduce the
+    // (negative) pressure of each side by (1 - D); reduce the deviatoric stress
+    // too only when DAMAGE_ACTS_ON_S (Benz & Asphaug 1995, miluphcuda).
+    if (WR[1] < 0.) WR[1] *= (1.0 - damageTotalR);
+    if (WL[1] < 0.) WL[1] *= (1.0 - damageTotalL);
+#if DAMAGE_ACTS_ON_S
+    for (int a = 0; a < DIM*DIM; ++a) SijR[a] *= (1.0 - damageTotalR);
+    for (int a = 0; a < DIM*DIM; ++a) SijL[a] *= (1.0 - damageTotalL);
+#endif
 #endif
 
 #if TENSILE_CORRECTION && TENSILE_CORRECTION_2

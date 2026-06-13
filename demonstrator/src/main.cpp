@@ -139,6 +139,19 @@ int main(int argc, char *argv[]){
         m.u_iv    = mEntry.getVal<double>("u_iv");
         m.u_cv    = mEntry.getVal<double>("u_cv");
         m.mu      = mEntry.getVal<double>("mu");
+        // Optional solid-failure parameters; default 0 (model inactive) when the
+        // key is absent, mirroring the optional sml.* keys above.
+        auto optD = [&mEntry](const char *key) -> double {
+            try { return mEntry.getVal<double>(key); } catch (...) { return 0.0; }
+        };
+        m.weibull_k     = optD("weibullK");
+        m.weibull_m     = optD("weibullM");
+        m.Y0            = optD("Y0");
+        m.mu_i          = optD("mu_i");
+        m.mu_d          = optD("mu_d");
+        m.Y_M           = optD("Y_M");
+        m.frictionAngle = optD("frictionAngle");
+        m.u_melt        = optD("u_melt");
         if ((int)mats.size() <= id) mats.resize(id + 1);
         mats[id] = m;
         Logger(INFO) << "    > Material " << id
@@ -146,7 +159,11 @@ int main(int argc, char *argv[]){
                      << ", u0=" << m.u0 << ", a=" << m.a << ", b=" << m.b
                      << ", alpha=" << m.alpha << ", beta=" << m.beta
                      << ", u_iv=" << m.u_iv << ", u_cv=" << m.u_cv
-                     << ", mu=" << m.mu;
+                     << ", mu=" << m.mu
+                     << ", weibullK=" << m.weibull_k << ", weibullM=" << m.weibull_m
+                     << ", Y0=" << m.Y0 << ", Y_M=" << m.Y_M
+                     << ", mu_i=" << m.mu_i << ", mu_d=" << m.mu_d
+                     << ", frictionAngle=" << m.frictionAngle << ", u_melt=" << m.u_melt;
     }
     EquationOfState MeshlessEOS(std::move(mats));
 #endif // EOS
