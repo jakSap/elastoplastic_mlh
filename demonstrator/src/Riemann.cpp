@@ -4,6 +4,36 @@
 
 #include "../include/Riemann.h"
 //#include "../include/riemannhelper.h"
+
+#if USE_HLLC && ELASTIC && TENSILE_CORRECTION && TENSILE_CORRECTION_3 && DIM == 2
+// Damp tensile (positive) principal components of a symmetric 2x2 deviatoric stress
+// by (1 - f), as in GIZMO's default eigenvalue branch (elastic_stress_tensor_force.h).
+static void dampTensilePrincipalComponents(double *S, const double &f){
+    const double a = S[0], b = S[1], c = S[3];
+    if (a*a + 2.*b*b + c*c < 1e-300) return;
+    const double mean = .5*(a + c);
+    const double dev = sqrt(.25*(a - c)*(a - c) + b*b);
+    // (near-)isotropic tensor: both eigenvalues = mean, damp directly
+    if (dev <= 1e-12 * std::fabs(mean)){
+        if (mean > 0.){ S[0] *= 1. - f; S[1] *= 1. - f; S[2] *= 1. - f; S[3] *= 1. - f; }
+        return;
+    }
+    double l1 = mean + dev, l2 = mean - dev;
+    // eigenvector of l1: (b, l1-a) or (l1-c, b), take the better conditioned one
+    double v1x = b, v1y = l1 - a;
+    const double wx = l1 - c, wy = b;
+    if (wx*wx + wy*wy > v1x*v1x + v1y*v1y){ v1x = wx; v1y = wy; }
+    const double n = sqrt(v1x*v1x + v1y*v1y);
+    v1x /= n; v1y /= n;
+    const double v2x = -v1y, v2y = v1x;
+    if (l1 > 0.) l1 *= 1. - f;
+    if (l2 > 0.) l2 *= 1. - f;
+    S[0] = l1*v1x*v1x + l2*v2x*v2x;
+    S[1] = l1*v1x*v1y + l2*v2x*v2y;
+    S[2] = S[1];
+    S[3] = l1*v1y*v1y + l2*v2y*v2y;
+}
+#endif
 Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
                  int matIdR, int matIdL, EquationOfState &MeshlessEOS
 #if USE_HLLC && ELASTIC
@@ -74,6 +104,18 @@ Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
     SijL[0] = SxxL; SijL[1] = SxyL; SijL[2] = SxzL;
     SijL[3] = SxyL; SijL[4] = SyyL; SijL[5] = SyzL;
     SijL[6] = SxzL; SijL[7] = SyzL; SijL[8] = SzzL;
+#endif
+
+#if TENSILE_CORRECTION && TENSILE_CORRECTION_2
+    // GIZMO's simple sign-test branch: damp the whole deviatoric stress of any
+    // negative-pressure side by (1 - f) (elastic_stress_tensor_force.h, "#if 0" branch).
+    if (WR[1] < 0.){ for (int a = 0; a < DIM*DIM; ++a) SijR[a] *= 1. - tensileCorrectionFactor; }
+    if (WL[1] < 0.){ for (int a = 0; a < DIM*DIM; ++a) SijL[a] *= 1. - tensileCorrectionFactor; }
+#endif
+#if TENSILE_CORRECTION && TENSILE_CORRECTION_3
+    // GIZMO's default 'artificial stress': damp tensile principal components everywhere.
+    dampTensilePrincipalComponents(SijR, tensileCorrectionFactor);
+    dampTensilePrincipalComponents(SijL, tensileCorrectionFactor);
 #endif
     // }
     double Lambda[DIM*DIM];

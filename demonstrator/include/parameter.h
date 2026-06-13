@@ -81,14 +81,31 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// Von Mises yield stress Y0 (only used when PLASTICITY is 1).
 #define YIELD_STRESS 0.1
 
+// Kernel for the MFM path, GIZMO numbering (GIZMO kernel.h KERNEL_FUNCTION):
+// 3 = cubic spline (default), 6 = Wendland C2, 7 = Wendland C4, 9 = Wendland C6.
+#define KERNEL_FUNCTION 3
+
 // Enable tensile correction. This activates computation of f_ab
 #define TENSILE_CORRECTION 1
 // Easiest form of tensile correction: Reduce effective Pressure after Riemann problem.
 // Using f_ab calculated as in Monaghan et al, 2000, implemented as in GIZMO.
 #define TENSILE_CORRECTION_1 1
+// Damp the deviatoric stress of a negative-pressure side by (1 - f), GIZMO's
+// simple sign-test branch in solids/elastic_stress_tensor_force.h ("#if 0" branch).
+#define TENSILE_CORRECTION_2 0
+// Damp only tensile (positive) principal components of the deviatoric stress by
+// (1 - f), GIZMO's default eigenvalue branch in solids/elastic_stress_tensor_force.h.
+#define TENSILE_CORRECTION_3 0
 // Two Parameters for the tensile correction facor, as in Monaghan, 2000
 #define TENSILE_CORRECTION_PREFAC 0.2
 #define TENSILE_CORRECTION_POWER 4.
+
+#if TENSILE_CORRECTION_2 && TENSILE_CORRECTION_3
+#error "TENSILE_CORRECTION_2 and TENSILE_CORRECTION_3 are mutually exclusive stress-damping branches (GIZMO's #if 0/#else)."
+#endif
+#if TENSILE_CORRECTION_3 && DIM == 3
+#error "TENSILE_CORRECTION_3 is only implemented for DIM == 2 (analytic 2x2 eigendecomposition)."
+#endif
 
 /** maximum interactions with ghost particles
  *  ignored when `PERIODIC_BOUNDARIES` is not set

@@ -4,90 +4,7 @@
 
 #include "../include/Particles.h"
 
-double Kernel::cubicSpline(const double &r, const double &h) {
-
-    // TODO: remove this
-    double h2 = h/2.;
-#if DIM == 2
-    const double sigma = 10./(7.*M_PI*h2*h2);
-#else // DIM == 3
-    const double sigma = 1./(M_PI*h2*h2*h2);
-#endif
-    const double q = r/h2;
-    if (0. <= q && q <= 1.){
-        return sigma*(1.-3./2.*q*q*(1.-q/2.));
-    } else if (1. < q && q < 2.){
-        return sigma/4.*pow(2.-q, 3.);
-    } else {
-        return 0.;
-    }
-}
-
-// dW(r, h)/dh for the MFM cubic spline used by `cubicSpline` above.
-// W(r,h) = sigma(h) * f(q),  q = r/(h/2) = 2r/h,  sigma = C / h^DIM.
-// Therefore dW/dh = -(sigma/h) * (DIM * f(q) + q * f'(q)),
-// since dq/dh = -q/h and dsigma/dh = -DIM*sigma/h.
-double Kernel::cubicSplineDh(const double &r, const double &h){
-    const double h2 = h/2.;
-#if DIM == 2
-    const double sigma = 10./(7.*M_PI*h2*h2);
-#else // DIM == 3
-    const double sigma = 1./(M_PI*h2*h2*h2);
-#endif
-    const double q = r/h2;
-    double f, fPrime;
-    if (0. <= q && q <= 1.){
-        f = 1. - 3./2.*q*q*(1. - q/2.);
-        fPrime = -3.*q + 9./4.*q*q;
-    } else if (1. < q && q < 2.){
-        f = pow(2.-q, 3.)/4.;
-        fPrime = -3./4.*pow(2.-q, 2.);
-    } else {
-        return 0.;
-    }
-    return -(sigma/h) * ((double)DIM * f + q * fPrime);
-}
-
-// // dW(r, h)/dr. Scalar. For needs to be multiplied with (x_i - x_j)/r
-// // For 2d SPH only
-// double Kernel::dWdr(const double &r, const double &h){
-//     const double sigma = 10./(7.*M_PI*h*h*h);
-//     const double q = r/h;
-//     if (0. <= q && q <= 1./2.){
-//         return sigma * (- 3 * q + 9./4. * q * q);
-//     } else if (1./2. < q && q < 1.){
-//         return sigma * -1 * 0.75 * pow((2 - q), 2);
-//     } else {
-//         return 0.;
-//     }
-// };
-
-// dW(r, h)/dr. Scalar. For needs to be multiplied with (x_i - x_j)/r
-// For 2d SPH only
-double Kernel::dWdr(const double &r, const double &h){
-    const double sigma = 40./(7.*M_PI);
-    const double q = r/h;
-    if (0. <= q && q < 1./2.){
-        return 6 * sigma / pow(h, DIM + 1) * (3*pow(q, 2) - 2 * q);
-    } else if (1./2. <= q && q <= 1.){
-        return 6 * sigma / pow(h, DIM + 1) * -1 * pow((1 - q), 2);
-    } else {
-        return 0.;
-    }
-};
-
-// dW/dh
-double Kernel::dWdh(const double &r, const double &h){
-    const double sigma = 40./(7.*M_PI*h*h*h);
-    const double q = r/h;
-    if (0. <= q && q <= 1./2.){
-        return 2 * sigma / pow(h, 6) * (12 * h * r*r - pow(h, 3) - 15 * pow(r, 3));
-    } else if (1./2. < q && q < 1.){
-        return 2 * sigma / pow(h, 6) * pow((h - r), 2) * (5 * r - 2 * h);
-    } else {
-        return 0.;
-    }
-}
+// Kernel functions live in include/Kernel.h (selected via KERNEL_FUNCTION).
 
 Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
             , bool ghosts
@@ -345,8 +262,8 @@ void Particles::computeFabMonaghan(){
     // Get normalized mean particle distance within kernel length
     // Eqivalent to \Delta p in Monaghan paper
     double deltaP = sqrt(3.14159 / smlNNNTarget);
-    // And take the Kernel
-    double kernelDeltaP = Kernel::cubicSpline(deltaP, 1.);
+    // And take the Kernel (follows KERNEL_FUNCTION, as GIZMO's kernel_main does)
+    double kernelDeltaP = Kernel::W(deltaP, 1.);
 
     // Now loop through the interaction pairs:
     for(int i = 0; i < N; ++i){
@@ -362,7 +279,7 @@ void Particles::computeFabMonaghan(){
             // q = r_ab / max(h_a, h_b) following Monaghan and GIZMO
             double q = r / std::max(sml[i], sml[j]);
             // Take the kernel, again..
-            double kernelQ = Kernel::cubicSpline(q, 1.);
+            double kernelQ = Kernel::W(q, 1.);
             // To be consistent with Monaghan, dont apply the power of n here.
             fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = kernelQ / kernelDeltaP;
         }
@@ -1692,8 +1609,8 @@ void Particles::updateAllSmoothingLengths(){
         int it = 0;
         for (it = 0; it < smlMaxIter; ++it){
             // self contribution at r = 0
-            double n_h   = Kernel::cubicSpline(0., h);
-            double dn_dh = Kernel::cubicSplineDh(0., h);
+            double n_h   = Kernel::W(0., h);
+            double dn_dh = Kernel::WDh(0., h);
             for (int j = 0; j < noi[i]; ++j){
                 int iP = nnl[j + i*MAX_NUM_INTERACTIONS];
                 double dSqr = pow(x[i] - x[iP], 2)
@@ -1702,8 +1619,8 @@ void Particles::updateAllSmoothingLengths(){
                 dSqr += pow(z[i] - z[iP], 2);
 #endif
                 double r = sqrt(dSqr);
-                n_h   += Kernel::cubicSpline(r, h);
-                dn_dh += Kernel::cubicSplineDh(r, h);
+                n_h   += Kernel::W(r, h);
+                dn_dh += Kernel::WDh(r, h);
             }
 #if DIM == 2
             double V  = SML_V_COEF * h * h;
@@ -1797,8 +1714,8 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
         bool rescued  = false;
         int it = 0;
         for (it = 0; it < smlMaxIter; ++it){
-            double n_h   = Kernel::cubicSpline(0., h);
-            double dn_dh = Kernel::cubicSplineDh(0., h);
+            double n_h   = Kernel::W(0., h);
+            double dn_dh = Kernel::WDh(0., h);
             for (int j = 0; j < noi[i]; ++j){
                 int iP = nnl[j + i*MAX_NUM_INTERACTIONS];
                 double dSqr = pow(x[i] - x[iP], 2)
@@ -1807,8 +1724,8 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
                 dSqr += pow(z[i] - z[iP], 2);
 #endif
                 double r = sqrt(dSqr);
-                n_h   += Kernel::cubicSpline(r, h);
-                dn_dh += Kernel::cubicSplineDh(r, h);
+                n_h   += Kernel::W(r, h);
+                dn_dh += Kernel::WDh(r, h);
             }
             for (int j = 0; j < noiGhosts[i]; ++j){
                 int iP = nnlGhosts[j + i*MAX_NUM_GHOST_INTERACTIONS];
@@ -1818,8 +1735,8 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
                 dSqr += pow(z[i] - ghostParticles.z[iP], 2);
 #endif
                 double r = sqrt(dSqr);
-                n_h   += Kernel::cubicSpline(r, h);
-                dn_dh += Kernel::cubicSplineDh(r, h);
+                n_h   += Kernel::W(r, h);
+                dn_dh += Kernel::WDh(r, h);
             }
 #if DIM == 2
             double V  = SML_V_COEF * h * h;
@@ -2097,7 +2014,7 @@ void Particles::gradient(double *f, double (*grad)[DIM]){
 #endif
                 const double r = sqrt(r2);
                 if (r <= 0.) continue;
-                const double dW = Kernel::dWdr(r, sml[i]);
+                const double dW = Kernel::WDr(r, sml[i]);
                 const double w  = wSPH * m[jIdx] * (f[jIdx] - f[i]) * dW / (r * rho[i]);
                 grad[i][0] += w * dx;
                 grad[i][1] += w * dy;
@@ -3970,7 +3887,7 @@ void Particles::gradient(double *f, double (*grad)[DIM], double *fGhost, const P
 #endif
                 const double r = sqrt(r2);
                 if (r <= 0.) continue;
-                const double dW = Kernel::dWdr(r, sml[i]);
+                const double dW = Kernel::WDr(r, sml[i]);
                 const double w  = wSPH * m[jIdx] * (f[jIdx] - f[i]) * dW / (r * rho[i]);
                 grad[i][0] += w * dx;
                 grad[i][1] += w * dy;
@@ -3998,7 +3915,7 @@ void Particles::gradient(double *f, double (*grad)[DIM], double *fGhost, const P
 #endif
                 const double r = sqrt(r2);
                 if (r <= 0.) continue;
-                const double dW = Kernel::dWdr(r, sml[i]);
+                const double dW = Kernel::WDr(r, sml[i]);
                 const double w  = wSPH * ghostParticles.m[gIdx] * (fGhost[gIdx] - f[i])
                                   * dW / (r * rho[i]);
                 grad[i][0] += w * dx;

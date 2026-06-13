@@ -10,23 +10,12 @@
 #include <highfive/H5File.hpp>
 
 #include "parameter.h"
+#include "Kernel.h"
 #include "Logger.h"
 #include "Domain.h"
 #include "Helper.h"
 #include "Riemann.h"
 #include "EquationOfState.h"
-
-namespace Kernel {
-    double cubicSpline(const double &r, const double &h);
-    /// Analytical d/dh of cubicSpline (MFM kernel, support r in [0, h]).
-    /// Used by the variable smoothing length Newton iteration.
-    double cubicSplineDh(const double &r, const double &h);
-    // For SPH only and 2d:
-    // dW(r, h)/dr:
-    double dWdr(const double &r, const double &h);
-    // dW(r, h)/dh:
-    double dWdh(const double &r, const double &h);
-}
 
 class Particles {
 
@@ -333,7 +322,7 @@ private:
     double (*Fij)[DIM+2];
     double (*vFrame)[DIM];
 
-    double (*kernel)(const double&, const double&){ &Kernel::cubicSpline };
+    double (*kernel)(const double&, const double&){ &Kernel::W };
 
     /// variables for integration
     double *mF, *eF, (*vF)[DIM];
