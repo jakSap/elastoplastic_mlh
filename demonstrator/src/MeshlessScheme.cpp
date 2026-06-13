@@ -271,7 +271,7 @@ void MeshlessScheme::run(){
 	Logger(INFO) << "    > Performing stress integration 1 / 2";
         particles->integrateStressTensor(timeStep / 2.0);
 #if FRAGMENTATION
-        particles->integrateDamage(timeStep / 2.0);
+        if (t >= DAMAGE_START_TIME) particles->integrateDamage(timeStep / 2.0);
 #endif
 #if PERIODIC_BOUNDARIES
         Logger(DEBUG) << "      > Update ghost state after stress integration";
@@ -429,7 +429,7 @@ void MeshlessScheme::run(){
         Logger(INFO) << "    > Performing stress integration 2 / 2";
         particles->integrateStressTensor(timeStep / 2.0);
 #if FRAGMENTATION
-        particles->integrateDamage(timeStep / 2.0);
+        if (t >= DAMAGE_START_TIME) particles->integrateDamage(timeStep / 2.0);
 #endif
 
 #if EXPLICIT_VOL_INTEGRATION

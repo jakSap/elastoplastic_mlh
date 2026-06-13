@@ -94,6 +94,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// Maximum number of activation thresholds stored per particle. Only relevant
 /// for FRAGMENTATION; keep at 1 otherwise so the flaw array stays tiny.
 #define MAX_NUM_FLAWS 1
+/// Skip damage evolution while simulated time < DAMAGE_START_TIME. The kernel-sum
+/// density is truncated (rho < rho0, hence spurious tension everywhere) for the
+/// first step or two until the smoothing length converges; without this gate that
+/// startup transient latches every Weibull flaw at once. Damage models in general
+/// require a relaxed IC. Default 0.0 = no delay.
+#define DAMAGE_START_TIME 0.0
 
 /// Per-material plasticity yield models (mutually exclusive). The yield
 /// strength Y(P, damage, u) is supplied by EquationOfState::EOSYieldStrength

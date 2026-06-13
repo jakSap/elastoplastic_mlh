@@ -1,0 +1,49 @@
+; Basalt impact sweep -- BASE config.
+; The build/run script copies this per combo and rewrites outDir (and timeEnd).
+initFile /home/sappler/Documents/newMFM/testcases/basalt_impact/basalt_impact-2D.h5
+outDir __OUTDIR__
+
+timeStep 0.05
+timeEnd __TIMEEND__
+h5DumpInterval 4
+
+kernelSize 0.22
+sml {
+    NNNTarget 32
+    tol       1e-3
+    maxIter   200
+    maxFactor 1.2
+    hMinFactor 0.1
+    hMaxFactor 3.0
+    warnFraction  0.05
+    panicFraction 0.25
+}
+
+hydro_gamma 1.6666666666666667
+
+; Normalized basalt Tillotson (rho0 = A = c = 1) + Grady-Kipp / plasticity params.
+; weibullK/M are documentation only here -- flaws come from the IC HDF5.
+materials {
+    mat0 {
+        matId 0
+        rho0  1.0
+        A     1.0
+        B     0.0
+        u0    1.0
+        a     0.0
+        b     0.0
+        alpha 0.0
+        beta  0.0
+        u_iv  0.05
+        u_cv  0.18
+        mu    0.22
+        weibullK 5.0e12
+        weibullM 9.5
+        Y0    0.01
+        Y_M   0.03
+        mu_i  1.5
+        mu_d  0.6
+        frictionAngle 0.6
+        u_melt 0.5
+    }
+}

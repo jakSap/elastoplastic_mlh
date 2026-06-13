@@ -1,0 +1,7 @@
+# Generated artifacts (keep only the generator, config, scripts, README)
+0*_*/
+basalt_impact-2D.h5
+*.png
+*.log
+*.status
+*.build.err
