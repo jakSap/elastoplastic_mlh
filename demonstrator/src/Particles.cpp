@@ -347,7 +347,13 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, const double &f, double
     double cmag[2] = {0., 0.};
     for (int side = 0; side < 2; ++side){
         const int p = (side == 0) ? i : jj;
-        const double a = Sxx[p], b = Sxy[p], c = Syy[p];
+        double a = Sxx[p], b = Sxy[p], c = Syy[p];
+#if FRAGMENTATION && DAMAGE_ACTS_ON_S
+        // Grady-Kipp: damaged material carries less deviatoric stress (matches the
+        // solid-HLLC path in Riemann.cpp). Pressure damage flows through the solver.
+        const double dmg = 1.0 - damageTotal[p];
+        a *= dmg; b *= dmg; c *= dmg;
+#endif
         const double mean = 0.5*(a + c);
         const double dev  = sqrt(0.25*(a - c)*(a - c) + b*b);
         double l1 = mean + dev, l2 = mean - dev;
