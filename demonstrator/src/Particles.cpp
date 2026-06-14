@@ -302,6 +302,84 @@ void Particles::computeFabMonaghan(){
     }
 }
 #endif // TENSILE_CORRECTION
+
+#if GIZMO_ELASTIC_FLUX
+// Port of GIZMO solids/elastic_stress_tensor_force.h (eigenvalue branch), in the
+// demonstrator's lab frame. Computed once per pair (i<jj); the flux-symmetry copy
+// negates it for jj, matching GIZMO's antisymmetric +i/-j application.
+void Particles::addGizmoElasticStressFlux(int i, int jj, const double &f, double *Fout){
+    const double dx = x[i] - x[jj], dy = y[i] - y[jj];
+    const double r2 = dx*dx + dy*dy;
+    if (r2 <= 0.) return;
+    const double r = sqrt(r2), rinv = 1./r;
+
+    // SPH 'effective area' along the line of centres (chosen to avoid tensile instability)
+    const double dwk = std::fabs(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, sml[jj]));
+    const double rhoi = rho[i], rhoj = rho[jj];
+    const double FNormT = m[i]*m[jj]*dwk / (rhoi*rhoj);
+    const double FVec[2] = { FNormT*dx*rinv, FNormT*dy*rinv };
+
+    // mean-velocity interface (the -0.5 carries GIZMO's required sign)
+    const double v_int[2] = { -0.5*(vx[i]+vx[jj]), -0.5*(vy[i]+vy[jj]) };
+    const double dv[2] = { vx[i]-vx[jj], vy[i]-vy[jj] };
+    const double vdotr = dv[0]*dx + dv[1]*dy;
+
+    // longitudinal (P-wave) and transverse (S-wave) acoustic impedances for HLL diffusion
+#if EOS == 1 || EOS == 2
+    const double Ki = MeshlessEOS->EOSBulkModulus(matId[i], rhoi, P[i]);
+    const double Kj = MeshlessEOS->EOSBulkModulus(matId[jj], rhoj, P[jj]);
+    const double mui = MeshlessEOS->EOSShearModulus(matId[i]);
+    const double muj = MeshlessEOS->EOSShearModulus(matId[jj]);
+#else
+    const double Ki = MeshlessEOS->EOSBulkModulus(rhoi, P[i]);
+    const double Kj = MeshlessEOS->EOSBulkModulus(rhoj, P[jj]);
+    const double mui = 0., muj = 0.;
+#endif
+    const double ci  = sqrt((Ki + 4./3.*mui)/rhoi), cj  = sqrt((Kj + 4./3.*muj)/rhoj);
+    const double cTi = sqrt(mui/rhoi),               cTj = sqrt(muj/rhoj);
+    const double wt_r = rhoi*ci*rhoj*cj / (rhoi*ci + rhoj*cj) * FNormT;
+    const double denT = rhoi*cTi + rhoj*cTj;
+    const double wt_t = (denT > 0.) ? rhoi*cTi*rhoj*cTj / denT * FNormT : 0.;
+    const double wt_rt = (wt_r - wt_t) * vdotr * rinv * rinv;
+
+    // deviatoric stress force: project face onto stress eigenvectors, damp tensile
+    // (positive) principal components by (1 - f); summed over both sides at wt=-0.5
+    double cmag[2] = {0., 0.};
+    for (int side = 0; side < 2; ++side){
+        const int p = (side == 0) ? i : jj;
+        const double a = Sxx[p], b = Sxy[p], c = Syy[p];
+        const double mean = 0.5*(a + c);
+        const double dev  = sqrt(0.25*(a - c)*(a - c) + b*b);
+        double l1 = mean + dev, l2 = mean - dev;
+        double e1[2], e2[2];
+        if (dev <= 1e-12*std::fabs(mean)){ e1[0]=1.; e1[1]=0.; e2[0]=0.; e2[1]=1.; }
+        else {
+            double v1x = b, v1y = l1 - a; const double wx = l1 - c, wy = b;
+            if (wx*wx + wy*wy > v1x*v1x + v1y*v1y){ v1x = wx; v1y = wy; }
+            const double nv = sqrt(v1x*v1x + v1y*v1y);
+            e1[0] = v1x/nv; e1[1] = v1y/nv; e2[0] = -e1[1]; e2[1] = e1[0];
+        }
+        const double l[2] = { l1, l2 };
+        const double *e[2] = { e1, e2 };
+        for (int kk = 0; kk < 2; ++kk){
+            double prefac = -0.5 * l[kk] * (FVec[0]*e[kk][0] + FVec[1]*e[kk][1]);
+            if (l[kk] > 0.) prefac *= 1. - f;
+            cmag[0] += prefac * e[kk][0];
+            cmag[1] += prefac * e[kk][1];
+        }
+    }
+    // HLL-type dissipation of velocity differences (longitudinal + transverse shear wave)
+    cmag[0] -= wt_rt*dx + wt_t*dv[0];
+    cmag[1] -= wt_rt*dy + wt_t*dv[1];
+    const double cmag_E = cmag[0]*v_int[0] + cmag[1]*v_int[1];
+
+    // demonstrator convention: dp_i/dt = -sum_j Fij, so add the negative of GIZMO's force
+    Fout[1] -= cmag_E;
+    Fout[2] -= cmag[0];
+    Fout[3] -= cmag[1];
+}
+#endif // GIZMO_ELASTIC_FLUX
+
 void Particles::integrateStressTensor(const double &dt) {
     for (int i = 0; i < N; ++i) {
 #if EOS == 1 || EOS == 2
@@ -1564,6 +1642,14 @@ void Particles::compDensity(){
 void Particles::applyExplicitVolumeOverride(){
     // Mirror of GIZMO master/hydro/density.c:982-987. The kernel-sum density
     // is the relaxation target; downstream physics sees the integrated value.
+    // Skip the first EXPLICIT_VOL_SEED_SKIP step(s): keep the working rho at the
+    // kernel density so the t=0 startup-NNS truncation (~0.89) self-heals by
+    // re-summation before it seeds the (re-summation-free) advected density.
+    if (explicitVolSeedSkip > 0){
+        for (int i = 0; i < N; ++i) rhoKernel[i] = rho[i];
+        --explicitVolSeedSkip;
+        return;
+    }
     if (!explicitVolInitialized){
         for (int i = 0; i < N; ++i){
             rhoKernel[i]   = rho[i];
@@ -1581,14 +1667,46 @@ void Particles::applyExplicitVolumeOverride(){
     }
 }
 
+#if EXPLICIT_VOL_SPH_DIVV
+double Particles::sphDivV(int i){
+    // GIZMO Particle_DivVel (density.c:334,514): -sum_j dW/dr (dp.dv)/r normalized
+    // by the kernel-sum neighbour number (= omega, which includes the self term).
+    // The kernel normalization cancels between numerator and omega. No ghosts:
+    // EXPLICIT_VOL_INTEGRATION is guarded to the non-periodic path.
+    double acc = 0.;
+    for (int jn = 0; jn < noi[i]; ++jn){
+        const int j = nnl[i*MAX_NUM_INTERACTIONS + jn];
+        const double dpx = x[i]-x[j], dpy = y[i]-y[j];
+        const double dvx = vx[i]-vx[j], dvy = vy[i]-vy[j];
+        double r2 = dpx*dpx + dpy*dpy;
+        double dpdv = dpx*dvx + dpy*dvy;
+#if DIM == 3
+        const double dpz = z[i]-z[j], dvz = vz[i]-vz[j];
+        r2 += dpz*dpz; dpdv += dpz*dvz;
+#endif
+        if (r2 <= 0.) continue;
+        const double r = std::sqrt(r2);
+        acc -= Kernel::WDr(r, sml[i]) * dpdv / r;
+    }
+    return (omega[i] > 0.) ? acc / omega[i] : 0.;
+}
+#endif
+
 void Particles::integrateExplicitVolumeHalfStep(const double &dt, bool finalize){
     // Mirror of GIZMO master/kicks.c:308-318. Called twice per outer step
     // with dt = full_step / 2 to bracket the flux/updateState block.
+    // No-op until the advected density has been seeded (see applyExplicitVolumeOverride):
+    // during the seed-skip step(s) rho is the kernel density and must not be advected.
+    if (!explicitVolInitialized) return;
     for (int i = 0; i < N; ++i){
         // Advection step: d ln rho / dt = -div v.
+#if EXPLICIT_VOL_SPH_DIVV
+        double divV = sphDivV(i);
+#else
         double divV = vxGrad[i][0] + vyGrad[i][1];
 #if DIM == 3
         divV += vzGrad[i][2];
+#endif
 #endif
         double arg = divV * dt;
         if (arg >  EXPLICIT_VOL_DIVV_CLAMP) arg =  EXPLICIT_VOL_DIVV_CLAMP;
@@ -2991,6 +3109,11 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 double fSxxL = Sxx[jj] + Helper::dotProduct(SxxGrad[jj], xijxj_loc);
                 double fSxyL = Sxy[jj] + Helper::dotProduct(SxyGrad[jj], xijxj_loc);
                 double fSyyL = Syy[jj] + Helper::dotProduct(SyyGrad[jj], xijxj_loc);
+#if GIZMO_ELASTIC_FLUX
+                // GIZMO keeps the Riemann problem isotropic; the deviatoric stress
+                // is added as a separate SPH flux after the solve (see below).
+                fSxxR = fSxyR = fSyyR = fSxxL = fSxyL = fSyyL = 0.;
+#endif
 #if DIM == 3
                 double fSxzR = Sxz[i]  + Helper::dotProduct(SxzGrad[i], xijxi_loc);
                 double fSyzR = Syz[i]  + Helper::dotProduct(SyzGrad[i], xijxi_loc);
@@ -3026,6 +3149,13 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #endif
                 };
                 solver.HLLCFlux(Fij[ii]);
+#if GIZMO_ELASTIC_FLUX
+                double fTC = 0.;
+#if TENSILE_CORRECTION
+                fTC = TENSILE_CORRECTION_PREFAC * pow(fabMonaghan[ii], TENSILE_CORRECTION_POWER);
+#endif
+                addGizmoElasticStressFlux(i, jj, fTC, Fij[ii]);
+#endif
 #else
 #if USE_MATID
                 int matIdR_ii = matId[i];

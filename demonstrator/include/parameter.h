@@ -172,6 +172,13 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #error "TENSILE_CORRECTION_3 is only implemented for DIM == 2 (analytic 2x2 eigendecomposition)."
 #endif
 
+// GIZMO-faithful elastic coupling: keep the HLLC Riemann problem purely isotropic
+// (pressure only + dummy-pressure shift) and add the deviatoric stress as a separate
+// SPH stress flux with longitudinal+transverse (shear-wave) HLL dissipation and
+// per-eigenvalue tensile correction (GIZMO solids/elastic_stress_tensor_force.h).
+// (consistency guards live below, after USE_HLLC is defined)
+#define GIZMO_ELASTIC_FLUX 0
+
 /** maximum interactions with ghost particles
  *  ignored when `PERIODIC_BOUNDARIES` is not set
 **/
@@ -198,6 +205,14 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #endif
 // Use HLLC or HLL solver for EOS != ideal gas
 #define USE_HLLC 1
+
+// GIZMO_ELASTIC_FLUX consistency guards (USE_HLLC/ELASTIC are now defined)
+#if GIZMO_ELASTIC_FLUX && !(USE_HLLC && ELASTIC)
+#error "GIZMO_ELASTIC_FLUX requires USE_HLLC == 1 and ELASTIC == 1."
+#endif
+#if GIZMO_ELASTIC_FLUX && DIM == 3
+#error "GIZMO_ELASTIC_FLUX stress flux is only implemented for DIM == 2 (analytic 2x2 eigendecomposition)."
+#endif
 
 // Use HLL solver
 #define HLLC_general_EOS 1
@@ -322,6 +337,25 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// 0 = legacy: re-sync rho = rhoExplicit inside every half-kick (desyncs P and
 ///     rho for the flux pass, since pressure was computed before kick A).
 #define EXPLICIT_VOL_FREEZE_RHO 1
+/// Velocity-divergence source for the explicit-volume advection. GIZMO drives the
+/// continuity integration with a robust SPH kernel-weighted estimator
+/// (Particle_DivVel, density.c:334/514: -sum_j dW/dr (dp.dv)/r, normalized by the
+/// kernel-sum neighbour number = omega), NOT the matrix-inverse MFM gradient trace.
+/// The MFM gradient is ill-conditioned at the ring's free surface and injects a
+/// spurious divergence that bloats/drifts the rings before contact (absent in GIZMO).
+/// NOTE: ported faithfully, but in the demonstrator the SPH estimator is slightly
+/// noisier at the free surface than the MFM trace and did not improve the rings, so
+/// it is left OFF by default; the working seed-fix run uses the MFM trace.
+/// 1 = GIZMO SPH estimator (faithful, noisier here); 0 = MFM gradient trace (DEFAULT).
+#define EXPLICIT_VOL_SPH_DIVV 0
+/// Number of initial steps to run on the kernel density before seeding the advected
+/// density. The demonstrator's t=0 kernel density is truncated by the incomplete
+/// startup NNS (bulk ~0.89) and self-heals by re-summation at step 1; seeding the
+/// (re-summation-free) advected density from that poisoned value induces a spurious
+/// breathing/expansion (ring bloat + pre-contact drift) that GIZMO does not have
+/// (GIZMO has no t=0 truncation). 1 = seed from the healed step-1 density (DEFAULT);
+/// 0 = legacy seed from the truncated t=0 density (bloats).
+#define EXPLICIT_VOL_SEED_SKIP 1
 
 #if EXPLICIT_VOL_INTEGRATION && PERIODIC_BOUNDARIES
 #error "EXPLICIT_VOL_INTEGRATION currently only wires the non-periodic path. The periodic gradient-recompute hooks would need additional ghost updates of rhoExplicit/rhoKernel. Set EXPLICIT_VOL_INTEGRATION to 0 for periodic runs."

@@ -65,6 +65,11 @@ public:
     /// call we seed rhoExplicit from the kernel density rather than overwriting
     /// rho; on every subsequent call we substitute rho <- rhoExplicit.
     bool explicitVolInitialized { false };
+    /// Number of initial steps to run on the kernel density before seeding the
+    /// advected density. The demonstrator's t=0 kernel density is truncated by the
+    /// incomplete startup NNS (~0.89) and self-heals at step 1; seeding from that
+    /// poisoned value bloats the rings (absent in GIZMO). Seed from the healed value.
+    int explicitVolSeedSkip { EXPLICIT_VOL_SEED_SKIP };
 
     /// Replace rho with rhoExplicit (after stashing kernel rho in rhoKernel),
     /// or seed rhoExplicit from rho on the first call. Must be called right
@@ -78,6 +83,12 @@ public:
     /// EXPLICIT_VOL_FREEZE_RHO only the finalize kick writes rho <- rhoExplicit, so
     /// the working density stays frozen through the hydro pass.
     void integrateExplicitVolumeHalfStep(const double &dt, bool finalize = false);
+#if EXPLICIT_VOL_SPH_DIVV
+    /// GIZMO's robust SPH kernel-weighted velocity divergence (Particle_DivVel,
+    /// density.c:334/514): -sum_j dW/dr (dp.dv)/r normalized by omega (kernel-sum
+    /// neighbour number). Surface-stable, unlike the MFM gradient trace.
+    double sphDivV(int i);
+#endif
 #endif
 
 #if ELASTIC
@@ -92,6 +103,11 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     void computeFabMonaghan();
 #endif
     void integrateStressTensor(const double &dt);
+#if GIZMO_ELASTIC_FLUX
+    // GIZMO-faithful deviatoric stress flux (solids/elastic_stress_tensor_force.h),
+    // added to the pair flux Fout after the isotropic Riemann solve.
+    void addGizmoElasticStressFlux(int i, int jj, const double &f, double *Fout);
+#endif
 #if FRAGMENTATION
     /// Grady-Kipp damage state (Benz & Asphaug 1995).
     /// `damage` is the DIM-th root of the tensile damage; full damage is
