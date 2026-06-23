@@ -382,6 +382,11 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
     const double Sstar =
         (WR[1] - WL[1] + WL[0] * uL * SLmuL - WR[0] * uR * SRmuR) /
         (WL[0] * SLmuL - WR[0] * SRmuR);
+// #ifdef FIRST_ORDER_DEBUG
+//     if (n[0] < -0.5 && n[1] > 0.5 && WL[0] > 1.5 && WR[0] < 1.5)
+//         printf("DEMOHLLC n=(%.3f,%.3f) WL2=%.3f WR2=%.3f uL=%.4f uR=%.4f aL=%.4f aR=%.4f Sstar=%.5f rhoL=%.3f rhoR=%.3f\n",
+//                n[0],n[1],WL[2],WR[2],uL,uR,aL,aR,Sstar,WL[0],WR[0]);
+// #endif
 #endif
     // Logger(DEBUG) <<  "SStar: " << Sstar;
     // Logger(DEBUG) << "SLmuL: " << SLmuL;

@@ -3417,6 +3417,13 @@ void Particles::collectFluxes(Helper &helper){
 #if DIM==3
             vF[i][2] += Fij[ii][4];
 #endif
+// #ifdef FIRST_ORDER_DEBUG
+//             if (i == 4124 && j < 60) {
+//                 int jj=nnl[ii];
+//                 printf("DEMOPAIR i=%d j=%d xi=(%.4f,%.4f) xj=(%.4f,%.4f) Aij=(%.6f,%.6f) Fij1=%.6f Fij2=%.6f Fij3=%.6f\n",
+//                        i,jj,x[i],y[i],x[jj],y[jj],Aij[ii][0],Aij[ii][1],Fij[ii][1],Fij[ii][2],Fij[ii][3]);
+//             }
+// #endif
 
             /// ENERGY FLUXES
             // allocate buffer for energy update
@@ -3555,6 +3562,9 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
         }
 
         // UPDATE VELOCITY
+// #ifdef FIRST_ORDER_DEBUG
+//         if (i == 4124) printf("NETDEMO i=%d ax=%.6f ay=%.6f dedt=%.6f m=%.6g noi=%d\n", i, -vF[i][0]/m[i], -vF[i][1]/m[i], -eF[i]/m[i], m[i], noi[i]);
+// #endif
         Q[1] -= dt*vF[i][0];
         Q[2] -= dt*vF[i][1];
 #if DIM == 3

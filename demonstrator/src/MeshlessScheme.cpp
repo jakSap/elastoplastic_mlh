@@ -285,6 +285,19 @@ void MeshlessScheme::run(){
         Logger(DEBUG) << "      > Explicit-volume half-step kick A";
         particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/false);
 #endif
+// #ifdef FIRST_ORDER_DEBUG
+//         // zero all gradients -> first-order (no spatial reconstruction, no half-step)
+//         for (int _z=0; _z<particles->N; ++_z) for (int _d=0; _d<DIM; ++_d) {
+//             particles->rhoGrad[_z][_d]=0.; particles->vxGrad[_z][_d]=0.;
+//             particles->vyGrad[_z][_d]=0.; particles->PGrad[_z][_d]=0.;
+//         }
+// #if PERIODIC_BOUNDARIES
+//         for (int _z=0; _z<ghostParticles.N; ++_z) for (int _d=0; _d<DIM; ++_d) {
+//             ghostParticles.rhoGrad[_z][_d]=0.; ghostParticles.vxGrad[_z][_d]=0.;
+//             ghostParticles.vyGrad[_z][_d]=0.; ghostParticles.PGrad[_z][_d]=0.;
+//         }
+// #endif
+// #endif
         Logger(INFO) << "    > Preparing Riemann solver";
         Logger(DEBUG) << "      > Computing effective faces";
         particles->compEffectiveFace();
