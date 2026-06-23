@@ -278,31 +278,35 @@ void Riemann::HLLCFlux(double *Fij){
     }
 #endif
 
+// As implemented by Hopkins in GIZMO, before the Riemann solver, add a dummy pressure to make the Riemann problem well-behaved.
+// Check if tension actually exists. We need effective pressure: p - S_rot^xx
+#if USE_DUMMY_PRESSURE
+double pEffR = WR[1] - SijRotR[0];
+double pEffL = WL[1] - SijRotL[0];
+double pDummy = 0;
+if (pEffR < 0 | pEffL < 0){
+    pDummy = -1. * std::min(pEffR, pEffL);
+}
+WR[1] += 2 * pDummy;
+WL[1] += 2 * pDummy;
 #if TENSILE_CORRECTION && TENSILE_CORRECTION_1
-    // As implemented by Hopkins in GIZMO, before the Riemann solver, add a dummy pressure to make the Riemann problem well-behaved.
-    // Check if tension actually exists. We need effective pressure: p - S_rot^xx
-    double pEffR = WR[1] - SijRotR[0];
-    double pEffL = WL[1] - SijRotL[0];
-    double pDummy = 0;
-    if (pEffR < 0 | pEffL < 0){
-        pDummy = -1. * std::min(pEffR, pEffL);
-    }
-    WR[1] += 2 * pDummy;
-    WL[1] += 2 * pDummy;
     SijRotR[0] += 2*pDummy;
     SijRotL[0] += 2*pDummy;
     pDummy *= (1 - tensileCorrectionFactor);
+#endif
 #endif
 
     double Sstar = 0.;
     HLLC::xSplitElasticHLLC(matIdL, matIdR, WR, WL, SijRotR, SijRotL, Fij, MeshlessEOS, Sstar);
 
-#if TENSILE_CORRECTION && TENSILE_CORRECTION_1
+// #if TENSILE_CORRECTION && TENSILE_CORRECTION_1
+#if USE_DUMMY_PRESSURE
     if (pDummy > 0){
         Fij[2] -= pDummy;
         Fij[1] -= pDummy * Sstar;
     }
 #endif
+// #endif
     // Back-rotate momentum fluxes to lab frame (Lambda^{-1} = Lambda^T)
 #if DIM == 2
     double FijBuf[DIM] = { Fij[2], Fij[3] };

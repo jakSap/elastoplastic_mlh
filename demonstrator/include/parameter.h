@@ -213,9 +213,24 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #if GIZMO_ELASTIC_FLUX && DIM == 3
 #error "GIZMO_ELASTIC_FLUX stress flux is only implemented for DIM == 2 (analytic 2x2 eigendecomposition)."
 #endif
+// GIZMO_ELASTIC_FLUX zeroes the deviatoric stress passed to the Riemann solver and
+// applies its own per-eigenvalue tensile damping in the separate stress flux, so the
+// in-solver stress-damping branches TC2/TC3 would be no-ops: forbid the combination.
+#if GIZMO_ELASTIC_FLUX && TENSILE_CORRECTION_2
+#error "GIZMO_ELASTIC_FLUX and TENSILE_CORRECTION_2 are mutually exclusive: stress damping is done in the elastic flux, not the Riemann solver."
+#endif
+#if GIZMO_ELASTIC_FLUX && TENSILE_CORRECTION_3
+#error "GIZMO_ELASTIC_FLUX and TENSILE_CORRECTION_3 are mutually exclusive: stress damping is done in the elastic flux, not the Riemann solver."
+#endif
 
 // Use HLL solver
 #define HLLC_general_EOS 1
+
+// Riemann related: Use dummy pressure to avoid ill defined riemann problem
+#define USE_DUMMY_PRESSURE 1
+#if USE_DUMMY_PRESSURE == 0 && TENSILE_CORRECTION
+#error "Dummy pressure needs to be activated if tensile correction is to be used."
+#endif
 #define USE_HLL 0
 
 // Use Roe Average for HLL solver. Otherwise direct estimate is used.
