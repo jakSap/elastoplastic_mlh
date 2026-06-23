@@ -60,7 +60,13 @@ double EquationOfState::EOSSoundSpeed(int matId, const double &rho, const double
     assert(matId >= 0 && matId < (int)materials.size());
 #endif
     const MurnaghanMaterial &m = materials[matId];
-    return m.K0 / m.rho0 * pow(rho / m.rho0, m.n - 1);
+    // Linear sound speed a = sqrt((dp/drho)_s) = sqrt((K0/rho0) eta^(n-1)).
+    // The helper expression below is a^2; the missing sqrt inflated the signal
+    // speed used by cEff / the CFL timestep (negligible when a ~ 1 in the
+    // normalized testcases, but it crushes the timestep in SI units where
+    // a ~ few km/s). Matches the linear-speed convention of the Tillotson
+    // EOSSoundSpeed and the ideal-gas branch.
+    return std::sqrt(m.K0 / m.rho0 * pow(rho / m.rho0, m.n - 1.0));
 }
 
 double EquationOfState::EOSInternalEnergy(int matId, const double &rho, const double &p){
@@ -92,11 +98,25 @@ double EquationOfState::EOSAdiabaticSoundSpeed(int matId, const double &rho, con
     assert(matId >= 0 && matId < (int)materials.size());
 #endif
     const MurnaghanMaterial &m = materials[matId];
-    const double eta = rho / m.rho0;
-    double cs = m.n * pow(eta, m.n) / (pow(eta, m.n) - 1);
-    assert(cs >= 0 && "Negative sound speed encountered");
-    assert(cs > 0 && "Zero sound speed encountered");
-    return cs;
+    // Adiabatic sound speed a = sqrt((dp/drho)_s), cf. general_eos_riemann
+    // Eq. (2) a = sqrt(Gamma p/rho) and Eq. (118). The Murnaghan EOS is
+    // barotropic, so (dp/drho)_s = dp/drho = (K0/rho0) eta^(n-1), giving
+    //   a = sqrt( (K0/rho0) eta^(n-1) ).
+    // Equivalently a = sqrt(K/rho) with K = K0 eta^n (== EOSBulkModulus).
+    // The previous expression returned n eta^n/(eta^n - 1) = Gamma = a^2 rho/p
+    // (== EOSGeneralGamma), i.e. the adiabatic index, not the velocity a, which
+    // broke the PVRS wave-speed estimate in the non-elastic HLLC path
+    // (abar = aL + aR, SLmuL = -aL*qL).
+    // Clamp rho to a positive floor: the linear reconstruction at a face can
+    // extrapolate to rho <= 0 (or NaN) under tensile stretching. The HLLC caller
+    // already guards rhoLinv against this; do the same here so cs2 stays positive.
+    // Use an explicit conditional to be NaN-safe (std::max(NaN, x) is unspecified).
+    const double rho_floor = m.rho0 * 1e-10;
+    const double rho_safe = (rho > rho_floor) ? rho : rho_floor;
+    const double eta = rho_safe / m.rho0;
+    const double cs2 = (m.K0 / m.rho0) * pow(eta, m.n - 1.0);
+    assert(cs2 > 0 && "Non-positive sound speed squared encountered");
+    return std::sqrt(cs2);
 }
 
 double EquationOfState::EOSGeneralGamma(int matId, const double &rho, const double &p){
@@ -264,7 +284,12 @@ double EquationOfState::EOSSoundSpeed(int matId, const double &rho, const double
     const TillotsonMaterial &m = materials[matId];
     // u < 0 is the caller's sentinel for "use p instead" (see Particles.cpp:2148).
     const double u_use = (u >= 0.0) ? u : tillotsonInternalEnergy(m, rho, p);
-    return tillotsonSoundSpeedSquared(m, rho, u_use);
+    // Return the LINEAR sound speed (matches the ideal-gas EOSSoundSpeed and the
+    // callers in compGlobalTimestep / the explicit-vol cEff, which use it as a
+    // signal speed). The helper returns c^2; the missing sqrt was invisible in
+    // the normalized basalt testcase (c ~ 1 so c^2 ~ c) but collapses the CFL
+    // timestep in SI units (c ~ 5500 -> c^2 ~ 3e7).
+    return std::sqrt(tillotsonSoundSpeedSquared(m, rho, u_use));
 }
 
 double EquationOfState::EOSInternalEnergy(int matId, const double &rho, const double &p){
@@ -290,7 +315,12 @@ double EquationOfState::EOSAdiabaticSoundSpeed(int matId, const double &rho, con
     const TillotsonMaterial &m = materials[matId];
     const double u   = tillotsonInternalEnergy(m, rho, p);
     const double cs2 = tillotsonSoundSpeedSquared(m, rho, u);
-    return cs2 * rho / p;
+    // Adiabatic sound speed a = sqrt((dp/drho)_s), cf. general_eos_riemann
+    // Eq. (2)/(118). The previous expression returned cs2*rho/p = Gamma =
+    // a^2 rho/p (== EOSGeneralGamma below), i.e. the adiabatic index, not the
+    // velocity a; that broke the PVRS wave-speed estimate in the general-EOS
+    // HLLC path (abar = aL + aR, SLmuL = -aL*qL).
+    return std::sqrt(cs2);
 }
 
 double EquationOfState::EOSGeneralGamma(int matId, const double &rho, const double &p){
