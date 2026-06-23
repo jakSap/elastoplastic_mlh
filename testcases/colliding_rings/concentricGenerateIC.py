@@ -112,7 +112,7 @@ if __name__ == "__main__":
         ))
     else:
         xs_ring, ys_ring = xs_main, ys_main
-        mat_ring = np.full(len(xs_main), 1, dtype=np.int8)
+        mat_ring = np.full(len(xs_main), 0, dtype=np.int8)
         m_ring   = np.full(len(xs_main), mass_main)
 
     N = len(xs_ring)
