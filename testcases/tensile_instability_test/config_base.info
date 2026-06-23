@@ -1,0 +1,69 @@
+; Tensile-instability stretch sweep -- BASE config (template).
+; run_tensile_sweep.sh copies this per run and rewrites the __PLACEHOLDERS__:
+;   __INITFILE__  strain-rate-specific stretch IC (tensile_stretch_ic_srA_dpD.h5)
+;   __OUTDIR__    per-run output directory
+;   __TIMEEND__   simulation end time
+;   __LOWERX__ / __UPPERX__  x-box limits (buffer scales with strain rate so the
+;                            stretched strip never reaches the periodic seam)
+initFile __INITFILE__
+outDir   __OUTDIR__
+
+; Fixed: with ADAPTIVE_TIMESTEP this is the output stride; h5DumpInterval 10 ->
+; snapshot every 0.1 -> ~100 dumps for timeEnd 10.
+timeStep 0.01
+timeEnd  __TIMEEND__
+h5DumpInterval 10
+
+; ~2x particle spacing (delta_p = 0.05); adaptive SML (VARIABLE_SML) tunes h to NNNTarget.
+kernelSize 0.1
+sml {
+    NNNTarget 32
+    tol       1e-3
+    maxIter   200
+    maxFactor 1.2
+    hMinFactor 0.1
+    hMaxFactor 3.0
+    warnFraction  0.05
+    panicFraction 0.25
+}
+
+; Unused for Tillotson (EOS 2); kept for config-parser compatibility.
+hydro_gamma 1.6666666666666667
+
+; Normalized basalt Tillotson (rho0 = A = c = 1) + shear modulus mu for the
+; elastic strip (ELASTIC 1). Same set as basalt_impact/config_base.info; the
+; failure/plasticity keys are inert here (no FRAGMENTATION/PLASTICITY).
+materials {
+    mat0 {
+        matId 0
+        rho0  1.0
+        A     1.0
+        B     0.0
+        u0    1.0
+        a     0.0
+        b     0.0
+        alpha 0.0
+        beta  0.0
+        u_iv  0.05
+        u_cv  0.18
+        mu    0.22
+        weibullK 5.0e12
+        weibullM 9.5
+        Y0    0.01
+        Y_M   0.03
+        mu_i  1.5
+        mu_d  0.6
+        frictionAngle 0.6
+        u_melt 0.5
+    }
+}
+
+; x-buffer scales with strain rate (see script); y stays [-1,1].
+periodicBoxLimits {
+    lowerX __LOWERX__
+    lowerY -1.0
+    lowerZ  0.0
+    upperX __UPPERX__
+    upperY  1.0
+    upperZ  0.0
+}
