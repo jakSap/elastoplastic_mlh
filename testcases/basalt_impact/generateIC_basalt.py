@@ -36,10 +36,10 @@ delta_p   = 0.10          # particle spacing -> ~8k particles
 R_target  = 5.0           # target disk radius
 R_proj    = 0.8           # projectile disk radius
 gap       = 0.1           # initial gap between projectile and target
-v_imp     = 0.2           # impact speed; c = sqrt(A/rho) = 1, so Mach ~0.2.
-                          # The scheme is tuned for the gentle (Mach<~0.3) regime
-                          # of the colliding-rings benchmark; faster impacts
-                          # collapse the CFL timestep.
+v_imp     = 2.0           # impact speed; c = sqrt(A/rho) = 1, so Mach ~2
+                          # (supersonic, genuine high-velocity impact). ADAPTIVE_TIMESTEP
+                          # handles the tighter CFL; with the GIZMO-faithful elastic flux
+                          # + explicit-vol seed fix the scheme stays stable here.
 rho0      = 1.0
 u_const   = 0.0           # cold start; for the linear Tillotson (a=b=B=0) P
                           # depends only on density, so u is inert here.

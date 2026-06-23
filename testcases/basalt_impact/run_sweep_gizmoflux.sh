@@ -39,7 +39,10 @@ for i in "${!NAMES[@]}"; do
     cp /tmp/param.master.bak "$PARAM"
     for f in $flags; do sed -i "s/#define $f 0/#define $f 1/" "$PARAM"; done
     if [[ "$flags" == *FRAGMENTATION* ]]; then
-        sed -i 's/#define DAMAGE_START_TIME 0.0/#define DAMAGE_START_TIME 0.6/' "$PARAM"
+        # High-velocity impact: contact is near t=0, so the damage gate only needs to
+        # clear the startup transient (the seed fix heals t=0 by step 1), not wait for
+        # the (now immediate) contact. Small value keeps damage active through the impact.
+        sed -i 's/#define DAMAGE_START_TIME 0.0/#define DAMAGE_START_TIME 0.05/' "$PARAM"
     fi
     enable_gizmo
     echo "=== building $name [${flags:-elastic baseline}] + gizmoflux ==="
