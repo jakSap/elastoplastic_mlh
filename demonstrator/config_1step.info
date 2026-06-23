@@ -1,0 +1,25 @@
+initFile khN10000.h5
+outDir output_1step
+timeStep 0.005
+timeEnd 0.1
+h5DumpInterval 1
+periodicBoxLimits {
+    lowerX 0.0
+    lowerY 0.0
+    lowerZ 0.0
+    upperX 1.0
+    upperY 1.0
+    upperZ 0.0
+}
+kernelSize 0.04
+sml {
+    NNNTarget 20
+    tol 1e-3
+    maxIter 20
+    maxFactor 1.2
+    hMinFactor 0.1
+    hMaxFactor 4.0
+    warnFraction 0.02
+    panicFraction 0.2
+}
+hydro_gamma 1.6666666666666667

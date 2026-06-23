@@ -35,7 +35,7 @@
 /// V_kern is pi h^2 in 2D and (4/3) pi h^3 in 3D.
 /// For the single_block 2D testcase (delta_p = 0.005, kernelSize = 0.02),
 /// this evaluates to ~50, which is also a reasonable default for 2D MFM.
-#define NNN_TARGET 20
+#define NNN_TARGET 32
 
 /// numerical tolerance for the Newton-Raphson root finding on f_SML
 #define SML_TOL 1e-3
@@ -67,7 +67,7 @@
 Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // #define EOS 0 // Ideal gas EOS
 // #define EOS 1 // Murnaghan EOS
-#define EOS 2 // Tillotson EOS
+#define EOS 2
 
 /* Simulate elastic dynamics*/
 #define ELASTIC 1
@@ -148,7 +148,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 
 // Kernel for the MFM path, GIZMO numbering (GIZMO kernel.h KERNEL_FUNCTION):
 // 3 = cubic spline (default), 6 = Wendland C2, 7 = Wendland C4, 9 = Wendland C6.
-#define KERNEL_FUNCTION 3
+#define KERNEL_FUNCTION 6
 
 // Enable tensile correction. This activates computation of f_ab
 #define TENSILE_CORRECTION 1
@@ -177,7 +177,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // SPH stress flux with longitudinal+transverse (shear-wave) HLL dissipation and
 // per-eigenvalue tensile correction (GIZMO solids/elastic_stress_tensor_force.h).
 // (consistency guards live below, after USE_HLLC is defined)
-#define GIZMO_ELASTIC_FLUX 0
+#define GIZMO_ELASTIC_FLUX 1
 
 /** maximum interactions with ghost particles
  *  ignored when `PERIODIC_BOUNDARIES` is not set
@@ -259,7 +259,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define RUNSPH 0
 
 /// define if arificial viscosity should be employed
-#define ARTVISC 1
+#define ARTVISC 0
 
 /// artificial viscosity parameters
 #define ALPHA_VISC 1
@@ -321,7 +321,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // Bisection on the colliding-rings test (MA-Obsidian/2026-05-25-bisection-results.md)
 // identified this as the single highest-impact missing GIZMO feature for elastic
 // rebound; without it the rings stick instead of bouncing.
-#define EXPLICIT_VOL_INTEGRATION 0
+#define EXPLICIT_VOL_INTEGRATION 1
 /// Maximum |div v * dt/2| inside the half-step exponential. Caps the per-step
 /// density change at exp(EXPLICIT_VOL_DIVV_CLAMP) ~ 4.5 (matches GIZMO).
 #define EXPLICIT_VOL_DIVV_CLAMP 1.5
@@ -402,15 +402,15 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // calls to collectFluxes.
 // DIAG_COND_ENABLE: set to 1 to enable, 0 to disable.
 // DIAG_COND_TRIGGER: threshold as a double literal (not used in #if).
-#define DIAG_COND_ENABLE     1
+#define DIAG_COND_ENABLE     0
 #define DIAG_COND_TRIGGER    1000.
 #define DIAG_WINDOW_STEPS    100
 
 // using pressure floor to avoid predicting negative pressures
-//#define PRESSURE_FLOOR 1e-8
+//#define PRESSURE_FLOOR -1
 
 // Use density floor
-#define DENSITY_FLOOR .01
+#define DENSITY_FLOOR -1
 
 // Hopkins 2015 MFM <-> SPH gradient blend, controlled per particle by
 // conditionNumber[i]. The output gradient is
