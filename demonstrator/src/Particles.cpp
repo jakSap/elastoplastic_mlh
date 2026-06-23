@@ -277,7 +277,11 @@ Particles::~Particles() {
 void Particles::computeFabMonaghan(){
     // Get normalized mean particle distance within kernel length
     // Eqivalent to \Delta p in Monaghan paper
+#if VARIABLE_SML
     double deltaP = sqrt(3.14159 / smlNNNTarget);
+#else
+    double deltaP = sqrt(3.14159 / (double)NNN_TARGET);
+#endif
     // And take the Kernel (follows KERNEL_FUNCTION, as GIZMO's kernel_main does)
     double kernelDeltaP = Kernel::W(deltaP, 1.);
 
