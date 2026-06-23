@@ -1,0 +1,70 @@
+; ===========================================================================
+; 2D iron-impact benchmark -- newMFM demonstrator replication of the miluphcuda
+; plasticity benchmark (miluphcuda_bare/plasticity_impact_2d).
+;
+; Mode (set in demonstrator/include/parameter.h):
+;   MESHLESS_FINITE_MASS 1        (MFM)
+;   EOS 2                         (Tillotson)
+;   ELASTIC 1, VON_MISES_PLASTICITY 1  (elastic + constant-yield plastic)
+;   EXPLICIT_VOL_INTEGRATION 1    (GIZMO Monaghan continuity volume)
+;   SURFACE_VOLCORR 1             (Hopkins/GIZMO free-surface volume closure)
+;   KERNEL_FUNCTION 3             (cubic spline, matches miluphcuda)
+;   PERIODIC_BOUNDARIES 0
+;
+; SI units throughout (kg, m, s, Pa, J/kg), matching the miluphcuda material.cfg.
+; ===========================================================================
+
+initFile /home/sappler/Documents/newMFM/testcases/iron_impact/iron_impact-2D.h5
+outDir   /home/sappler/Documents/newMFM/testcases/iron_impact/output
+
+; Output cadence (ADAPTIVE_TIMESTEP): a frame is dumped every
+; timeStep * h5DumpInterval seconds. 1e-6 * 1 -> 1 us spacing, 60 us total =>
+; 61 frames (0..60), matching the miluphcuda run (-n 60 -t 1e-6). The actual
+; integration dt is CFL-limited and clamped to land exactly on each dump time.
+timeStep 1e-6
+timeEnd  60e-6
+h5DumpInterval 1
+
+; Initial smoothing length / NNS search radius. h convention: support radius = h.
+; Matched to miluphcuda's cubic-spline support 2*sml = 2.4*dx = 0.006 m.
+kernelSize 0.006
+
+sml {
+    ; N_NN = pi*(h/dx)^2 = pi*2.4^2 ~ 18  (cubic-spline support 2.4*dx)
+    NNNTarget 18
+    tol       1e-3
+    maxIter   200
+    maxFactor 1.2
+    hMinFactor 0.1
+    hMaxFactor 3.0
+    warnFraction  0.05
+    panicFraction 0.25
+}
+
+; Unused under the Tillotson EOS (read by the parser regardless).
+hydro_gamma 1.6666666666666667
+
+; --- Iron, Tillotson EOS (Melosh 1989) + von Mises yield, SI units -----------
+; Mirrors miluphcuda_bare/plasticity_impact_2d/material.cfg:
+;   shear_modulus = 80 GPa -> mu ;  bulk_modulus 128 GPa = till_A -> A
+;   yield_stress  = 2.5 GPa (constant von Mises) -> Y0
+;   till_A/B, till_E_0/E_iv/E_cv, till_a/b/alpha/beta as below.
+; Y_M/mu_*/frictionAngle/weibull*/u_melt are unused by VON_MISES_PLASTICITY.
+materials {
+    mat0 {
+        matId 0
+        rho0  7.8e3
+        A     128.0e9
+        B     105.0e9
+        u0    9.5e6
+        a     0.5
+        b     1.5
+        alpha 5.0
+        beta  5.0
+        u_iv  2.4e6
+        u_cv  8.67e6
+        mu    80.0e9
+        ; von Mises constant yield strength
+        Y0    2.5e9
+    }
+}
