@@ -357,6 +357,21 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// 0 = legacy seed from the truncated t=0 density (bloats).
 #define EXPLICIT_VOL_SEED_SKIP 1
 
+/// Seed the explicitly-integrated density from the per-material reference density
+/// rho0 (the IC density) instead of the kernel sum, and use it from step 0 (no
+/// seed-skip). This mirrors miluphcuda's INTEGRATE_DENSITY, which advects density
+/// from the IC value: the kernel sum under-counts at a free surface (~25% deficit
+/// here), which a stiff EOS (iron Tillotson A=128 GPa) turns into multi-GPa
+/// spurious tension that ejects the surface layer and drives the internal energy
+/// negative. A static cold surface seeded at rho0 has divv=0, so the advected
+/// density stays rho0 and the surface is stress-free, exactly as in miluphcuda.
+/// Only meaningful for EOS 1/2 (needs a material rho0). 0 = seed from kernel sum
+/// (DEFAULT); 1 = seed from rho0 (free-surface solids in physical units).
+#define EXPLICIT_VOL_SEED_RHO0 0
+#if EXPLICIT_VOL_SEED_RHO0 && EOS == 0
+#error "EXPLICIT_VOL_SEED_RHO0 needs a material reference density (EOS 1 or 2)."
+#endif
+
 #if EXPLICIT_VOL_INTEGRATION && PERIODIC_BOUNDARIES
 #error "EXPLICIT_VOL_INTEGRATION currently only wires the non-periodic path. The periodic gradient-recompute hooks would need additional ghost updates of rhoExplicit/rhoKernel. Set EXPLICIT_VOL_INTEGRATION to 0 for periodic runs."
 #endif

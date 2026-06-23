@@ -1648,6 +1648,28 @@ void Particles::compDensity(){
 void Particles::applyExplicitVolumeOverride(){
     // Mirror of GIZMO master/hydro/density.c:982-987. The kernel-sum density
     // is the relaxation target; downstream physics sees the integrated value.
+#if EXPLICIT_VOL_SEED_RHO0
+    // miluphcuda INTEGRATE_DENSITY-faithful path: seed the advected density from
+    // the material reference rho0 (the IC density) and use it from step 0. The
+    // kernel sum is fine in the bulk but under-counts at free surfaces; for a
+    // stiff EOS that deficit is multi-GPa spurious tension. See parameter.h.
+    if (!explicitVolInitialized){
+        for (int i = 0; i < N; ++i){
+            const double r0 = MeshlessEOS->EOSGetMaterial(matId[i]).rho0;
+            rhoKernel[i]   = rho[i];
+            rhoExplicit[i] = r0;
+            rho[i]         = r0;
+        }
+        explicitVolInitialized = true;
+        return;
+    }
+    for (int i = 0; i < N; ++i){
+        rhoKernel[i] = rho[i];
+        if (rhoExplicit[i] > 0.) rho[i] = rhoExplicit[i];
+        else                     rhoExplicit[i] = rho[i];
+    }
+    return;
+#endif
     // Skip the first EXPLICIT_VOL_SEED_SKIP step(s): keep the working rho at the
     // kernel density so the t=0 startup-NNS truncation (~0.89) self-heals by
     // re-summation before it seeds the (re-summation-free) advected density.
