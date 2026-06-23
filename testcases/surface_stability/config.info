@@ -1,0 +1,50 @@
+; Surface-stability test: stationary elastic crescent.
+;
+; Goal: watch free-surface fraying in a zero-velocity IC and correlate it with
+; per-particle diagnostics (cond(E), h_i/kernelSize, N_NN). The crescent has a
+; convex outer arc, a concave inner arc, and two sharp convex horns, so the
+; same run produces all surface types under identical material state.
+;
+; Requires parameter.h: ELASTIC 1, PLASTICITY 0, VARIABLE_SML 1, EOS 1,
+;                        OUTPUT_CONDITION_NUMBER 1
+
+initFile ../testcases/surface_stability/lune_deltap0.05-2D.h5
+
+outDir ../testcases/surface_stability/output
+
+timeStep 0.1
+
+timeEnd 20
+
+h5DumpInterval 1
+
+; unused, PERIODIC_BOUNDARIES is off
+periodicBoxLimits {
+    lowerX -0.25
+    lowerY -0.25
+    lowerZ  0.
+    upperX  0.25
+    upperY  0.25
+    upperZ  0.
+}
+
+; kernel size = 2 * particle spacing
+kernelSize 0.1
+
+sml {
+    NNNTarget 30
+    tol       1e-3
+    maxIter   70
+    maxFactor 1.2
+    hMinFactor 0.1
+    hMaxFactor 4.0
+    warnFraction  0.01
+    panicFraction 0.1
+}
+
+hydro_gamma 1.6666666666666667
+
+; Murnaghan EOS: stress-free at rho = rho0 when u = 0
+MURN_K0   1.0
+MURN_n    2.0
+MURN_rho0 1.0
