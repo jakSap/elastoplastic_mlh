@@ -12,6 +12,19 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import LogNorm
 from matplotlib.patches import Circle
 from multiprocessing import Pool
+import tempfile
+
+
+def _init_tex_worker():
+    """Give each worker process its own matplotlib TeX cache directory.
+
+    With usetex=True, all workers otherwise share ~/.cache/matplotlib/tex.cache;
+    concurrent processes writing the same cached .png clobber each other, and a
+    reader then hits a half-written file ("SyntaxError: not a PNG file"). A
+    per-process cache removes the contention entirely."""
+    from matplotlib import texmanager
+    d = tempfile.mkdtemp(prefix=f'mpltex_{os.getpid()}_')
+    texmanager.TexManager.texcache = d
 
 #MAX_NUM_INTERACTIONS = 1000
 pref = 'S'
@@ -191,7 +204,10 @@ def plotNNL(h5File, iNNL, pos, ax):
     ax.scatter(posNNL[:,0], posNNL[:,1], s=5, marker='x', color='m')
 
 def createEnergyPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
-    data = h5.File(h5File, 'r')
+    data = open_snapshot(h5File)
+    if "u" not in data:
+        print(f"WARNING: internal energy unavailable for {h5File} (no u field), skipping.")
+        return
     pos = data["x"][:]
 
     u = data["u"][()]
@@ -215,7 +231,10 @@ def createEnergyPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, ma
     plt.close()
 
 def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
-    data = h5.File(h5File, 'r')
+    data = open_snapshot(h5File)
+    if "P" not in data:
+        print(f"WARNING: pressure unavailable for {h5File} (GIZMO snapshots carry no Pressure field), skipping.")
+        return
     pos = data["x"][:]
 
     time = data["time"][0]
@@ -254,7 +273,10 @@ def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, 
     plt.close()
 
 def createNoiPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
-    data = h5.File(h5File, 'r')
+    data = open_snapshot(h5File)
+    if "noi" not in data:
+        print(f"WARNING: number of interactions unavailable for {h5File} (no noi field), skipping.")
+        return
     pos = data["x"][:]
 
     noi = data["noi"][()]
@@ -276,7 +298,10 @@ def createNoiPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, marke
     plt.close()
 
 def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., threshold=None, iHi=-1, dpi=200):
-    data = h5.File(h5File, 'r')
+    data = open_snapshot(h5File)
+    if "conditionNumber" not in data:
+        print(f"WARNING: condition number unavailable for {h5File} (no conditionNumber field), skipping.")
+        return
     pos = data["x"][:]
     time = data["time"][0]
     ncond = data["conditionNumber"][()]
@@ -404,18 +429,23 @@ def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax
 
 def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSize=1.,
                        diff=False, first_frame_data=None, diff_vminmax=None, iHi=-1, dpi=200):
-    data = h5.File(h5File, 'r')
+    data = open_snapshot(h5File)
     pos  = data["x"][:]
     time = data["time"][0]
 
-    quantities = [
-        ("rho", data["rho"][()],  r"Density $\varrho$"),
-        ("P",   data["P"][()],    r"Pressure $P$"),
-        ("u",   data["u"][()],    r"Internal energy $u$"),
-        ("Sxx", data["Sxx"][:],   r"$S_{xx}$"),
-        ("Sxy", data["Sxy"][:],   r"$S_{xy}$"),
-        ("Syy", data["Syy"][:],   r"$S_{yy}$"),
+    # Only include quantities the snapshot actually carries; GIZMO snapshots
+    # provide rho and u but none of the stress fields, so the figure shrinks
+    # gracefully instead of crashing on a missing key.
+    candidate_quantities = [
+        ("rho", r"Density $\varrho$"),
+        ("P",   r"Pressure $P$"),
+        ("u",   r"Internal energy $u$"),
+        ("Sxx", r"$S_{xx}$"),
+        ("Sxy", r"$S_{xy}$"),
+        ("Syy", r"$S_{yy}$"),
     ]
+    quantities = [(key, data[key][()], label)
+                  for key, label in candidate_quantities if key in data]
     quantities_dict = {key: vals for key, vals, _ in quantities}
 
     plt.rcParams.update({'font.size': 12})
@@ -425,14 +455,14 @@ def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSi
 
     if show_diff:
         DIFF_FLOOR = 1e-12
-        diff_meta = [
+        diff_meta = [(dlabel, key) for dlabel, key in [
             (r"$|\Delta\varrho|$", "rho"),
             (r"$|\Delta P|$",      "P"),
             (r"$|\Delta u|$",      "u"),
             (r"$|\Delta S_{xx}|$", "Sxx"),
             (r"$|\Delta S_{xy}|$", "Sxy"),
             (r"$|\Delta S_{yy}|$", "Syy"),
-        ]
+        ] if key in quantities_dict and key in first_frame_data]
         for idx, (dlabel, key) in enumerate(diff_meta):
             ax = axes_flat[idx]
             diff_vals = np.abs(quantities_dict[key] - first_frame_data[key])
@@ -600,18 +630,21 @@ if __name__=="__main__":
             if args.diff and all_h5Files:
                 DIFF_FLOOR = 1e-12
                 first_frame_data = {}
-                with h5.File(all_h5Files[0], 'r') as d:
-                    for key in ["rho", "P", "u", "Sxx", "Sxy", "Syy"]:
+                d = open_snapshot(all_h5Files[0])
+                for key in ["rho", "P", "u", "Sxx", "Sxy", "Syy"]:
+                    if key in d:
                         first_frame_data[key] = d[key][()]
                 print(f"First frame loaded from {all_h5Files[0].name} for diff computation.")
 
                 diff_vminmax = {}
                 print(f"Pre-scanning {len(all_h5Files)} file(s) for diff color limits...")
-                for key in ["rho", "P", "u", "Sxx", "Sxy", "Syy"]:
+                for key in first_frame_data:
                     d_lo, d_hi = None, None
                     for f in all_h5Files:
-                        with h5.File(f, 'r') as d:
-                            diff = np.abs(d[key][()] - first_frame_data[key])
+                        d = open_snapshot(f)
+                        if key not in d:
+                            continue
+                        diff = np.abs(d[key][()] - first_frame_data[key])
                         flo = float(np.clip(diff, DIFF_FLOOR, None).min())
                         fhi = float(diff.max())
                         if d_lo is None or flo < d_lo: d_lo = flo
@@ -649,7 +682,7 @@ if __name__=="__main__":
 
     nworkers = min(args.workers, len(tasks)) if tasks else 1
     print(f"Rendering {len(tasks)} plot(s) with {nworkers} worker(s)...")
-    with Pool(nworkers) as pool:
+    with Pool(nworkers, initializer=_init_tex_worker) as pool:
         for i, _ in enumerate(pool.imap_unordered(_worker, tasks), 1):
             print(f"  {i}/{len(tasks)} done", end='\r', flush=True)
     print()
