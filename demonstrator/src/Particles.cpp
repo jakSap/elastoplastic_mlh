@@ -3213,13 +3213,31 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
             //int ii = i*MAX_NUM_GHOST_INTERACTIONS+j; // interaction index i->j
             int ji = nnlGhosts[ii]; // index i of particle j
             if (ghostParticles.parent[ji]<i){
-                compute = false;
-                int ij;
-                // search neighbor i in nnlGhosts[] of j
-                for (ij=0; ij<noiGhosts[ghostParticles.parent[ji]]; ++ij){
-                    if(ghostParticles.parent[nnlGhosts[ij+ghostParticles.parent[ji]*MAX_NUM_GHOST_INTERACTIONS]] == i) break;
+                const int p = ghostParticles.parent[ji];
+                // Image-aware reverse match: the forward ghost ji sits at
+                // x[p]+delta; the reciprocal interaction is p with the image of
+                // i at x[i]-delta. Matching by parent id alone is ambiguous when
+                // i is reachable through more than one periodic image, so pick
+                // the ghost-of-i closest to that expected position.
+                const double tgtX = x[i] - (ghostParticles.x[ji] - x[p]);
+                const double tgtY = y[i] - (ghostParticles.y[ji] - y[p]);
+                double best = std::numeric_limits<double>::max();
+                int ijBest = -1;
+                for (int ij=0; ij<noiGhosts[p]; ++ij){
+                    const int gg = nnlGhosts[ij+p*MAX_NUM_GHOST_INTERACTIONS];
+                    if (ghostParticles.parent[gg] != i) continue;
+                    double d = pow(ghostParticles.x[gg]-tgtX, 2)
+                             + pow(ghostParticles.y[gg]-tgtY, 2);
+                    if (d < best){ best = d; ijBest = ij; }
                 }
-                iij = ij+ghostParticles.parent[ji]*MAX_NUM_GHOST_INTERACTIONS;
+                if (ijBest < 0){
+                    // Non-reciprocal: p has no ghost of i. Compute directly
+                    // rather than copy from a stale/garbage slot.
+                    compute = true;
+                } else {
+                    compute = false;
+                    iij = ijBest+p*MAX_NUM_GHOST_INTERACTIONS;
+                }
             }
 #endif
 
@@ -3705,6 +3723,11 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
         if (foundGhostX || foundGhostY) {
             ghostMap[i*(DIM+1)] = iGhost;
             ghostParticles.parent[iGhost] = i;
+            // Keep ghost sml current with the parent at creation time. ghostNNS
+            // runs before updateGhostState, so without this the symmetric
+            // max(h_i,h_j) neighbour criterion would read stale, mis-indexed
+            // smoothing lengths and produce non-reciprocal ghost neighbour lists.
+            ghostParticles.sml[iGhost] = sml[i];
             //Logger(DEBUG) << "particle@" << i << " = [" << x[i] << ", " << y[i] << "] makes "
             //          << "ghost@" << iGhost << " = [" << ghostParticles.x[iGhost] << ", "
             //          << ghostParticles.y[iGhost] << "]";
@@ -3722,6 +3745,7 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
             }
             ghostMap[i*(DIM+1)+1] = iGhost;
             ghostParticles.parent[iGhost] = i;
+            ghostParticles.sml[iGhost] = sml[i];
             //Logger(DEBUG) << "particle@" << i << " = [" << x[i] << ", " << y[i] << "] makes "
             //              <<"ghost@" << iGhost << " = [" << ghostParticles.x[iGhost] << ", "
             //              << ghostParticles.y[iGhost] << "]";
@@ -3734,6 +3758,7 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
             ghostParticles.y[iGhost] = y[i];
             ghostMap[i*(DIM+1)+2] = iGhost;
             ghostParticles.parent[iGhost] = i;
+            ghostParticles.sml[iGhost] = sml[i];
             //Logger(DEBUG) << "particle@" << i << " = [" << x[i] << ", " << y[i] << "] makes "
             //              << "ghost@" << iGhost << " = [" << ghostParticles.x[iGhost] << ", "
             //              << ghostParticles.y[iGhost] << "]";
@@ -3836,8 +3861,11 @@ void Particles::ghostNNS(Domain &domain, const Particles &ghostParticles, const 
         exit(2);
 #endif
 #if VARIABLE_SML
-            // Ghost's parent sml is copied into ghostParticles.sml[iGhost]
-            const double hPair = std::max(hi, ghostParticles.sml[iGhost]);
+            // Use the parent's live sml directly rather than the ghost-array
+            // copy: createGhostParticles repacks the ghost array every step and
+            // ghostNNS runs before updateGhostState, so ghostParticles.sml[iGhost]
+            // can be stale/mis-indexed. The parent index is always current.
+            const double hPair = std::max(hi, sml[ghostParticles.parent[iGhost]]);
             const double hSqr = hPair * hPair;
 #endif
             if (dSqr < hSqr){
@@ -4177,9 +4205,20 @@ void Particles::compEffectiveFace(const Particles &ghostParticles){
         for (int j=0; j<noiGhosts[i]; ++j){
             int ii = i*MAX_NUM_GHOST_INTERACTIONS+j;
             int ji = nnlGhosts[ii]; // index i of particle j
-            int ij;
-            for (ij=0; ij<noiGhosts[ghostParticles.parent[ji]]; ++ij){
-                if(ghostParticles.parent[nnlGhosts[ij+ghostParticles.parent[ji]*MAX_NUM_GHOST_INTERACTIONS]] == i) break;
+            const int p = ghostParticles.parent[ji];
+            // Image-aware reverse match (see solveRiemannProblems): pick the
+            // ghost-of-i in p's list closest to x[i]-delta, not the first parent
+            // match, so the face is antisymmetric across multi-image seams.
+            const double tgtX = x[i] - (ghostParticles.x[ji] - x[p]);
+            const double tgtY = y[i] - (ghostParticles.y[ji] - y[p]);
+            int ij = -1;
+            double best = std::numeric_limits<double>::max();
+            for (int ijc=0; ijc<noiGhosts[p]; ++ijc){
+                const int gg = nnlGhosts[ijc+p*MAX_NUM_GHOST_INTERACTIONS];
+                if (ghostParticles.parent[gg] != i) continue;
+                double d = pow(ghostParticles.x[gg]-tgtX, 2)
+                         + pow(ghostParticles.y[gg]-tgtY, 2);
+                if (d < best){ best = d; ij = ijc; }
             }
 
             //Logger(DEBUG) << "j = " << j << ", ii = " << ii << ", ji = " << ji
@@ -4190,8 +4229,12 @@ void Particles::compEffectiveFace(const Particles &ghostParticles){
             //          << ", " << psijTilde_xiGhosts[ij+ghostParticles.parent[ji]*MAX_NUM_GHOST_INTERACTIONS][1] << "]";
 
             for (int alpha=0; alpha<DIM; ++alpha){
-                AijGhosts[ii][alpha] = 1./omega[i]*psijTilde_xiGhosts[ii][alpha] - 1./ghostParticles.omega[ji]
-                                       * psijTilde_xiGhosts[ij+ghostParticles.parent[ji]*MAX_NUM_GHOST_INTERACTIONS][alpha];
+                // Drop the reverse term if p has no ghost of i (non-reciprocal):
+                // indexing a stale slot would corrupt the face.
+                const double rev = (ij < 0) ? 0.
+                    : 1./ghostParticles.omega[ji]
+                      * psijTilde_xiGhosts[ij+p*MAX_NUM_GHOST_INTERACTIONS][alpha];
+                AijGhosts[ii][alpha] = 1./omega[i]*psijTilde_xiGhosts[ii][alpha] - rev;
             }
         }
     }
@@ -4694,14 +4737,22 @@ void Particles::checkFluxSymmetry(Particles *ghostParticles){
             int ii = i * MAX_NUM_GHOST_INTERACTIONS + j; // interaction index i->j
 
             int ji = nnlGhosts[ii]; // index i of particle j
-            // search neighbor i in nnl[] of j
-            int ij;
-            // search neighbor i in nnlGhosts[] of j
-            for (ij = 0; ij < noiGhosts[ghostParticles->parent[ji]]; ++ij) {
-                if (ghostParticles->parent[nnlGhosts[ij + ghostParticles->parent[ji] * MAX_NUM_GHOST_INTERACTIONS]]
-                    == i) break;
+            const int p = ghostParticles->parent[ji];
+            // Image-aware reverse match (see solveRiemannProblems): the
+            // reciprocal interaction is p with the image of i at x[i]-delta.
+            const double tgtX = x[i] - (ghostParticles->x[ji] - x[p]);
+            const double tgtY = y[i] - (ghostParticles->y[ji] - y[p]);
+            int ij = -1;
+            double best = std::numeric_limits<double>::max();
+            for (int ijc = 0; ijc < noiGhosts[p]; ++ijc) {
+                const int gg = nnlGhosts[ijc + p * MAX_NUM_GHOST_INTERACTIONS];
+                if (ghostParticles->parent[gg] != i) continue;
+                double d = pow(ghostParticles->x[gg]-tgtX, 2)
+                         + pow(ghostParticles->y[gg]-tgtY, 2);
+                if (d < best){ best = d; ij = ijc; }
             }
-            int iij = ij + ghostParticles->parent[ji] * MAX_NUM_GHOST_INTERACTIONS; // interaction index j->i
+            if (ij < 0) continue; // non-reciprocal: no partner to compare against
+            int iij = ij + p * MAX_NUM_GHOST_INTERACTIONS; // interaction index j->i
 
             bool notSym = false;
             if (FijGhosts[iij][0] + FijGhosts[ii][0] > FLUX_SYM_TOL) {
