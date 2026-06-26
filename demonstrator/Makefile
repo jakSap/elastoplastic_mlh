@@ -44,7 +44,32 @@ else
 	LDFLAGS += -lgomp
 endif
 
-all: $(OBJECTS) $(TRGTDIR)/$(TARGET)
+all: check-flags $(OBJECTS) $(TRGTDIR)/$(TARGET)
+
+# Abort if any flag defined in parameter.h is never referenced outside its own #define line.
+# Searches src/, include/, and tests/ for each flag name as a whole word, then discards the
+# line that IS the definition ('^filename:#define FLAGNAME<space-or-EOL>') so that flags used
+# only inside another macro's definition (e.g. PLASTICITY inside PLASTICITY_ANY) still pass.
+check-flags: $(INCLDIR)/parameter.h
+	@echo "Checking that all parameter.h flags are referenced ..."
+	@failed=0; \
+	while IFS= read -r macro; do \
+		uses=$$(grep -rw "$$macro" $(SRCDIR)/ $(INCLDIR)/ tests/ \
+		    --include="*.cpp" --include="*.h" \
+		    --exclude="parameter.h.cmp_backup" 2>/dev/null \
+		  | grep -cEv '^[^:]+:[[:space:]]*#[[:space:]]*define[[:space:]]+'"$$macro"'([[:space:]]|$$)'); \
+		if [ "$$uses" -eq 0 ]; then \
+			echo "  ERROR: '$$macro' is defined in parameter.h but never referenced"; \
+			failed=1; \
+		fi; \
+	done < <(grep -E '^\s*#\s*define\s+[A-Za-z_][A-Za-z_0-9]*' $(INCLDIR)/parameter.h \
+	         | sed -E 's/^\s*#\s*define\s+([A-Za-z_][A-Za-z_0-9]*).*/\1/' \
+	         | grep -v '^DEMONSTRATOR_PARAMETER_H$$'); \
+	if [ "$$failed" -ne 0 ]; then \
+		echo "Build aborted: fix or remove the unused flags above from parameter.h"; \
+		exit 1; \
+	fi
+	@echo "All parameter flags are referenced."
 
 # build all with debug flags
 debug: CXXFLAGS := -g -Wall -std=c++11 -O0 -I$(INCLDIR) -I$(HOLIB)
@@ -142,4 +167,4 @@ test-damage: | $(TRGTDIR)
 	@echo "Running damage/plasticity test ..."
 	@$(TRGTDIR)/test_damage
 
-.PHONY: all debug clean cleaner install prepare-run binac binac-load-modules test-kernel test-damage
+.PHONY: all debug clean cleaner install prepare-run binac binac-load-modules test-kernel test-damage check-flags
