@@ -4880,6 +4880,9 @@ void Particles::dump2file(std::string filename, double simTime){
     HighFive::DataSet numActiveFlawsDataSet = h5File.createDataSet<int>("/numActiveFlaws", HighFive::DataSpace(N));
 #endif
 #endif
+#if TENSILE_CORRECTION && OUTPUT_FAB
+    HighFive::DataSet fabAvgDataSet = h5File.createDataSet<double>("/fabAvg", HighFive::DataSpace(N));
+#endif
 
     // containers for particle data
     std::vector<double> timeVec({ simTime });
@@ -5017,5 +5020,17 @@ void Particles::dump2file(std::string filename, double simTime){
     damageTotalDataSet.write(damageTotalVec);
     numActiveFlawsDataSet.write(numActiveFlawsVec);
 #endif
+#endif
+#if TENSILE_CORRECTION && OUTPUT_FAB
+    {
+        std::vector<double> fabAvgVec(N);
+        for (int i = 0; i < N; ++i) {
+            double sum = 0.;
+            for (int jn = 0; jn < noi[i]; ++jn)
+                sum += fabMonaghan[i*MAX_NUM_INTERACTIONS+jn];
+            fabAvgVec[i] = (noi[i] > 0) ? sum / noi[i] : 0.;
+        }
+        fabAvgDataSet.write(fabAvgVec);
+    }
 #endif
 }

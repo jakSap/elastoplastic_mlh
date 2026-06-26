@@ -114,6 +114,7 @@ def get_output_prefix(args):
     elif args.energy:          return "u"
     elif args.noi:             return "noi"
     elif args.conditionNumber: return "ncond"
+    elif args.fab:             return "fab"
     elif args.stress:          return pref
     else:                      return ""
 
@@ -342,6 +343,36 @@ def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax
         plt.savefig(evecPath)
         plt.close()
 
+def createFabPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1):
+    data = h5.File(h5File, 'r')
+    if "fabAvg" not in data:
+        print(f"WARNING: fabAvg unavailable for {h5File} (compile with OUTPUT_FAB), skipping.")
+        return
+    pos = data["x"][:]
+    time = data["time"][0]
+    fab = data["fabAvg"][()]
+
+    plt.rcParams.update({'font.size': 18})
+    fig, ax = plt.subplots(figsize=(7,5), dpi=200)
+    fabPlt = ax.scatter(pos[:,0], pos[:,1], c=fab, s=markerSize, vmin=vmin, vmax=vmax)
+
+    setDomainLimits(ax, pos, h5File, openBorders)
+
+    if iHi > -1:
+        plotKernelCircle(data, iHi, pos, ax)
+
+    plt.title(r"Avg. $\bar{f}_{ab}$ at $t = " + f"{time:.4f}" + r"$")
+    plt.xlabel("$x$")
+    plt.ylabel("$y$")
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    fig.colorbar(fabPlt, cax=cax)
+    ax.set_aspect('equal')
+    plt.tight_layout()
+    print("Saving figure to", outDir + "/fab" + pathlib.Path(h5File).stem + ".png")
+    plt.savefig(outDir + "/fab" + pathlib.Path(h5File).stem + ".png")
+    plt.close()
+
 def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSize=1.,
                        diff=False, first_frame_data=None, diff_vminmax=None, iHi=-1):
     data = h5.File(h5File, 'r')
@@ -423,7 +454,7 @@ def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSi
 
 def _worker(task):
     (h5File, outDir, grad, vel, stress, iNNL, borders, vmin, vmax,
-     pressure, energy, noi, conditionNumber, condThreshold,
+     pressure, energy, noi, conditionNumber, condThreshold, fab,
      combined, combined_vminmax,
      markerSize, diff, first_frame_data, diff_vminmax, iHi) = task
     if combined:
@@ -437,6 +468,8 @@ def _worker(task):
         createNoiPlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi)
     elif conditionNumber:
         createConditionNumberPlot(h5File, outDir, borders, vmin, vmax, markerSize, condThreshold, iHi)
+    elif fab:
+        createFabPlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi)
     else:
         createPlot(h5File, outDir, grad, vel, stress, iNNL, borders, vmin, vmax, markerSize, iHi)
 
@@ -456,6 +489,7 @@ if __name__=="__main__":
     parser.add_argument("--conditionNumber", "-N", action="store_true", help="plot condition number of gradient estimation matrix")
     parser.add_argument("--threshold", "-T", nargs=3, metavar=("NCOND", "EX", "EY"), type=float, default=None,
                         help="highlight particles meeting all three: Ncond > NCOND, |e_x| < EX, |e_y| < EY (use with -N)")
+    parser.add_argument("--fab", "-f", action="store_true", help="plot per-particle average f_ab (requires OUTPUT_FAB at compile time)")
     parser.add_argument("--plotVelocity", "-v", action="store_true", help="plot velocity")
     parser.add_argument("--iNNL", "-i", metavar="int", type=int, help="plot NNL for particles i", default=-1)
     parser.add_argument("--hi", metavar="int", type=int, help="plot kernel length h of particle i as a thin circle", default=-1)
@@ -562,6 +596,8 @@ if __name__=="__main__":
                 colorKey = "noi"
             elif args.conditionNumber:
                 colorKey = "conditionNumber"
+            elif args.fab:
+                colorKey = "fabAvg"
             else:
                 colorKey = "rho"
             print(f"Pre-scanning {len(h5Files)} file(s) for color limits...")
@@ -575,7 +611,7 @@ if __name__=="__main__":
     tasks = [(f, args.outDir, args.plotGradient, args.plotVelocity, args.stress,
               args.iNNL, args.openBorders, vmin, vmax,
               args.pressure, args.energy, args.noi, args.conditionNumber,
-              args.threshold, args.combined, combined_vminmax,
+              args.threshold, args.fab, args.combined, combined_vminmax,
               args.markerSize, args.diff, first_frame_data, diff_vminmax, args.hi)
              for f in h5Files]
 

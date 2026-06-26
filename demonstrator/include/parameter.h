@@ -164,6 +164,10 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // Two Parameters for the tensile correction facor, as in Monaghan, 2000
 #define TENSILE_CORRECTION_PREFAC 0.2
 #define TENSILE_CORRECTION_POWER 4.
+// Output per-particle average f_ab to h5 dump (requires TENSILE_CORRECTION)
+#if TENSILE_CORRECTION
+#define OUTPUT_FAB 1
+#endif
 
 #if TENSILE_CORRECTION_2 && TENSILE_CORRECTION_3
 #error "TENSILE_CORRECTION_2 and TENSILE_CORRECTION_3 are mutually exclusive stress-damping branches (GIZMO's #if 0/#else)."
@@ -237,7 +241,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define USE_ROE 1
 
 // Convert HLL(C) flux to primitive vars for debugging
-#define DEBUG_HLL 1
+//#define DEBUG_HLL 1
 
 /// enforcing flux symmetry by only calculating on side
 #define ENFORCE_FLUX_SYM 1
@@ -402,7 +406,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // calls to collectFluxes.
 // DIAG_COND_ENABLE: set to 1 to enable, 0 to disable.
 // DIAG_COND_TRIGGER: threshold as a double literal (not used in #if).
-#define DIAG_COND_ENABLE     0
+#define DIAG_COND_ENABLE     1
 #define DIAG_COND_TRIGGER    1000.
 #define DIAG_WINDOW_STEPS    100
 
@@ -410,7 +414,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //#define PRESSURE_FLOOR -1
 
 // Use density floor
-#define DENSITY_FLOOR -1
+#define DENSITY_FLOOR .01
 
 // Hopkins 2015 MFM <-> SPH gradient blend, controlled per particle by
 // conditionNumber[i]. The output gradient is

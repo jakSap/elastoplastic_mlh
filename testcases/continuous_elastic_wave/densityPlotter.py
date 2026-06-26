@@ -106,6 +106,7 @@ def get_output_prefix(args):
     elif args.pressure: return "P"
     elif args.energy:   return "u"
     elif args.noi:      return "noi"
+    elif args.fab:      return "fab"
     elif args.stress:   return pref
     else:               return ""
 
@@ -267,6 +268,33 @@ def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSi
     plt.close()
 
 
+def createFabPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1.):
+    data = h5.File(h5File, 'r')
+    if "fabAvg" not in data:
+        print(f"WARNING: fabAvg unavailable for {h5File} (compile with OUTPUT_FAB), skipping.")
+        return
+    pos = data["x"][:]
+    time = data["time"][0]
+    fab = data["fabAvg"][()]
+
+    plt.rcParams.update({'font.size': 18})
+    fig, ax = plt.subplots(figsize=(7,5), dpi=200)
+    fabPlt = ax.scatter(pos[:,0], pos[:,1], c=fab, s=markerSize, vmin=vmin, vmax=vmax)
+
+    setDomainLimits(ax, pos, h5File, openBorders)
+
+    plt.title(r"Avg. $\bar{f}_{ab}$ at $t = " + f"{time:.4f}" + r"$")
+    plt.xlabel("$x$")
+    plt.ylabel("$y$")
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    fig.colorbar(fabPlt, cax=cax)
+    ax.set_aspect('equal')
+    plt.tight_layout()
+    print("Saving figure to", outDir + "/fab" + pathlib.Path(h5File).stem + ".png")
+    plt.savefig(outDir + "/fab" + pathlib.Path(h5File).stem + ".png")
+    plt.close()
+
 def _worker_init(tmpdir):
     """Give each pool worker its own TeX cache directory so concurrent LaTeX
     compilations don't corrupt each other's cache files."""
@@ -278,7 +306,7 @@ def _worker_init(tmpdir):
 
 def _worker(task):
     (h5File, outDir, grad, vel, stress, iNNL, borders, vmin, vmax,
-     pressure, energy, noi, combined, combined_vminmax,
+     pressure, energy, noi, fab, combined, combined_vminmax,
      markerSize, diff, first_frame_data, diff_vminmax) = task
     if combined:
         createCombinedPlot(h5File, outDir, borders, combined_vminmax, markerSize,
@@ -289,6 +317,8 @@ def _worker(task):
         createEnergyPlot(h5File, outDir, borders, vmin, vmax, markerSize)
     elif noi:
         createNoiPlot(h5File, outDir, borders, vmin, vmax, markerSize)
+    elif fab:
+        createFabPlot(h5File, outDir, borders, vmin, vmax, markerSize)
     else:
         createPlot(h5File, outDir, grad, vel, stress, iNNL, borders, vmin, vmax, markerSize)
 
@@ -305,6 +335,7 @@ if __name__=="__main__":
     parser.add_argument("--combined", "-C", action="store_true",
                         help="Plot rho, P, u, Sxx, Sxy, Syy in a 2x3 combined figure")
     parser.add_argument("--noi", "-n", action="store_true", help="plot number of interactions instead of density")
+    parser.add_argument("--fab", "-f", action="store_true", help="plot per-particle average f_ab (requires OUTPUT_FAB at compile time)")
     parser.add_argument("--plotVelocity", "-v", action="store_true", help="plot velocity")
     parser.add_argument("--iNNL", "-i", metavar="int", type=int, help="plot NNL for particles i", default=-1)
     parser.add_argument("--openBorders", "-b", action="store_true", help="Adjust plot domain to show all real particles")
@@ -398,6 +429,8 @@ if __name__=="__main__":
                 colorKey = "u"
             elif args.noi:
                 colorKey = "noi"
+            elif args.fab:
+                colorKey = "fabAvg"
             else:
                 colorKey = "rho"
             print(f"Pre-scanning {len(h5Files)} file(s) for color limits...")
@@ -410,7 +443,7 @@ if __name__=="__main__":
 
     tasks = [(f, args.outDir, args.plotGradient, args.plotVelocity, args.stress,
               args.iNNL, args.openBorders, vmin, vmax,
-              args.pressure, args.energy, args.noi, args.combined, combined_vminmax,
+              args.pressure, args.energy, args.noi, args.fab, args.combined, combined_vminmax,
               args.markerSize, args.diff, first_frame_data, diff_vminmax)
              for f in h5Files]
 
