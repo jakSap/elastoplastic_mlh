@@ -55,6 +55,26 @@
 /// Must stay <= the NNS search radius budget or neighbors will be missed.
 #define SML_H_MAX_FACTOR 4.0
 
+/// MeshlessScheme::run() searches for neighbours ONCE per step at a fixed
+/// nnsRadius = max(kernelSize, hMax_from_previous_step), then hands that
+/// candidate list (nnl/noi) to updateAllSmoothingLengths(), whose Newton
+/// solve only reweights the particles already in the list -- it cannot
+/// discover new ones as h grows. A particle whose h has to grow a lot this
+/// step (e.g. a free-surface corner with few real neighbours) can converge
+/// to an h that exceeds nnsRadius, leaving it stuck with an incomplete
+/// neighbour list (wrong Omega/FCE/density/gradients), even though the
+/// Newton iteration itself reports converged. If h_max after the solve
+/// exceeds nnsRadius, MeshlessScheme::run() redoes the whole NNS+solve pass
+/// at nnsRadius = h_max * NNS_SEARCH_MARGIN, repeating until the search
+/// radius covers where h actually converged (or NNS_MAX_RETRIES is hit).
+#define NNS_SEARCH_MARGIN 1.5
+
+/// safety cap on how many times MeshlessScheme::run() will redo the NNS+SML
+/// solve pass per step chasing NNS_SEARCH_MARGIN headroom. Hitting this is a
+/// sign of a genuinely pathological configuration (h growing without bound),
+/// not just a slow-to-settle corner -- treated as fatal, like SML_PANIC_FRACTION.
+#define NNS_MAX_RETRIES 5
+
 /// fraction of particles allowed to end the Newton iteration in a bad state
 /// (unconverged OR clamped at hMin/hMax) before a WARN is logged.
 #define SML_WARN_FRACTION 0.01

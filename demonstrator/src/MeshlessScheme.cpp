@@ -63,11 +63,22 @@ void MeshlessScheme::run(){
         // search with the largest h currently in use; flux symmetry is then
         // preserved by the existing ENFORCE_FLUX_SYM machinery.
 #if VARIABLE_SML
-        const double nnsRadius = std::max(config.kernelSize, particles->hMax());
+        double nnsRadius = std::max(config.kernelSize, particles->hMax());
 #else
-        const double nnsRadius = config.kernelSize;
+        double nnsRadius = config.kernelSize;
 #endif
 
+        // updateAllSmoothingLengths()'s Newton solve only reweights the
+        // particles already in nnl/noi -- it cannot discover neighbours
+        // outside the radius the NNS was just run at. If a particle's h
+        // converges beyond nnsRadius (e.g. a free-surface corner needing a
+        // much larger h than last step), its neighbour list is silently
+        // incomplete. Detect that and redo the whole NNS+solve pass with a
+        // margin above the new h_max, until the search radius actually
+        // covers where h converged. See NNS_SEARCH_MARGIN (parameter.h).
+        int nnsRetry = 0;
+        bool nnsRetryNeeded;
+        do {
 #if !PERIODIC_BOUNDARIES
         Logger(INFO) << "    > Computing domain limits ...";
         double domainLimits[DIM*2];
@@ -119,7 +130,27 @@ void MeshlessScheme::run(){
 #else
         particles->updateAllSmoothingLengths();
 #endif
+        double hMaxAfterSolve = particles->hMax();
+        nnsRetryNeeded = (hMaxAfterSolve > nnsRadius);
+        if (nnsRetryNeeded){
+            ++nnsRetry;
+            if (nnsRetry > NNS_MAX_RETRIES){
+                Logger(ERROR) << "      > h_max=" << hMaxAfterSolve
+                              << " still exceeds NNS search radius=" << nnsRadius
+                              << " after " << NNS_MAX_RETRIES
+                              << " retries - neighbour lists remain incomplete. Aborting.";
+                exit(8);
+            }
+            nnsRadius = hMaxAfterSolve * NNS_SEARCH_MARGIN;
+            Logger(WARN) << "      > h_max=" << hMaxAfterSolve
+                         << " exceeded NNS search radius; redoing NNS+SML solve "
+                         << "with radius=" << nnsRadius
+                         << " (retry " << nnsRetry << "/" << NNS_MAX_RETRIES << ")";
+        }
+#else
+        nnsRetryNeeded = false;
 #endif // VARIABLE_SML
+        } while (nnsRetryNeeded);
         Logger(INFO) << "    > Computing density";
         particles->compDensity();
 #if PERIODIC_BOUNDARIES
