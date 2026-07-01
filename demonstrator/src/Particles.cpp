@@ -287,6 +287,7 @@ void Particles::computeFabMonaghan(){
 
     // Now loop through the interaction pairs:
     for(int i = 0; i < N; ++i){
+        double hi = noi[i];
         for(int jn = 0; jn < noi[i]; ++jn){
             // This way of looping means recomputing...
             int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
@@ -301,7 +302,17 @@ void Particles::computeFabMonaghan(){
             // Take the kernel, again..
             double kernelQ = Kernel::W(q, 1.);
             // To be consistent with Monaghan, dont apply the power of n here.
-            fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = kernelQ / kernelDeltaP;
+            // fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = kernelQ / kernelDeltaP
+            //                              * fce[i*MAX_NUM_INTERACTIONS+jn]    
+            //                             ;
+            double fceCorr = 1;
+            // fceCorr = 0.5 * (fce[i] + fce[j]);
+            fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = kernelQ / kernelDeltaP;//  / fceCorr;
+            
+            if (i == 11){
+                Logger(DEBUG) << "      FceCorr i = 12: " << fceCorr;
+                Logger(DEBUG) << "      fab i = 12, j = " << j << ": " << kernelQ / kernelDeltaP;
+            }
         }
     }
 }
@@ -4882,6 +4893,16 @@ void Particles::dump2file(std::string filename, double simTime){
 #endif
 #if TENSILE_CORRECTION && OUTPUT_FAB
     HighFive::DataSet fabAvgDataSet = h5File.createDataSet<double>("/fabAvg", HighFive::DataSpace(N));
+    HighFive::DataSet fabMaxDataSet = h5File.createDataSet<double>("/fabMax", HighFive::DataSpace(N));
+#if DEBUG_LVL >= 2
+    {
+        std::vector<size_t> fabDims = { std::size_t(N), std::size_t(MAX_NUM_INTERACTIONS) };
+        h5File.createDataSet<double>("/fabAll", HighFive::DataSpace(fabDims));
+    }
+#endif
+#endif
+#if DEBUG_LVL >= 2
+    h5File.createDataSet<double>("/faceClosureErr", HighFive::DataSpace(dataSpaceDims));
 #endif
 
     // containers for particle data
@@ -5024,13 +5045,48 @@ void Particles::dump2file(std::string filename, double simTime){
 #if TENSILE_CORRECTION && OUTPUT_FAB
     {
         std::vector<double> fabAvgVec(N);
+        std::vector<double> fabMaxVec(N);
         for (int i = 0; i < N; ++i) {
             double sum = 0.;
-            for (int jn = 0; jn < noi[i]; ++jn)
+            double max = -1;
+            for (int jn = 0; jn < noi[i]; ++jn){
                 sum += fabMonaghan[i*MAX_NUM_INTERACTIONS+jn];
+                if (fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] > max){
+                    max = fabMonaghan[i*MAX_NUM_INTERACTIONS+jn];
+                }
+            }
             fabAvgVec[i] = (noi[i] > 0) ? sum / noi[i] : 0.;
+            fabMaxVec[i] = max;
         }
         fabAvgDataSet.write(fabAvgVec);
+        fabMaxDataSet.write(fabMaxVec);
+#if DEBUG_LVL >= 2
+        // dump full fab matrix — shape [N, MAX_NUM_INTERACTIONS], entries beyond
+        // noi[i] are zero (unused slots). Neighbor identity for slot jn is the
+        // same nnl[i*MAX_NUM_INTERACTIONS+jn] already written by dumpNNL() into
+        // the companion NNL.h5 file (/nnl<i>, /nnlPrtcls<i>) — no need to
+        // duplicate it here.
+        std::vector<std::vector<double>> fabAllVec(N, std::vector<double>(MAX_NUM_INTERACTIONS, 0.));
+        for (int i = 0; i < N; ++i) {
+            for (int jn = 0; jn < noi[i]; ++jn) {
+                fabAllVec[i][jn] = fabMonaghan[i*MAX_NUM_INTERACTIONS+jn];
+            }
+        }
+        h5File.getDataSet("/fabAll").write(fabAllVec);
+#endif
+    }
+#endif
+#if DEBUG_LVL >= 2
+    {
+        // per-particle face closure residual: sum_j Aij, should be zero in bulk
+        std::vector<std::vector<double>> fcerrVec(N, std::vector<double>(DIM, 0.));
+        for (int i = 0; i < N; ++i) {
+            for (int jn = 0; jn < noi[i]; ++jn) {
+                for (int alpha = 0; alpha < DIM; ++alpha)
+                    fcerrVec[i][alpha] += Aij[i*MAX_NUM_INTERACTIONS+jn][alpha];
+            }
+        }
+        h5File.getDataSet("/faceClosureErr").write(fcerrVec);
     }
 #endif
 }
