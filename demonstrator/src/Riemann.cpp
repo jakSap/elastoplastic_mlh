@@ -290,8 +290,8 @@ if (pEffR < 0 | pEffL < 0){
 WR[1] += 2 * pDummy;
 WL[1] += 2 * pDummy;
 #if TENSILE_CORRECTION && TENSILE_CORRECTION_1
-    SijRotR[0] += 2*pDummy;
-    SijRotL[0] += 2*pDummy;
+    // SijRotR[0] += 2*pDummy;      // These two lines effectively cancel out the two lines before so dont use them!
+    // SijRotL[0] += 2*pDummy;
     pDummy *= (1 - tensileCorrectionFactor);
 #endif
 #endif
