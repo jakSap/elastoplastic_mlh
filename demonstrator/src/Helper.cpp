@@ -81,6 +81,20 @@ double Helper::maxEigenvalueSym(const double *S){
 #endif
 }
 
+void Helper::eigenDecompositionSym(const double *S, double *eval, double *evec){
+    // A symmetric matrix has identical row-major and column-major storage, so S can be
+    // handed to LAPACK directly. On exit 'a' (column-major) holds the orthonormal
+    // eigenvectors in its columns: eigenvector k = a[k*DIM + i].
+    int n = DIM, lda = DIM, info;
+    int lwork = 3 * DIM;                 // >= max(1, 3n-1) for all DIM >= 1
+    double a[DIM * DIM];
+    double work[3 * DIM];
+    for (int k = 0; k < DIM * DIM; ++k) a[k] = S[k];
+    char jobz = 'V', uplo = 'U';
+    dsyev_(&jobz, &uplo, &n, a, &lda, eval, work, &lwork, &info);
+    for (int k = 0; k < DIM * DIM; ++k) evec[k] = a[k];
+}
+
 void Helper::rotationMatrix2D(double *a, double *b, double *Lambda){
     Lambda[0] = a[0]*b[0] + a[1]*b[1];
     Lambda[1] = -(a[0]*b[1] - a[1]*b[0]);

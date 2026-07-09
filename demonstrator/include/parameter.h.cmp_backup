@@ -9,7 +9,7 @@
 #define DIM 2
 
 /// define if periodic boundaries should be employed
-#define PERIODIC_BOUNDARIES 0
+#define PERIODIC_BOUNDARIES 1
 
 /// define if timestep is adaptive
 #define ADAPTIVE_TIMESTEP 1
@@ -21,7 +21,7 @@
 /// With hMaxFactor=4.0 (hMax=0.4), a tensile particle at the edge of
 /// initial-density material (rho=1.0, n=400/unit^2) has up to
 /// pi*0.16*400 ~ 200 neighbors; 400 gives safe headroom.
-#define MAX_NUM_INTERACTIONS 300
+#define MAX_NUM_INTERACTIONS 400
 
 /// use a per-particle, iteratively determined smoothing length (Hopkins 2015,
 /// see Martin's master thesis section 3.4.2). When 0, the global
@@ -35,7 +35,7 @@
 /// V_kern is pi h^2 in 2D and (4/3) pi h^3 in 3D.
 /// For the single_block 2D testcase (delta_p = 0.005, kernelSize = 0.02),
 /// this evaluates to ~50, which is also a reasonable default for 2D MFM.
-#define NNN_TARGET 32
+#define NNN_TARGET 20
 
 /// numerical tolerance for the Newton-Raphson root finding on f_SML
 #define SML_TOL 1e-3
@@ -55,26 +55,6 @@
 /// Must stay <= the NNS search radius budget or neighbors will be missed.
 #define SML_H_MAX_FACTOR 4.0
 
-/// MeshlessScheme::run() searches for neighbours ONCE per step at a fixed
-/// nnsRadius = max(kernelSize, hMax_from_previous_step), then hands that
-/// candidate list (nnl/noi) to updateAllSmoothingLengths(), whose Newton
-/// solve only reweights the particles already in the list -- it cannot
-/// discover new ones as h grows. A particle whose h has to grow a lot this
-/// step (e.g. a free-surface corner with few real neighbours) can converge
-/// to an h that exceeds nnsRadius, leaving it stuck with an incomplete
-/// neighbour list (wrong Omega/FCE/density/gradients), even though the
-/// Newton iteration itself reports converged. If h_max after the solve
-/// exceeds nnsRadius, MeshlessScheme::run() redoes the whole NNS+solve pass
-/// at nnsRadius = h_max * NNS_SEARCH_MARGIN, repeating until the search
-/// radius covers where h actually converged (or NNS_MAX_RETRIES is hit).
-#define NNS_SEARCH_MARGIN 1.5
-
-/// safety cap on how many times MeshlessScheme::run() will redo the NNS+SML
-/// solve pass per step chasing NNS_SEARCH_MARGIN headroom. Hitting this is a
-/// sign of a genuinely pathological configuration (h growing without bound),
-/// not just a slow-to-settle corner -- treated as fatal, like SML_PANIC_FRACTION.
-#define NNS_MAX_RETRIES 5
-
 /// fraction of particles allowed to end the Newton iteration in a bad state
 /// (unconverged OR clamped at hMin/hMax) before a WARN is logged.
 #define SML_WARN_FRACTION 0.01
@@ -87,10 +67,10 @@
 Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // #define EOS 0 // Ideal gas EOS
 // #define EOS 1 // Murnaghan EOS
-#define EOS 2
+#define EOS 1
 
 /* Simulate elastic dynamics*/
-#define ELASTIC 1
+#define ELASTIC 0
 // Shear modulus mu now lives per-material in the EOS material table
 // (see EquationOfState::MurnaghanMaterial.mu); look it up via
 // MeshlessEOS->EOSShearModulus(matId[i]).
@@ -171,7 +151,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define KERNEL_FUNCTION 6
 
 // Enable tensile correction. This activates computation of f_ab
-#define TENSILE_CORRECTION 1
+#define TENSILE_CORRECTION 0
 // Easiest form of tensile correction: Reduce effective Pressure after Riemann problem.
 // Using f_ab calculated as in Monaghan et al, 2000, implemented as in GIZMO.
 #define TENSILE_CORRECTION_1 1
@@ -184,10 +164,6 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // Two Parameters for the tensile correction facor, as in Monaghan, 2000
 #define TENSILE_CORRECTION_PREFAC 0.2
 #define TENSILE_CORRECTION_POWER 4.
-// Output per-particle average f_ab to h5 dump (requires TENSILE_CORRECTION)
-#if TENSILE_CORRECTION
-#define OUTPUT_FAB 0
-#endif
 
 #if TENSILE_CORRECTION_2 && TENSILE_CORRECTION_3
 #error "TENSILE_CORRECTION_2 and TENSILE_CORRECTION_3 are mutually exclusive stress-damping branches (GIZMO's #if 0/#else)."
@@ -201,7 +177,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // SPH stress flux with longitudinal+transverse (shear-wave) HLL dissipation and
 // per-eigenvalue tensile correction (GIZMO solids/elastic_stress_tensor_force.h).
 // (consistency guards live below, after USE_HLLC is defined)
-#define GIZMO_ELASTIC_FLUX 1
+#define GIZMO_ELASTIC_FLUX 0
 
 /** maximum interactions with ghost particles
  *  ignored when `PERIODIC_BOUNDARIES` is not set
@@ -234,19 +210,8 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #if GIZMO_ELASTIC_FLUX && !(USE_HLLC && ELASTIC)
 #error "GIZMO_ELASTIC_FLUX requires USE_HLLC == 1 and ELASTIC == 1."
 #endif
-// 3D MFM is supported: the GIZMO elastic stress flux and tensile-principal damping use the
-// dimension-agnostic Helper::eigenDecompositionSym (3x3 eigenbasis via LAPACK), the z/vz
-// coordinate+velocity plumbing is wired into the non-RUNSPH path (Particles.h declaration,
-// Particles.cpp DIM==3 alloc/free), and the MFM I/O + initial distribution round-trip z/vz
-// through the /x and /v datasets. (Built and linked in 3D; not yet runtime-validated.)
-// GIZMO_ELASTIC_FLUX zeroes the deviatoric stress passed to the Riemann solver and
-// applies its own per-eigenvalue tensile damping in the separate stress flux, so the
-// in-solver stress-damping branches TC2/TC3 would be no-ops: forbid the combination.
-#if GIZMO_ELASTIC_FLUX && TENSILE_CORRECTION_2
-#error "GIZMO_ELASTIC_FLUX and TENSILE_CORRECTION_2 are mutually exclusive: stress damping is done in the elastic flux, not the Riemann solver."
-#endif
-#if GIZMO_ELASTIC_FLUX && TENSILE_CORRECTION_3
-#error "GIZMO_ELASTIC_FLUX and TENSILE_CORRECTION_3 are mutually exclusive: stress damping is done in the elastic flux, not the Riemann solver."
+#if GIZMO_ELASTIC_FLUX && DIM == 3
+#error "GIZMO_ELASTIC_FLUX stress flux is only implemented for DIM == 2 (analytic 2x2 eigendecomposition)."
 #endif
 
 // Use HLL solver
@@ -263,7 +228,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define USE_ROE 1
 
 // Convert HLL(C) flux to primitive vars for debugging
-//#define DEBUG_HLL 1
+#define DEBUG_HLL 1
 
 /// enforcing flux symmetry by only calculating on side
 #define ENFORCE_FLUX_SYM 1
@@ -320,7 +285,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // The corrected (FCE/Omega) is also used as the volume V_i in compEffectiveFace
 // and sumVolume, mirroring GIZMO's downstream use of `Density` as 1/V.
 // Set to 0 to disable the correction entirely (rho_i = m_i*Omega_i).
-#define SURFACE_VOLCORR 1
+#define SURFACE_VOLCORR 0
 #define SURFACE_VOLCORR_A 1.0259
 #define SURFACE_VOLCORR_B 2.52444
 #define SURFACE_VOLCORR_FLOOR 0.344301
@@ -347,7 +312,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // Bisection on the colliding-rings test (MA-Obsidian/2026-05-25-bisection-results.md)
 // identified this as the single highest-impact missing GIZMO feature for elastic
 // rebound; without it the rings stick instead of bouncing.
-#define EXPLICIT_VOL_INTEGRATION 1
+#define EXPLICIT_VOL_INTEGRATION 0
 /// Maximum |div v * dt/2| inside the half-step exponential. Caps the per-step
 /// density change at exp(EXPLICIT_VOL_DIVV_CLAMP) ~ 4.5 (matches GIZMO).
 #define EXPLICIT_VOL_DIVV_CLAMP 1.5
@@ -433,10 +398,10 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define DIAG_WINDOW_STEPS    100
 
 // using pressure floor to avoid predicting negative pressures
-//#define PRESSURE_FLOOR -1
+//#define PRESSURE_FLOOR 1e-8
 
 // Use density floor
-#define DENSITY_FLOOR .000001
+#define DENSITY_FLOOR -1.
 
 // Hopkins 2015 MFM <-> SPH gradient blend, controlled per particle by
 // conditionNumber[i]. The output gradient is

@@ -6,6 +6,10 @@
 
 // Kernel functions live in include/Kernel.h (selected via KERNEL_FUNCTION).
 
+// per-face flux dump for one watched particle (same format as miluphcuda's
+// MFM_DEBUG_WATCH [MFMface] lines); set to -1 to disable
+#define PAIRDBG_WATCH -1
+
 Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
             , bool ghosts
             ) : N { numParticles }, MeshlessEOS(MeshlessEOS),
@@ -323,6 +327,7 @@ void Particles::computeFabMonaghan(){
 // demonstrator's lab frame. Computed once per pair (i<jj); the flux-symmetry copy
 // negates it for jj, matching GIZMO's antisymmetric +i/-j application.
 void Particles::addGizmoElasticStressFlux(int i, int jj, const double &f, double *Fout){
+#if DIM == 2
     const double dx = x[i] - x[jj], dy = y[i] - y[jj];
     const double r2 = dx*dx + dy*dy;
     if (r2 <= 0.) return;
@@ -398,6 +403,82 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, const double &f, double
     Fout[1] -= cmag_E;
     Fout[2] -= cmag[0];
     Fout[3] -= cmag[1];
+
+#elif DIM == 3
+    const double dx = x[i] - x[jj], dy = y[i] - y[jj], dz = z[i] - z[jj];
+    const double r2 = dx*dx + dy*dy + dz*dz;
+    if (r2 <= 0.) return;
+    const double r = sqrt(r2), rinv = 1./r;
+
+    // SPH 'effective area' along the line of centres (chosen to avoid tensile instability)
+    const double dwk = std::fabs(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, sml[jj]));
+    const double rhoi = rho[i], rhoj = rho[jj];
+    const double FNormT = m[i]*m[jj]*dwk / (rhoi*rhoj);
+    const double FVec[3] = { FNormT*dx*rinv, FNormT*dy*rinv, FNormT*dz*rinv };
+
+    // mean-velocity interface (the -0.5 carries GIZMO's required sign)
+    const double v_int[3] = { -0.5*(vx[i]+vx[jj]), -0.5*(vy[i]+vy[jj]), -0.5*(vz[i]+vz[jj]) };
+    const double dv[3] = { vx[i]-vx[jj], vy[i]-vy[jj], vz[i]-vz[jj] };
+    const double vdotr = dv[0]*dx + dv[1]*dy + dv[2]*dz;
+
+    // longitudinal (P-wave) and transverse (S-wave) acoustic impedances for HLL diffusion
+#if EOS == 1 || EOS == 2
+    const double Ki = MeshlessEOS->EOSBulkModulus(matId[i], rhoi, P[i]);
+    const double Kj = MeshlessEOS->EOSBulkModulus(matId[jj], rhoj, P[jj]);
+    const double mui = MeshlessEOS->EOSShearModulus(matId[i]);
+    const double muj = MeshlessEOS->EOSShearModulus(matId[jj]);
+#else
+    const double Ki = MeshlessEOS->EOSBulkModulus(rhoi, P[i]);
+    const double Kj = MeshlessEOS->EOSBulkModulus(rhoj, P[jj]);
+    const double mui = 0., muj = 0.;
+#endif
+    const double ci  = sqrt((Ki + 4./3.*mui)/rhoi), cj  = sqrt((Kj + 4./3.*muj)/rhoj);
+    const double cTi = sqrt(mui/rhoi),               cTj = sqrt(muj/rhoj);
+    const double wt_r = rhoi*ci*rhoj*cj / (rhoi*ci + rhoj*cj) * FNormT;
+    const double denT = rhoi*cTi + rhoj*cTj;
+    const double wt_t = (denT > 0.) ? rhoi*cTi*rhoj*cTj / denT * FNormT : 0.;
+    const double wt_rt = (wt_r - wt_t) * vdotr * rinv * rinv;
+
+    // deviatoric stress force: project face onto stress eigenvectors, damp tensile
+    // (positive) principal components by (1 - f); summed over both sides at wt=-0.5.
+    // The symmetric 3x3 eigenproblem has no closed form, so use LAPACK (Helper).
+    double cmag[3] = {0., 0., 0.};
+    for (int side = 0; side < 2; ++side){
+        const int p = (side == 0) ? i : jj;
+        double S[DIM*DIM];
+        S[0]=Sxx[p]; S[1]=Sxy[p]; S[2]=Sxz[p];
+        S[3]=Sxy[p]; S[4]=Syy[p]; S[5]=Syz[p];
+        S[6]=Sxz[p]; S[7]=Syz[p]; S[8]=Szz[p];
+#if FRAGMENTATION && DAMAGE_ACTS_ON_S
+        // Grady-Kipp: damaged material carries less deviatoric stress (matches the
+        // solid-HLLC path in Riemann.cpp). Pressure damage flows through the solver.
+        const double dmg = 1.0 - damageTotal[p];
+        for (int a = 0; a < DIM*DIM; ++a) S[a] *= dmg;
+#endif
+        double eval[DIM], evec[DIM*DIM];
+        Helper::eigenDecompositionSym(S, eval, evec);
+        for (int kk = 0; kk < DIM; ++kk){
+            // eigenvector kk is column kk of evec: evec[kk*DIM + component]
+            const double ek0 = evec[kk*DIM+0], ek1 = evec[kk*DIM+1], ek2 = evec[kk*DIM+2];
+            double prefac = -0.5 * eval[kk] * (FVec[0]*ek0 + FVec[1]*ek1 + FVec[2]*ek2);
+            if (eval[kk] > 0.) prefac *= 1. - f;
+            cmag[0] += prefac * ek0;
+            cmag[1] += prefac * ek1;
+            cmag[2] += prefac * ek2;
+        }
+    }
+    // HLL-type dissipation of velocity differences (longitudinal + transverse shear wave)
+    cmag[0] -= wt_rt*dx + wt_t*dv[0];
+    cmag[1] -= wt_rt*dy + wt_t*dv[1];
+    cmag[2] -= wt_rt*dz + wt_t*dv[2];
+    const double cmag_E = cmag[0]*v_int[0] + cmag[1]*v_int[1] + cmag[2]*v_int[2];
+
+    // demonstrator convention: dp_i/dt = -sum_j Fij, so add the negative of GIZMO's force
+    Fout[1] -= cmag_E;
+    Fout[2] -= cmag[0];
+    Fout[3] -= cmag[1];
+    Fout[4] -= cmag[2];
+#endif // DIM
 }
 #endif // GIZMO_ELASTIC_FLUX
 
@@ -3115,6 +3196,9 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #endif // EOS == 0
             bool compute = true;
             int iij;
+#if PAIRDBG_WATCH >= 0
+            double FhDbg[DIM+2] = {0.};
+#endif
 #if ENFORCE_FLUX_SYM
             //int ii = i*MAX_NUM_INTERACTIONS+j; // interaction index i->j
             int ji = nnl[ii]; // index i of particle j
@@ -3192,6 +3276,9 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #endif
                 };
                 solver.HLLCFlux(Fij[ii]);
+#if PAIRDBG_WATCH >= 0
+                for(int d=0; d<DIM+2; ++d) FhDbg[d] = Fij[ii][d];
+#endif
 #if GIZMO_ELASTIC_FLUX
                 double fTC = 0.;
 #if TENSILE_CORRECTION
@@ -3221,6 +3308,20 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
             // if(i == 6){//&& j==11){
             //    Logger(DEBUG) << "Fluxes = [" << Fij[ii][0] << ", " << Fij[ii][1] << ", " << Fij[ii][2] << ", " << Fij[ii][3] << "]";
             // }
+#if PAIRDBG_WATCH >= 0
+            if (i == PAIRDBG_WATCH) {
+                // WijR = i-side state, WijL = j-side state (see reconstruction above);
+                // Fh = pure HLLC flux (zero for mirrored faces where compute==false)
+                printf("[MFMface] i=%d j=%d A=(%.3e,%.3e) |A|=%.3e | WR(rho,P,vx,vy)=%.3e,%.3e,%.3e,%.3e | WL=%.3e,%.3e,%.3e,%.3e | Fh(px,py)=%.3e,%.3e | F(m,e,px,py)=%.3e,%.3e,%.3e,%.3e | mirrored=%d\n",
+                       i, nnl[ii], Aij[ii][0], Aij[ii][1],
+                       sqrt(Aij[ii][0]*Aij[ii][0] + Aij[ii][1]*Aij[ii][1]),
+                       WijR[ii][0], WijR[ii][1], WijR[ii][2], WijR[ii][3],
+                       WijL[ii][0], WijL[ii][1], WijL[ii][2], WijL[ii][3],
+                       FhDbg[2], FhDbg[3],
+                       Fij[ii][0], Fij[ii][1], Fij[ii][2], Fij[ii][3],
+                       compute ? 0 : 1);
+            }
+#endif
         }
 
 #if PERIODIC_BOUNDARIES

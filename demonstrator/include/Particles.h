@@ -31,6 +31,11 @@ public:
 #endif
     int *cell; // cell in which particle at index resides
     double *m, *u, *x, *y, *vx, *vy, *rho, *P;
+#if !RUNSPH && DIM == 3
+    // z-coordinate and z-velocity for the 3D MFM path. RUNSPH declares its own z/vz in the
+    // SPH block below; the DIM==3 allocation (Particles.cpp) and free are shared by both paths.
+    double *z, *vz;
+#endif
     /// per-particle smoothing length h_i. Always allocated, even when
     /// VARIABLE_SML is 0; in that case it is just a copy of config.kernelSize.
     double *sml;

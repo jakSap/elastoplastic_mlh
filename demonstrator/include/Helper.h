@@ -18,6 +18,10 @@ extern "C" {
 
     // generate inverse of a matrix given its LU decomposition
     void dgetri_(int* N, double* A, int* lda, int* IPIV, double* WORK, int* lwork, int* INFO);
+
+    // eigenvalues and eigenvectors of a real symmetric matrix
+    void dsyev_(char* jobz, char* uplo, int* n, double* a, int* lda,
+                double* w, double* work, int* lwork, int* info);
 }
 
 class Helper {
@@ -49,6 +53,20 @@ public:
      * @return the maximum eigenvalue
      */
     static double maxEigenvalueSym(const double *S);
+
+    /**
+     * @brief Eigenvalues and eigenvectors of a symmetric DIM x DIM matrix (LAPACK dsyev).
+     *
+     * Used by the GIZMO elastic stress flux and the tensile-principal damping, which need
+     * the full eigenbasis (not just the largest eigenvalue) to project/damp the deviatoric
+     * stress in 3D, where there is no closed-form eigenbasis.
+     *
+     * @param[in]  S    symmetric matrix, row-major [DIM*DIM]
+     * @param[out] eval eigenvalues, ascending [DIM]
+     * @param[out] evec eigenvectors stored column-wise: eigenvector k is evec[k*DIM + i],
+     *                  i = component (LAPACK's column-major output) [DIM*DIM]
+     */
+    static void eigenDecompositionSym(const double *S, double *eval, double *evec);
 
     /**
      * good resource for 3D implementation: https://math.stackexchange.com/a/897677

@@ -5,7 +5,28 @@
 #include "../include/Riemann.h"
 //#include "../include/riemannhelper.h"
 
-#if USE_HLLC && ELASTIC && TENSILE_CORRECTION && TENSILE_CORRECTION_3 && DIM == 2
+#if USE_HLLC && ELASTIC && TENSILE_CORRECTION && TENSILE_CORRECTION_3
+#if DIM == 3
+// Damp tensile (positive) principal components of a symmetric 3x3 deviatoric stress by
+// (1 - f). No closed-form eigenbasis in 3D, so use LAPACK (Helper). Reconstruct
+// S = sum_k lambda_k e_k e_k^T with the damped eigenvalues.
+static void dampTensilePrincipalComponents(double *S, const double &f){
+    double norm2 = 0.;
+    for (int a = 0; a < DIM*DIM; ++a) norm2 += S[a]*S[a];
+    if (norm2 < 1e-300) return;
+    double eval[DIM], evec[DIM*DIM];
+    Helper::eigenDecompositionSym(S, eval, evec);
+    for (int k = 0; k < DIM; ++k) if (eval[k] > 0.) eval[k] *= 1. - f;
+    // eigenvector k is column k of evec: evec[k*DIM + component]
+    for (int rr = 0; rr < DIM; ++rr){
+        for (int cc = 0; cc < DIM; ++cc){
+            double s = 0.;
+            for (int k = 0; k < DIM; ++k) s += eval[k]*evec[k*DIM+rr]*evec[k*DIM+cc];
+            S[rr*DIM+cc] = s;
+        }
+    }
+}
+#else // DIM == 2
 // Damp tensile (positive) principal components of a symmetric 2x2 deviatoric stress
 // by (1 - f), as in GIZMO's default eigenvalue branch (elastic_stress_tensor_force.h).
 static void dampTensilePrincipalComponents(double *S, const double &f){
@@ -33,6 +54,7 @@ static void dampTensilePrincipalComponents(double *S, const double &f){
     S[2] = S[1];
     S[3] = l1*v1y*v1y + l2*v2y*v2y;
 }
+#endif // DIM == 2
 #endif
 Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
                  int matIdR, int matIdL, EquationOfState &MeshlessEOS
@@ -287,8 +309,8 @@ double pDummy = 0;
 if (pEffR < 0 | pEffL < 0){
     pDummy = -1. * std::min(pEffR, pEffL);
 }
-WR[1] += 2 * pDummy;
-WL[1] += 2 * pDummy;
+WR[1] += pDummy;
+WL[1] += pDummy;
 #if TENSILE_CORRECTION && TENSILE_CORRECTION_1
     // SijRotR[0] += 2*pDummy;      // These two lines effectively cancel out the two lines before so dont use them!
     // SijRotL[0] += 2*pDummy;
@@ -531,7 +553,7 @@ void Riemann::rotateAndProjectFluxes2D(double *Fij){
 #else
 void Riemann::rotateAndProjectFluxes3D(double *Fij){
 #if HLLC_general_EOS
-    Logger(Info << "Exact solver with general EOS not implemented yet, exiting");
+    Logger(INFO) << "Exact solver with general EOS not implemented yet, exiting";
     exit(6);
 #endif
 #if EOS == 0
