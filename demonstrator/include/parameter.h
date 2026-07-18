@@ -233,6 +233,54 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #error "TENSILE_CORRECTION_3 is only implemented for DIM == 2 (analytic 2x2 eigendecomposition)."
 #endif
 
+// ---------------------------------------------------------------------------
+// Angular-momentum conservation (20260718 study, testcases/angular_momentum_study).
+// MFM pair momentum fluxes are generally NOT parallel to the pair's line of
+// centers (effective faces Aij are non-central, the deviatoric stress flux
+// S*Fhat is non-radial, and the transverse shear-wave HLL dissipation acts
+// along dv_t), so each antisymmetric pair exchange exerts a net torque
+// -(r_i - r_j) x F_ij and total L_z drains at collision contact. Selector:
+//   0 = baseline MFM (no fix)
+//   1 = RADIAL_FLUX: project each pair momentum flux onto the line of centers.
+//       Exact L conservation by construction; transverse (shear) momentum
+//       exchange between pairs is dropped (contact becomes normal-force-like).
+//   2 = RADIAL_FACE: project the effective face Aij onto the line of centers
+//       (fixes only the geometric non-centrality of the HLLC flux).
+//   3 = NO_TDISS: drop the transverse shear-wave HLL dissipation wt_t*dv_t in
+//       the GIZMO elastic stress flux (the purely numerical non-central term);
+//       longitudinal dissipation is kept unchanged.
+//   4 = SPIN: bookkeeping only -- accumulate each pair's residual torque into
+//       a per-particle spin ledger so that L_orbital + L_spin is conserved
+//       exactly; the velocity field itself stays baseline.
+//   5 = GLOBAL_CORR: after each velocity update, apply the minimal-kinetic-
+//       energy rigid-rotation velocity correction (about the center of mass)
+//       that restores the pre-step L_z exactly. Conserves P exactly; the KE
+//       change is compensated from internal energy.
+//   6 = LOCAL_CORR: attribute half of each pair's residual torque to each
+//       partner as a torque debt, then cancel every particle's debt by a small
+//       rotation kick applied to its own neighborhood (mass-centered, so P is
+//       conserved exactly and the injected L_z equals the debt exactly). KE
+//       change compensated from internal energy. Local version of 5.
+//   7 = RADIAL_FACE + NO_TDISS combined (fix both numerical non-central
+//       pieces, keep the physical deviatoric stress flux untouched).
+#define AM_METHOD 0
+
+#define AM_RADIAL_FLUX  (AM_METHOD == 1)
+#define AM_RADIAL_FACE  (AM_METHOD == 2 || AM_METHOD == 7)
+#define AM_NO_TDISS     (AM_METHOD == 3 || AM_METHOD == 7)
+#define AM_SPIN         (AM_METHOD == 4)
+#define AM_GLOBAL_CORR  (AM_METHOD == 5)
+#define AM_LOCAL_CORR   (AM_METHOD == 6)
+// methods that need the per-particle residual-torque accumulator tqF
+#define AM_TORQUE_TRACK (AM_SPIN || AM_LOCAL_CORR || AM_GLOBAL_CORR)
+
+#if AM_METHOD && DIM != 2
+#error "AM_METHOD > 0 is only implemented for DIM == 2 (torque about z)."
+#endif
+#if (AM_SPIN || AM_GLOBAL_CORR || AM_LOCAL_CORR) && !ELASTIC
+#error "AM_METHOD 4-6 hook into the ELASTIC updateState path only."
+#endif
+
 // GIZMO-faithful elastic coupling: keep the HLLC Riemann problem purely isotropic
 // (pressure only + dummy-pressure shift) and add the deviatoric stress as a separate
 // SPH stress flux with longitudinal+transverse (shear-wave) HLL dissipation and

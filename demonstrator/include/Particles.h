@@ -366,6 +366,19 @@ private:
 
     /// variables for integration
     double *mF, *eF, (*vF)[DIM];
+#if AM_TORQUE_TRACK
+    // Per-particle residual-torque accumulator (z-component, 2D): half of each
+    // pair's spurious torque [(r_i - r_j) x F_ij]_z is attributed to each
+    // partner. Summed over all particles this equals the total spurious L_z
+    // production rate of the flux update (physical exchange cancels pairwise).
+    // Flux sign convention: orbital dL_i = -dt * tqF[i].
+    double *tqF;
+#endif
+#if AM_SPIN
+    // Spin ledger absorbing the residual pair torque so that
+    // L_orbital + sum(spin) is conserved exactly (bookkeeping only).
+    double *spin;
+#endif
 
     void compOmega(int i);
     void slopeLimiter(double *f, double (*grad)[DIM],

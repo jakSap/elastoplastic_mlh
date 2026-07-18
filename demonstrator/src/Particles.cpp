@@ -159,6 +159,13 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         mF = new double[numParticles];
         vF = new double[numParticles][DIM];
         eF = new double[numParticles];
+#if AM_TORQUE_TRACK
+        tqF = new double[numParticles];
+#endif
+#if AM_SPIN
+        spin = new double[numParticles];
+        for (int i=0; i<numParticles; ++i) spin[i] = 0.;
+#endif
 
 #if PERIODIC_BOUNDARIES
         // estimated memory allocation
@@ -284,6 +291,12 @@ Particles::~Particles() {
         delete[] mF;
         delete[] vF;
         delete[] eF;
+#if AM_TORQUE_TRACK
+        delete[] tqF;
+#endif
+#if AM_SPIN
+        delete[] spin;
+#endif
 #if DIM == 3
         delete[] z;
         delete[] vz;
@@ -400,7 +413,15 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, const double &f, double
     const double cTi = sqrt(mui/rhoi),               cTj = sqrt(muj/rhoj);
     const double wt_r = rhoi*ci*rhoj*cj / (rhoi*ci + rhoj*cj) * FNormT;
     const double denT = rhoi*cTi + rhoj*cTj;
+#if AM_NO_TDISS
+    // Drop the transverse shear-wave dissipation: the combined HLL term
+    // decomposes as wt_r*(radial part of dv) + wt_t*(transverse part of dv),
+    // so wt_t = 0 removes exactly the non-central (torque-exerting) piece
+    // while leaving the longitudinal dissipation unchanged.
+    const double wt_t = 0.; (void)denT;
+#else
     const double wt_t = (denT > 0.) ? rhoi*cTi*rhoj*cTj / denT * FNormT : 0.;
+#endif
     const double wt_rt = (wt_r - wt_t) * vdotr * rinv * rinv;
 
     // deviatoric stress force: project face onto stress eigenvectors, damp tensile
@@ -2521,6 +2542,23 @@ void Particles::compEffectiveFace(){
                 Aij[i*MAX_NUM_INTERACTIONS+j][alpha] = Vi*psijTilde_xi[i*MAX_NUM_INTERACTIONS+j][alpha]
                         - Vji*psijTilde_xi[ij+ji*MAX_NUM_INTERACTIONS][alpha];
             }
+#if AM_RADIAL_FACE
+            // Project the effective face onto the line of centers: the HLLC
+            // pressure flux then acts along r_ij and exerts no pair torque.
+            // (The separate GIZMO elastic stress flux is built on its own
+            // radial SPH area and is unaffected.)
+            {
+                double ex = x[ji] - x[i], ey = y[ji] - y[i];
+                const double rn = sqrt(ex*ex + ey*ey);
+                if (rn > 0.){
+                    ex /= rn; ey /= rn;
+                    double *A = Aij[i*MAX_NUM_INTERACTIONS+j];
+                    const double Ar = A[0]*ex + A[1]*ey;
+                    A[0] = Ar*ex;
+                    A[1] = Ar*ey;
+                }
+            }
+#endif
 
             //if(i < 10){
             //    Logger(DEBUG) << "A[" << i << " -> " << ji << "] = [" << Aij[i*MAX_NUM_INTERACTIONS+j][0] << ", "
@@ -3406,6 +3444,24 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                                 matIdL_ii, matIdR_ii, *MeshlessEOS};
                 solver.exact(Fij[ii]);
 #endif
+#if AM_RADIAL_FLUX
+                // Project the pair momentum flux onto the line of centers so
+                // the antisymmetric exchange exerts zero net torque; total L_z
+                // is then conserved to machine precision. The energy flux is
+                // left unchanged (still antisymmetric, so total E is conserved;
+                // the dropped transverse work moves into internal energy).
+                {
+                    const int jr = nnl[ii];
+                    double ex = x[jr] - x[i], ey = y[jr] - y[i];
+                    const double rn = sqrt(ex*ex + ey*ey);
+                    if (rn > 0.){
+                        ex /= rn; ey /= rn;
+                        const double fr = Fij[ii][2]*ex + Fij[ii][3]*ey;
+                        Fij[ii][2] = fr*ex;
+                        Fij[ii][3] = fr*ey;
+                    }
+                }
+#endif
             } else {
                 // Logger(DEBUG) << " i = " << i << " j = " << nnl[ii] << " No compute";
                 for(int d=0; d<DIM+2; ++d){
@@ -3609,6 +3665,9 @@ void Particles::collectFluxes(Helper &helper){
         vF[i][2] = 0.;
 #endif
         eF[i] = 0.;
+#if AM_TORQUE_TRACK
+        tqF[i] = 0.;
+#endif
 
         //Logger(DEBUG) << "      > i = " << i;
 
@@ -3654,6 +3713,17 @@ void Particles::collectFluxes(Helper &helper){
             //                  + Helper::dotProduct(vFrame[ii], Fv));
 
             eF[i] += Fij[ii][1];
+
+#if AM_TORQUE_TRACK
+            // Half of the pair's spurious torque [(r_i - r_j) x F]_z; the
+            // mirrored pair contributes the identical value on the j side, so
+            // sum_i tqF[i] = total spurious L_z production rate (flux sign
+            // convention: orbital dL/dt = -sum_i tqF[i]).
+            {
+                const int jt = nnl[ii];
+                tqF[i] += 0.5*((x[i]-x[jt])*Fij[ii][3] - (y[i]-y[jt])*Fij[ii][2]);
+            }
+#endif
 
 #if DIAG_COND_ENABLE
             if (diagActive && i == diagTarget){
@@ -3908,6 +3978,88 @@ void Particles::updateState(const double &dt){
         }
 #endif
     }
+
+#if AM_SPIN
+    // Bookkeeping only: the spin ledger absorbs the residual pair torque, so
+    // L_orbital + sum(spin) is conserved exactly while the dynamics stay
+    // baseline. Orbital L changed by -dt*sum(tqF), so spin gains +dt*tqF.
+    for (int i=0; i<N; ++i){
+        spin[i] += dt*tqF[i];
+    }
+#endif
+
+#if AM_GLOBAL_CORR
+    // Cancel this step's spurious L_z production with the minimal-kinetic-
+    // energy rigid-rotation correction about the center of mass. delta-v =
+    // alpha * zhat x (r - R_com) conserves linear momentum exactly (the
+    // mass-weighted mean of r - R_com vanishes) and injects alpha * I of L_z.
+    {
+        double dL = 0.;
+        for (int i=0; i<N; ++i) dL += tqF[i];
+        dL *= -dt;  // orbital L_z change caused by the fluxes this step
+        double M = 0., xb = 0., yb = 0.;
+        for (int i=0; i<N; ++i){ M += m[i]; xb += m[i]*x[i]; yb += m[i]*y[i]; }
+        xb /= M; yb /= M;
+        double I = 0.;
+        for (int i=0; i<N; ++i){
+            const double rx = x[i]-xb, ry = y[i]-yb;
+            I += m[i]*(rx*rx + ry*ry);
+        }
+        if (I > 0. && dL != 0.){
+            const double alpha = -dL / I;
+            for (int i=0; i<N; ++i){
+                const double rx = x[i]-xb, ry = y[i]-yb;
+                const double dvx = -alpha*ry, dvy = alpha*rx;
+                // compensate the kinetic-energy change from internal energy so
+                // total energy stays conserved; skip when u would go negative
+                const double du = vx[i]*dvx + vy[i]*dvy + .5*(dvx*dvx + dvy*dvy);
+                vx[i] += dvx;
+                vy[i] += dvy;
+                if (u[i] - du > 0.) u[i] -= du;
+            }
+        }
+    }
+#endif
+
+#if AM_LOCAL_CORR
+    // Cancel each particle's torque debt (-dt*tqF[i]) with a small rigid-
+    // rotation kick applied to its own neighborhood (itself + its neighbor
+    // list). Centering the rotation on the set's mass centroid conserves
+    // linear momentum exactly, and the injected L_z equals alpha * I_loc
+    // independent of the current velocities, so applying the corrections
+    // sequentially still restores total L_z exactly.
+    for (int i=0; i<N; ++i){
+        const double debt = -dt*tqF[i];
+        if (debt == 0.) continue;
+        double M = m[i], xb = m[i]*x[i], yb = m[i]*y[i];
+        for (int j=0; j<noi[i]; ++j){
+            const int p = nnl[j+i*MAX_NUM_INTERACTIONS];
+            M += m[p]; xb += m[p]*x[p]; yb += m[p]*y[p];
+        }
+        xb /= M; yb /= M;
+        double I = 0.;
+        {
+            const double rx = x[i]-xb, ry = y[i]-yb;
+            I = m[i]*(rx*rx + ry*ry);
+        }
+        for (int j=0; j<noi[i]; ++j){
+            const int p = nnl[j+i*MAX_NUM_INTERACTIONS];
+            const double rx = x[p]-xb, ry = y[p]-yb;
+            I += m[p]*(rx*rx + ry*ry);
+        }
+        if (I <= 0.) continue;
+        const double alpha = -debt / I;
+        for (int j=0; j<=noi[i]; ++j){
+            const int p = (j == noi[i]) ? i : nnl[j+i*MAX_NUM_INTERACTIONS];
+            const double rx = x[p]-xb, ry = y[p]-yb;
+            const double dvx = -alpha*ry, dvy = alpha*rx;
+            const double du = vx[p]*dvx + vy[p]*dvy + .5*(dvx*dvx + dvy*dvy);
+            vx[p] += dvx;
+            vy[p] += dvy;
+            if (u[p] - du > 0.) u[p] -= du;
+        }
+    }
+#endif
 }
 
 void Particles::moveParticles(const double &dt, const Domain &domain){
@@ -5387,6 +5539,13 @@ void Particles::dump2file(std::string filename, double simTime){
         }
         h5File.getDataSet("/fabAll").write(fabAllVec);
 #endif
+    }
+#endif
+#if AM_SPIN
+    if (!ghosts){
+        // per-particle spin ledger; sum(spin) + L_z(orbital) is conserved
+        std::vector<double> spinVec(spin, spin+N);
+        h5File.createDataSet<double>("/spin", HighFive::DataSpace(N)).write(spinVec);
     }
 #endif
 #if DEBUG_LVL >= 2
