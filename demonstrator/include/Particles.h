@@ -352,6 +352,11 @@ private:
     int *noi;  // number of interactions
     double *omega; // store omega to avoid recomputing
     double (*psijTilde_xi)[DIM];
+#if SECOND_ORDER_GRADIENTS
+    // Second-order (quadratic-exact) gradient weights. Separate from
+    // psijTilde_xi, which must stay first order for the MFM effective faces.
+    double (*psijTildeGrad_xi)[DIM];
+#endif
     double (*Aij)[DIM];
     double (*WijL)[DIM+2], (*WijR)[DIM+2]; // DIM velocity components, density and pressure
     double (*Fij)[DIM+2];
@@ -372,6 +377,9 @@ private:
     int *nnlGhosts;
     int *noiGhosts;
     double (*psijTilde_xiGhosts)[DIM];
+#if SECOND_ORDER_GRADIENTS
+    double (*psijTildeGrad_xiGhosts)[DIM];
+#endif
     double (*AijGhosts)[DIM];
     double (*WijLGhosts)[DIM+2], (*WijRGhosts)[DIM+2]; // DIM velocity components, density and pressure
     double (*FijGhosts)[DIM+2];
@@ -385,6 +393,13 @@ private:
     double xi[DIM];
     double xj[DIM];
     double xjGhost[DIM];
+#if SECOND_ORDER_GRADIENTS
+    // Scratch for the second-order least-squares fit: P x P moment matrix and
+    // the polynomial basis vector, P = GRAD_MAT_DIM. Per-particle, filled in
+    // the single-threaded compPsijTilde loop (same pattern as B/xi/xj).
+    double Mmat[GRAD_MAT_DIM*GRAD_MAT_DIM];
+    double pbasis[GRAD_MAT_DIM];
+#endif
 
     /* Defines whether or not the particles in this instance are ghosts or not.
     Not to be confused with whether or not ghost particles exist globally */

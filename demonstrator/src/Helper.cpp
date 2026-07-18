@@ -19,6 +19,34 @@ void Helper::inverseMatrix(double *A, int N){
     //delete[] WORK;
 }
 
+bool Helper::inverseMatrixChecked(double *A, int N){
+    int LWORK = N*N;
+    int INFO;
+
+    // Frobenius norm of A captured before dgetrf overwrites it with its LU
+    // factors; needed for the condition-number test below.
+    double normA = 0.;
+    for (int k=0; k<N*N; ++k) normA += A[k]*A[k];
+
+    dgetrf_(&N,&N,A,&N,IPIV,&INFO);
+    if (INFO != 0) return false;      // singular: U has a zero pivot
+    dgetri_(&N,A,&N,IPIV,WORK,&LWORK,&INFO);
+    if (INFO != 0) return false;
+
+    // Reject ill-conditioned (not merely exactly-singular) matrices. The
+    // augmented order-2/3 gradient moment matrix goes near-singular on the
+    // one-sided stencils of free-surface particles; for order 3 the linear
+    // (gradient) and cubic basis terms share odd parity and become collinear
+    // there, so the odd block collapses while LAPACK still returns a garbage
+    // inverse that blows the recovered gradient up. kappa_F = ||A||_F *
+    // ||A^-1||_F is a cheap Frobenius proxy for the condition number; above
+    // GRAD_MAT_COND_MAX we report failure so the caller falls back to the
+    // well-conditioned first-order weights instead.
+    double normInv = 0.;
+    for (int k=0; k<N*N; ++k) normInv += A[k]*A[k];
+    return std::sqrt(normA*normInv) <= GRAD_MAT_COND_MAX;
+}
+
 double Helper::dotProduct(double *a, double *b){
     double res = 0.;
     for (int alpha=0; alpha<DIM; ++alpha){

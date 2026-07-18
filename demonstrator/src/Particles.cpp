@@ -10,6 +10,35 @@
 // MFM_DEBUG_WATCH [MFMface] lines); set to -1 to disable
 #define PAIRDBG_WATCH -1
 
+#if SECOND_ORDER_GRADIENTS
+// Polynomial basis (no constant term) for the second-order least-squares
+// gradient fit, evaluated at coordinates already nondimensionalised by h_i
+// (u = dx/h, v = dy/h, w = dz/h). The recovered coefficients c satisfy
+// f_j - f_i = sum_k c_k p_k, so the first DIM entries of c are h * gradient.
+// Ordering: [gradient terms] then [symmetric Hessian terms].
+static inline void buildGradBasis(double u, double v,
+#if DIM == 3
+                                  double w,
+#endif
+                                  double *p){
+#if DIM == 2
+    p[0] = u;    p[1] = v;                          // gradient
+    p[2] = u*u;  p[3] = u*v;  p[4] = v*v;           // Hessian
+#if GRADIENT_ORDER >= 3
+    p[5] = u*u*u; p[6] = u*u*v; p[7] = u*v*v; p[8] = v*v*v;  // 3rd derivatives
+#endif
+#else
+    p[0] = u;    p[1] = v;    p[2] = w;             // gradient
+    p[3] = u*u;  p[4] = u*v;  p[5] = u*w;           // Hessian
+    p[6] = v*v;  p[7] = v*w;  p[8] = w*w;
+#if GRADIENT_ORDER >= 3
+    p[9]  = u*u*u; p[10] = u*u*v; p[11] = u*u*w; p[12] = u*v*v; p[13] = u*v*w;  // 3rd derivatives
+    p[14] = u*w*w; p[15] = v*v*v; p[16] = v*v*w; p[17] = v*w*w; p[18] = w*w*w;
+#endif
+#endif
+}
+#endif
+
 Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
             , bool ghosts
             ) : N { numParticles }, MeshlessEOS(MeshlessEOS),
@@ -118,6 +147,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         nnl = new int[numParticles*MAX_NUM_INTERACTIONS];
         noi = new int[numParticles];
         psijTilde_xi = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
+#if SECOND_ORDER_GRADIENTS
+        psijTildeGrad_xi = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
+#endif
         Aij = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
         WijL = new double[numParticles*MAX_NUM_INTERACTIONS][DIM+2];
         WijR = new double[numParticles*MAX_NUM_INTERACTIONS][DIM+2];
@@ -135,6 +167,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         Logger(DEBUG) << "Declared array size: " << numParticles*(DIM+1);
         ghostMap = new int[numParticles*(DIM+1)]; // TODO: this is only applicable for DIM==2
         psijTilde_xiGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
+#if SECOND_ORDER_GRADIENTS
+        psijTildeGrad_xiGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
+#endif
         AijGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
         WijLGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM+2];
         WijRGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM+2];
@@ -239,6 +274,9 @@ Particles::~Particles() {
 
     if (!ghosts) {
         delete[] psijTilde_xi;
+#if SECOND_ORDER_GRADIENTS
+        delete[] psijTildeGrad_xi;
+#endif
         delete[] WijL;
         delete[] WijR;
         delete[] Fij;
@@ -258,6 +296,9 @@ Particles::~Particles() {
         delete[] nnlGhosts;
         delete[] noiGhosts;
         delete[] psijTilde_xiGhosts;
+#if SECOND_ORDER_GRADIENTS
+        delete[] psijTildeGrad_xiGhosts;
+#endif
         delete[] AijGhosts;
         delete[] WijLGhosts;
         delete[] WijRGhosts;
@@ -2296,11 +2337,78 @@ void Particles::compPsijTilde(Helper &helper){
                 }
             }
         }
+
+#if SECOND_ORDER_GRADIENTS
+        // ---- Second-order (quadratic-exact) gradient weights --------------
+        // Augmented least-squares fit that also solves for the symmetric
+        // Hessian; only the DIM gradient rows of M^-1 are stored. Coordinates
+        // are scaled by 1/h_i so M stays well conditioned; sInv undoes that
+        // scaling on the recovered gradient. Falls back to the first-order
+        // psijTilde_xi above when a particle has too few neighbours to
+        // constrain the quadratic (noi < GRAD_MAT_DIM) or M is singular.
+        const double sInv = 1. / hi;
+        bool useSecond = (noi[i] >= GRAD_MAT_DIM);
+        if (useSecond){
+            for (int k=0; k<GRAD_MAT_DIM*GRAD_MAT_DIM; ++k) Mmat[k] = 0.;
+            for (int j=0; j<noi[i]; ++j){
+                iP = nnl[j+i*MAX_NUM_INTERACTIONS];
+                double dSqr = pow(x[i]-x[iP],2) + pow(y[i]-y[iP],2);
+#if DIM == 3
+                dSqr += pow(z[i]-z[iP],2);
+#endif
+                double r = sqrt(dSqr);
+                double psij_xi = kernel(r, hi)/omega[i];
+                buildGradBasis((x[iP]-x[i])*sInv, (y[iP]-y[i])*sInv,
+#if DIM == 3
+                               (z[iP]-z[i])*sInv,
+#endif
+                               pbasis);
+                for (int k=0; k<GRAD_MAT_DIM; ++k)
+                    for (int l=0; l<GRAD_MAT_DIM; ++l)
+                        Mmat[k*GRAD_MAT_DIM+l] += pbasis[k]*pbasis[l]*psij_xi;
+            }
+            useSecond = helper.inverseMatrixChecked(Mmat, GRAD_MAT_DIM);
+        }
+        if (useSecond){
+            for (int j=0; j<noi[i]; ++j){
+                iP = nnl[j+i*MAX_NUM_INTERACTIONS];
+                double dSqr = pow(x[i]-x[iP],2) + pow(y[i]-y[iP],2);
+#if DIM == 3
+                dSqr += pow(z[i]-z[iP],2);
+#endif
+                double r = sqrt(dSqr);
+                double psij_xi = kernel(r, hi)/omega[i];
+                buildGradBasis((x[iP]-x[i])*sInv, (y[iP]-y[i])*sInv,
+#if DIM == 3
+                               (z[iP]-z[i])*sInv,
+#endif
+                               pbasis);
+                for (int alpha=0; alpha<DIM; ++alpha){
+                    double val = 0.;
+                    for (int k=0; k<GRAD_MAT_DIM; ++k)
+                        val += Mmat[alpha*GRAD_MAT_DIM+k]*pbasis[k];
+                    psijTildeGrad_xi[j+i*MAX_NUM_INTERACTIONS][alpha] = sInv*val*psij_xi;
+                }
+            }
+        } else {
+            for (int j=0; j<noi[i]; ++j)
+                for (int alpha=0; alpha<DIM; ++alpha)
+                    psijTildeGrad_xi[j+i*MAX_NUM_INTERACTIONS][alpha]
+                        = psijTilde_xi[j+i*MAX_NUM_INTERACTIONS][alpha];
+        }
+#endif
     }
 }
 
 
 void Particles::gradient(double *f, double (*grad)[DIM]){
+    // Second-order weights when enabled, else the first-order estimator. The
+    // MFM effective faces (compEffectiveFace) always keep psijTilde_xi.
+#if SECOND_ORDER_GRADIENTS
+    auto *psiTildeGrad = psijTildeGrad_xi;
+#else
+    auto *psiTildeGrad = psijTilde_xi;
+#endif
     for (int i=0; i<N; ++i) {
         for (int alpha = 0; alpha < DIM; ++alpha) {
             grad[i][alpha] = 0;
@@ -2332,7 +2440,7 @@ void Particles::gradient(double *f, double (*grad)[DIM]){
             if (wMFM > 0.){
                 for (int alpha = 0; alpha < DIM; ++alpha) {
                     grad[i][alpha] += wMFM * (f[jIdx] - f[i])
-                                      * psijTilde_xi[j + i * MAX_NUM_INTERACTIONS][alpha];
+                                      * psiTildeGrad[j + i * MAX_NUM_INTERACTIONS][alpha];
                 }
             }
             if (wSPH > 0.){
@@ -3102,18 +3210,18 @@ double Particles::pairwiseLimiter(double phi0, double phi_i, double phi_j, doubl
         phiMin = phi_j;
         phiMax = phi_i;
     }
-    double delta1 = PSI_1 * abs(phi_i - phi_j);
-    double delta2 = PSI_2 * abs(phi_i - phi_j);
+    double delta1 = PSI_1 * std::fabs(phi_i - phi_j);
+    double delta2 = PSI_2 * std::fabs(phi_i - phi_j);
     double phiMinus, phiPlus;
     if ((phiMax + delta1 >= 0. && phiMax >= 0.) || (phiMax + delta1 < 0. && phiMax < 0.)) {
         phiPlus = phiMax + delta1;
     } else {
-        phiPlus = phiMax / (1. + delta1 / abs(phiMax));
+        phiPlus = phiMax / (1. + delta1 / std::fabs(phiMax));
     }
     if ((phiMin - delta1 >= 0. && phiMin >= 0.) || (phiMin - delta1 < 0. && phiMin < 0.)) {
         phiMinus = phiMin - delta1;
     } else {
-        phiMinus = phiMin / (1. + delta1 / abs(phiMin));
+        phiMinus = phiMin / (1. + delta1 / std::fabs(phiMin));
     }
 
     /// actually compute the effective face limited value
@@ -4248,10 +4356,114 @@ void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles){
                 //}
             }
         }
+
+#if SECOND_ORDER_GRADIENTS
+        // ---- Second-order (quadratic-exact) gradient weights --------------
+        // Same augmented least-squares fit as the non-ghost overload, but the
+        // moment matrix accumulates over real AND ghost neighbours, and both
+        // psijTildeGrad_xi and psijTildeGrad_xiGhosts are filled. Falls back to
+        // the first-order weights when constraints are insufficient / singular.
+        const double sInv = 1. / hi;
+        bool useSecond = (noi[i] + noiGhosts[i] >= GRAD_MAT_DIM);
+        if (useSecond){
+            for (int k=0; k<GRAD_MAT_DIM*GRAD_MAT_DIM; ++k) Mmat[k] = 0.;
+            for (int j=0; j<noi[i]; ++j){
+                iP = nnl[j+i*MAX_NUM_INTERACTIONS];
+                double dSqr = pow(x[i]-x[iP],2) + pow(y[i]-y[iP],2);
+#if DIM == 3
+                dSqr += pow(z[i]-z[iP],2);
+#endif
+                double psij_xi = kernel(sqrt(dSqr), hi)/omega[i];
+                buildGradBasis((x[iP]-x[i])*sInv, (y[iP]-y[i])*sInv,
+#if DIM == 3
+                               (z[iP]-z[i])*sInv,
+#endif
+                               pbasis);
+                for (int k=0; k<GRAD_MAT_DIM; ++k)
+                    for (int l=0; l<GRAD_MAT_DIM; ++l)
+                        Mmat[k*GRAD_MAT_DIM+l] += pbasis[k]*pbasis[l]*psij_xi;
+            }
+            for (int j=0; j<noiGhosts[i]; ++j){
+                int g = nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS];
+                double dSqr = pow(x[i]-ghostParticles.x[g],2) + pow(y[i]-ghostParticles.y[g],2);
+#if DIM == 3
+                dSqr += pow(z[i]-ghostParticles.z[g],2);
+#endif
+                double psij_xi = kernel(sqrt(dSqr), hi)/omega[i];
+                buildGradBasis((ghostParticles.x[g]-x[i])*sInv, (ghostParticles.y[g]-y[i])*sInv,
+#if DIM == 3
+                               (ghostParticles.z[g]-z[i])*sInv,
+#endif
+                               pbasis);
+                for (int k=0; k<GRAD_MAT_DIM; ++k)
+                    for (int l=0; l<GRAD_MAT_DIM; ++l)
+                        Mmat[k*GRAD_MAT_DIM+l] += pbasis[k]*pbasis[l]*psij_xi;
+            }
+            useSecond = helper.inverseMatrixChecked(Mmat, GRAD_MAT_DIM);
+        }
+        if (useSecond){
+            for (int j=0; j<noi[i]; ++j){
+                iP = nnl[j+i*MAX_NUM_INTERACTIONS];
+                double dSqr = pow(x[i]-x[iP],2) + pow(y[i]-y[iP],2);
+#if DIM == 3
+                dSqr += pow(z[i]-z[iP],2);
+#endif
+                double psij_xi = kernel(sqrt(dSqr), hi)/omega[i];
+                buildGradBasis((x[iP]-x[i])*sInv, (y[iP]-y[i])*sInv,
+#if DIM == 3
+                               (z[iP]-z[i])*sInv,
+#endif
+                               pbasis);
+                for (int alpha=0; alpha<DIM; ++alpha){
+                    double val = 0.;
+                    for (int k=0; k<GRAD_MAT_DIM; ++k)
+                        val += Mmat[alpha*GRAD_MAT_DIM+k]*pbasis[k];
+                    psijTildeGrad_xi[j+i*MAX_NUM_INTERACTIONS][alpha] = sInv*val*psij_xi;
+                }
+            }
+            for (int j=0; j<noiGhosts[i]; ++j){
+                int g = nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS];
+                double dSqr = pow(x[i]-ghostParticles.x[g],2) + pow(y[i]-ghostParticles.y[g],2);
+#if DIM == 3
+                dSqr += pow(z[i]-ghostParticles.z[g],2);
+#endif
+                double psij_xi = kernel(sqrt(dSqr), hi)/omega[i];
+                buildGradBasis((ghostParticles.x[g]-x[i])*sInv, (ghostParticles.y[g]-y[i])*sInv,
+#if DIM == 3
+                               (ghostParticles.z[g]-z[i])*sInv,
+#endif
+                               pbasis);
+                for (int alpha=0; alpha<DIM; ++alpha){
+                    double val = 0.;
+                    for (int k=0; k<GRAD_MAT_DIM; ++k)
+                        val += Mmat[alpha*GRAD_MAT_DIM+k]*pbasis[k];
+                    psijTildeGrad_xiGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS][alpha] = sInv*val*psij_xi;
+                }
+            }
+        } else {
+            for (int j=0; j<noi[i]; ++j)
+                for (int alpha=0; alpha<DIM; ++alpha)
+                    psijTildeGrad_xi[j+i*MAX_NUM_INTERACTIONS][alpha]
+                        = psijTilde_xi[j+i*MAX_NUM_INTERACTIONS][alpha];
+            for (int j=0; j<noiGhosts[i]; ++j)
+                for (int alpha=0; alpha<DIM; ++alpha)
+                    psijTildeGrad_xiGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS][alpha]
+                        = psijTilde_xiGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS][alpha];
+        }
+#endif
     }
 }
 
 void Particles::gradient(double *f, double (*grad)[DIM], double *fGhost, const Particles &ghostParticles){
+    // Second-order weights when enabled, else the first-order estimator. The
+    // MFM effective faces (compEffectiveFace) always keep psijTilde_xi.
+#if SECOND_ORDER_GRADIENTS
+    auto *psiTildeGrad = psijTildeGrad_xi;
+    auto *psiTildeGradGhost = psijTildeGrad_xiGhosts;
+#else
+    auto *psiTildeGrad = psijTilde_xi;
+    auto *psiTildeGradGhost = psijTilde_xiGhosts;
+#endif
     for (int i=0; i<N; ++i) {
         for (int alpha = 0; alpha < DIM; ++alpha) {
             grad[i][alpha] = 0;
@@ -4283,7 +4495,7 @@ void Particles::gradient(double *f, double (*grad)[DIM], double *fGhost, const P
             if (wMFM > 0.){
                 for (int alpha = 0; alpha < DIM; ++alpha) {
                     grad[i][alpha] += wMFM * (f[jIdx] - f[i])
-                                      * psijTilde_xi[j + i * MAX_NUM_INTERACTIONS][alpha];
+                                      * psiTildeGrad[j + i * MAX_NUM_INTERACTIONS][alpha];
                 }
             }
             if (wSPH > 0.){
@@ -4311,7 +4523,7 @@ void Particles::gradient(double *f, double (*grad)[DIM], double *fGhost, const P
             if (wMFM > 0.){
                 for (int alpha = 0; alpha < DIM; ++alpha) {
                     grad[i][alpha] += wMFM * (fGhost[gIdx] - f[i])
-                                      * psijTilde_xiGhosts[j + i * MAX_NUM_GHOST_INTERACTIONS][alpha];
+                                      * psiTildeGradGhost[j + i * MAX_NUM_GHOST_INTERACTIONS][alpha];
                 }
             }
             if (wSPH > 0.){

@@ -8,6 +8,43 @@
 /// possible values 2 or 3 for 2D or 3D simulations
 #define DIM 2
 
+// Order of the least-squares polynomial gradient estimator:
+//   1 = linear-exact  (classic Hopkins-2015 MFM first moment matrix)
+//   2 = quadratic-exact (augmented with the symmetric Hessian terms)
+//   3 = cubic-exact     (also the third-derivative terms)
+#define GRADIENT_ORDER 1
+
+// The augmented moment-matrix machinery (separate psijTildeGrad array, PxP
+// solve, per-particle fallback) is shared by order 2 and 3; only the basis
+// size GRAD_MAT_DIM and the polynomial basis grow with the order.
+#define SECOND_ORDER_GRADIENTS (GRADIENT_ORDER >= 2)
+
+// Size of the least-squares moment matrix = number of polynomial basis terms
+// (no constant term). GRAD_MAT_DIM also sizes the LAPACK scratch buffers in
+// Helper, so it is always defined.
+//   order 1: DIM                                             (2D: 2,  3D: 3)
+//   order 2: + DIM*(DIM+1)/2          symmetric Hessian      (2D: 5,  3D: 9)
+//   order 3: + DIM*(DIM+1)*(DIM+2)/6  symmetric 3rd deriv    (2D: 9,  3D: 19)
+#if GRADIENT_ORDER == 1
+#define GRAD_MAT_DIM (DIM)
+#elif GRADIENT_ORDER == 2
+#define GRAD_MAT_DIM (DIM + (DIM*(DIM+1))/2)
+#else
+#define GRAD_MAT_DIM (DIM + (DIM*(DIM+1))/2 + (DIM*(DIM+1)*(DIM+2))/6)
+#endif
+
+// Conditioning guard for the augmented least-squares gradient fit
+// (inverseMatrixChecked). A one-sided free-surface stencil makes the moment
+// matrix near-singular without making it exactly singular, so LAPACK returns a
+// garbage inverse and the recovered gradient explodes -- most severely at
+// order 3, where the linear and cubic basis terms share odd parity and go
+// collinear on such stencils. When the Frobenius condition estimate
+// kappa_F = ||M||_F * ||M^-1||_F exceeds this threshold the fit is rejected and
+// the estimator falls back to the first-order weights for that particle. This
+// is the primary tuning knob: lower -> fall back sooner (safer, closer to
+// first order), higher -> keep the high-order fit on more marginal stencils.
+#define GRAD_MAT_COND_MAX 1.0e5
+
 /// define if periodic boundaries should be employed
 #define PERIODIC_BOUNDARIES 0
 

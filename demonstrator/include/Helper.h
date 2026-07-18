@@ -28,6 +28,17 @@ class Helper {
 
 public:
     void inverseMatrix(double *A, int N);
+
+    /**
+     * @brief In-place inverse of an NxN row-major matrix, reporting success.
+     *
+     * Same LAPACK path as inverseMatrix (dgetrf + dgetri) but returns false when
+     * either factorisation step reports INFO != 0 (singular / ill-posed matrix),
+     * so callers can fall back gracefully. Used by the second-order gradient
+     * estimator, whose PxP moment matrix can be singular when a particle has too
+     * few neighbours to constrain the quadratic fit. N must be <= GRAD_MAT_DIM.
+     */
+    bool inverseMatrixChecked(double *A, int N);
     static double dotProduct(double *a, double *b);
     static void crossProduct(double *a, double *b, double *crossProduct);
 
@@ -83,8 +94,10 @@ public:
 
 
 private:
-    double WORK[DIM*DIM];
-    int IPIV[DIM];
+    // Sized for the largest matrix inverted (the GRAD_MAT_DIM x GRAD_MAT_DIM
+    // second-order gradient moment matrix); LWORK = N*N is passed to dgetri.
+    double WORK[GRAD_MAT_DIM*GRAD_MAT_DIM];
+    int IPIV[GRAD_MAT_DIM];
 
 };
 
