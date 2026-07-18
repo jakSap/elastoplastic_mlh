@@ -42,6 +42,15 @@ public:
 
     // States WR, WL must be pre-rotated (vx = normal) and pre-boosted
     // SijRotR, SijRotL are rotated stress tensors [DIM*DIM], row-major
+#if ELASTIC_HLLC_EP
+    static void xSplitElasticHLLCEP(int matIdL, int matIdR,
+            double *WR, double *WL,
+            double *SijRotR, double *SijRotL,
+            double *totflux,
+            EquationOfState &MeshlessEOS,
+            double &Sstar);
+#endif
+
     static void xSplitElasticHLLC(int matIdL, int matIdR,
             double *WR, double *WL,
             double *SijRotR, double *SijRotL,

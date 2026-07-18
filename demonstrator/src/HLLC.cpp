@@ -591,6 +591,184 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
 
 }
 
+#if ELASTIC_HLLC_EP
+// MHLLCEP, elastic 3-wave case (Liu, Cheng & Liu 2019, Comput. Fluids 192).
+// Same x-split state and flux conventions as xSplitElasticHLLC below, but:
+//  - built on the total normal traction t = p - Sxx throughout, with the
+//    contact condition t*_L = t*_R (their eq. 40): pressure and deviatoric
+//    stress jump independently across the interface, so the caller must NOT
+//    add a dummy pressure;
+//  - Davis-type wave speeds clamped to bracket the interface (their eq. 44);
+//    the clamp guarantees the star corrections apply and adds dissipation
+//    for supersonic approach;
+//  - the star density and the hypo-elastic log closure for the star
+//    deviatoric stress, s*_xx = s_xx - 4/3 mu ln(rho*/rho) (their eq. 33),
+//    are computed as the hook for the plastic-wave cases (their sec. 3.5)
+//    and Godunov-consistent strain rates; in the pure elastic case they do
+//    not enter the flux (which follows from Rankine-Hugoniot alone).
+void HLLC::xSplitElasticHLLCEP(int matIdL, int matIdR,
+        double *WR, double *WL,
+        double *SijRotR, double *SijRotL,
+        double *totflux,
+        EquationOfState &MeshlessEOS,
+        double &Sstar){
+
+    const double vL = WL[2];
+    const double vR = WR[2];
+    const double SxxL = SijRotL[0], SxyL = SijRotL[1];
+    const double SxxR = SijRotR[0], SxyR = SijRotR[1];
+#if DIM == 3
+    const double SxzL = SijRotL[2];
+    const double SxzR = SijRotR[2];
+#endif
+    const double tL = WL[1] - SxxL;  // total normal traction left  (p - Sxx)
+    const double tR = WR[1] - SxxR;  // total normal traction right (p - Sxx)
+
+    // Elastic longitudinal wave speed. Without the dummy-pressure shift the
+    // EOS sees the raw (possibly tensile) pressure, where the bulk modulus
+    // can drop below zero; floor the squared speed at the shear contribution.
+#if EOS == 1 || EOS == 2
+    const double KL  = MeshlessEOS.EOSBulkModulus(matIdL, WL[0], WL[1]);
+    const double KR  = MeshlessEOS.EOSBulkModulus(matIdR, WR[0], WR[1]);
+    const double muL = MeshlessEOS.EOSShearModulus(matIdL);
+    const double muR = MeshlessEOS.EOSShearModulus(matIdR);
+#else
+    const double KL  = MeshlessEOS.EOSBulkModulus(WL[0], WL[1]);
+    const double KR  = MeshlessEOS.EOSBulkModulus(WR[0], WR[1]);
+    const double muL = 0.;
+    const double muR = 0.;
+#endif
+    const double aL = sqrt(std::max(KL + 4.0/3.0 * muL, 4.0/3.0 * muL) / WL[0]);
+    const double aR = sqrt(std::max(KR + 4.0/3.0 * muR, 4.0/3.0 * muR) / WR[0]);
+
+    // Davis wave speeds clamped to bracket the interface (eq. 44)
+    const double SL = std::min(std::min(vL - aL, vR - aR), 0.0);
+    const double SR = std::max(std::max(vL + aL, vR + aR), 0.0);
+    const double SLmvL = SL - vL;
+    const double SRmvR = SR - vR;
+
+    // Contact wave speed from traction continuity (eq. 40)
+    Sstar = (tR - tL + WL[0] * vL * SLmvL - WR[0] * vR * SRmvR)
+          / (WL[0] * SLmvL - WR[0] * SRmvR);
+
+    // Star density and log-closure star stress (eqs. 41-43); unused by the
+    // elastic flux, kept as the entry point for yielding / plastic waves.
+    // const double rhoStarL = WL[0] * SLmvL / (SL - Sstar);
+    // const double sxxStarL = SxxL - 4.0/3.0 * muL * log(rhoStarL / WL[0]);
+
+    // Flux at x/t = 0: sample the contact side, then the star correction
+    // F*K = FK + SK*(U*K - UK); the clamp makes SL <= 0 <= SR always hold.
+    // Flux layout: [mass, energy, vx-mom, vy-mom [, vz-mom]]
+    if (Sstar >= 0.0){
+        const double rhoLvL = WL[0] * vL;
+#if DIM == 3
+        const double v2L = WL[2]*WL[2] + WL[3]*WL[3] + WL[4]*WL[4];
+#else
+        const double v2L = WL[2]*WL[2] + WL[3]*WL[3];
+#endif
+#if EOS == 1 || EOS == 2
+        const double eL = MeshlessEOS.EOSInternalEnergy(matIdL, WL[0], WL[1])
+                            + 0.5 * v2L;
+#else
+        const double eL = MeshlessEOS.EOSInternalEnergy(WL[0], WL[1])
+                            + 0.5 * v2L;
+#endif
+#if MESHLESS_FINITE_MASS
+        totflux[0] = 0;
+        totflux[2] = tL;
+        totflux[3] = -SxyL;
+#if DIM == 3
+        totflux[4] = -SxzL;
+        totflux[1] = vL * tL - WL[3] * SxyL - WL[4] * SxzL;
+#else
+        totflux[1] = vL * tL - WL[3] * SxyL;
+#endif
+#else // MFV
+        totflux[0] = rhoLvL;
+        totflux[2] = rhoLvL * vL + tL;
+        totflux[3] = rhoLvL * WL[3] - SxyL;
+#if DIM == 3
+        totflux[4] = rhoLvL * WL[4] - SxzL;
+        totflux[1] = vL * (WL[1] + WL[0] * eL) - vL * SxxL - WL[3] * SxyL - WL[4] * SxzL;
+#else
+        totflux[1] = vL * (WL[1] + WL[0] * eL) - vL * SxxL - WL[3] * SxyL;
+#endif
+#endif // MESHLESS_FINITE_MASS
+        if (SL < 0.0){
+            const double starfac = SLmvL / (SL - Sstar);
+            const double rhoLSL = WL[0] * SL;
+            const double rhoLSLstarfac = rhoLSL * (starfac - 1.0);
+            const double rhoLSLSstarmvL = rhoLSL * (Sstar - vL) * starfac;
+#if MESHLESS_FINITE_MASS
+            totflux[2] += rhoLSLSstarmvL;
+#else // MFV
+            totflux[0] += rhoLSLstarfac;
+            totflux[2] += rhoLSLstarfac * vL + rhoLSLSstarmvL;
+            totflux[3] += rhoLSLstarfac * WL[3];
+#if DIM == 3
+            totflux[4] += rhoLSLstarfac * WL[4];
+#endif
+#endif // MESHLESS_FINITE_MASS
+            totflux[1] += rhoLSLstarfac * eL
+                        + rhoLSLSstarmvL * (Sstar + tL / (WL[0] * SLmvL));
+        }
+    } else {
+        const double rhoRvR = WR[0] * vR;
+#if DIM == 3
+        const double v2R = WR[2]*WR[2] + WR[3]*WR[3] + WR[4]*WR[4];
+#else
+        const double v2R = WR[2]*WR[2] + WR[3]*WR[3];
+#endif
+#if EOS == 1 || EOS == 2
+        const double eR = MeshlessEOS.EOSInternalEnergy(matIdR, WR[0], WR[1])
+                        + 0.5 * v2R;
+#else
+        const double eR = MeshlessEOS.EOSInternalEnergy(WR[0], WR[1])
+                        + 0.5 * v2R;
+#endif
+#if MESHLESS_FINITE_MASS
+        totflux[0] = 0;
+        totflux[2] = tR;
+        totflux[3] = -SxyR;
+#if DIM == 3
+        totflux[4] = -SxzR;
+        totflux[1] = vR * tR - WR[3] * SxyR - WR[4] * SxzR;
+#else
+        totflux[1] = vR * tR - WR[3] * SxyR;
+#endif
+#else // MFV
+        totflux[0] = rhoRvR;
+        totflux[2] = rhoRvR * vR + tR;
+        totflux[3] = rhoRvR * WR[3] - SxyR;
+#if DIM == 3
+        totflux[4] = rhoRvR * WR[4] - SxzR;
+        totflux[1] = vR * (WR[1] + WR[0] * eR) - vR * SxxR - WR[3] * SxyR - WR[4] * SxzR;
+#else
+        totflux[1] = vR * (WR[1] + WR[0] * eR) - vR * SxxR - WR[3] * SxyR;
+#endif
+#endif // MESHLESS_FINITE_MASS
+        if (SR > 0.0){
+            const double starfac = SRmvR / (SR - Sstar);
+            const double rhoRSR = WR[0] * SR;
+            const double rhoRSRstarfac = rhoRSR * (starfac - 1.0);
+            const double rhoRSRSstarmvR = rhoRSR * (Sstar - vR) * starfac;
+#if MESHLESS_FINITE_MASS
+            totflux[2] += rhoRSRSstarmvR;
+#else // MFV
+            totflux[0] += rhoRSRstarfac;
+            totflux[2] += rhoRSRstarfac * vR + rhoRSRSstarmvR;
+            totflux[3] += rhoRSRstarfac * WR[3];
+#if DIM == 3
+            totflux[4] += rhoRSRstarfac * WR[4];
+#endif
+#endif // MESHLESS_FINITE_MASS
+            totflux[1] += rhoRSRstarfac * eR
+                        + rhoRSRSstarmvR * (Sstar + tR / (WR[0] * SRmvR));
+        }
+    }
+}
+#endif // ELASTIC_HLLC_EP
+
 void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
         double *WR, double *WL,
         double *SijRotR, double *SijRotL,

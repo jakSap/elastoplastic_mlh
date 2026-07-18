@@ -300,6 +300,23 @@ void Riemann::HLLCFlux(double *Fij){
     }
 #endif
 
+#if ELASTIC_HLLC_EP
+#if ELASTIC_HLLC_EP == 2
+    // pair-radial variant: drop the tangential traction so the pair flux
+    // stays central (the face itself is already projected onto the line of
+    // centers via AM_RADIAL_FACE in compEffectiveFace)
+#if DIM == 2
+    SijRotL[1] = SijRotL[2] = SijRotR[1] = SijRotR[2] = 0.;
+#else
+    SijRotL[1] = SijRotL[2] = SijRotL[3] = SijRotL[6] = 0.;
+    SijRotR[1] = SijRotR[2] = SijRotR[3] = SijRotR[6] = 0.;
+#endif
+#endif
+    // traction-continuity solver; needs no dummy pressure by construction
+    double Sstar = 0.;
+    HLLC::xSplitElasticHLLCEP(matIdL, matIdR, WR, WL, SijRotR, SijRotL, Fij, MeshlessEOS, Sstar);
+#else // ELASTIC_HLLC_EP
+
 // As implemented by Hopkins in GIZMO, before the Riemann solver, add a dummy pressure to make the Riemann problem well-behaved.
 // Check if tension actually exists. We need effective pressure: p - S_rot^xx
 #if USE_DUMMY_PRESSURE
@@ -329,6 +346,7 @@ WL[1] += pDummy;
     }
 #endif
 // #endif
+#endif // ELASTIC_HLLC_EP
     // Back-rotate momentum fluxes to lab frame (Lambda^{-1} = Lambda^T)
 #if DIM == 2
     double FijBuf[DIM] = { Fij[2], Fij[3] };

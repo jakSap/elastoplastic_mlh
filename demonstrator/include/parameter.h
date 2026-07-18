@@ -233,6 +233,20 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #error "TENSILE_CORRECTION_3 is only implemented for DIM == 2 (analytic 2x2 eigendecomposition)."
 #endif
 
+// Elastic HLLC-EP (Liu, Cheng & Liu 2019, Comput. Fluids 192, "MHLLCEP",
+// elastic 3-wave case): solid HLLC built on the total normal traction
+// t = p - S_nn throughout, with the contact condition t*_L = t*_R -- p and
+// S_nn jump independently across the interface, so USE_DUMMY_PRESSURE is
+// bypassed on this path -- and Davis-type wave speeds clamped to bracket the
+// interface. The star density / deviatoric stress split (their eq. 33 log
+// closure) is the hook for the later plastic-wave cases.
+//   0 = off (existing solvers)
+//   1 = face-normal solver, replaces the solid HLLC on the ELASTIC path (A')
+//   2 = pair-radial (B'): additionally project the effective face onto the
+//       line of centers and drop the tangential traction, making every pair
+//       flux central -> L_z conserved to machine precision by construction
+#define ELASTIC_HLLC_EP 0
+
 // ---------------------------------------------------------------------------
 // Angular-momentum conservation (20260718 study, testcases/angular_momentum_study).
 // MFM pair momentum fluxes are generally NOT parallel to the pair's line of
@@ -266,7 +280,8 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define AM_METHOD 0
 
 #define AM_RADIAL_FLUX  (AM_METHOD == 1)
-#define AM_RADIAL_FACE  (AM_METHOD == 2 || AM_METHOD == 7)
+// ELASTIC_HLLC_EP == 2 reuses the radial face projection for its geometry
+#define AM_RADIAL_FACE  (AM_METHOD == 2 || AM_METHOD == 7 || ELASTIC_HLLC_EP == 2)
 #define AM_NO_TDISS     (AM_METHOD == 3 || AM_METHOD == 7)
 #define AM_SPIN         (AM_METHOD == 4)
 #define AM_GLOBAL_CORR  (AM_METHOD == 5)
@@ -332,6 +347,14 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #endif
 #if GIZMO_ELASTIC_FLUX && TENSILE_CORRECTION_3
 #error "GIZMO_ELASTIC_FLUX and TENSILE_CORRECTION_3 are mutually exclusive: stress damping is done in the elastic flux, not the Riemann solver."
+#endif
+
+// ELASTIC_HLLC_EP consistency guards
+#if ELASTIC_HLLC_EP && !(USE_HLLC && ELASTIC)
+#error "ELASTIC_HLLC_EP requires USE_HLLC == 1 and ELASTIC == 1."
+#endif
+#if ELASTIC_HLLC_EP && GIZMO_ELASTIC_FLUX
+#error "ELASTIC_HLLC_EP carries the deviatoric stress inside the Riemann solver; disable GIZMO_ELASTIC_FLUX."
 #endif
 
 // Use HLL solver
