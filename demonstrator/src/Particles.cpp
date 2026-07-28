@@ -27,6 +27,10 @@ static inline void buildGradBasis(double u, double v,
 #if GRADIENT_ORDER >= 3
     p[5] = u*u*u; p[6] = u*u*v; p[7] = u*v*v; p[8] = v*v*v;  // 3rd derivatives
 #endif
+#if GRADIENT_ORDER >= 4
+    p[9] = u*u*u*u; p[10] = u*u*u*v; p[11] = u*u*v*v;        // 4th derivatives
+    p[12] = u*v*v*v; p[13] = v*v*v*v;
+#endif
 #else
     p[0] = u;    p[1] = v;    p[2] = w;             // gradient
     p[3] = u*u;  p[4] = u*v;  p[5] = u*w;           // Hessian
@@ -35,8 +39,187 @@ static inline void buildGradBasis(double u, double v,
     p[9]  = u*u*u; p[10] = u*u*v; p[11] = u*u*w; p[12] = u*v*v; p[13] = u*v*w;  // 3rd derivatives
     p[14] = u*w*w; p[15] = v*v*v; p[16] = v*v*w; p[17] = v*w*w; p[18] = w*w*w;
 #endif
+#if GRADIENT_ORDER >= 4
+    p[19] = u*u*u*u; p[20] = u*u*u*v; p[21] = u*u*u*w; p[22] = u*u*v*v; p[23] = u*u*v*w;  // 4th derivatives
+    p[24] = u*u*w*w; p[25] = u*v*v*v; p[26] = u*v*v*w; p[27] = u*v*w*w; p[28] = u*w*w*w;
+    p[29] = v*v*v*v; p[30] = v*v*v*w; p[31] = v*v*w*w; p[32] = v*w*w*w; p[33] = w*w*w*w;
+#endif
 #endif
 }
+
+#if SURFACE_GRAD_BLEND
+// Smooth surface-fade weight for the higher-order reconstruction, from the
+// eigenvalue ratio s = lambda_min/lambda_max of the FIRST-ORDER moment matrix B
+// (row-major [DIM*DIM], symmetric PSD). s is dimensionless -> resolution-
+// independent, and evaluated at first order -> order-independent; it is ~1 in an
+// isotropic bulk stencil and -> 0 as the stencil goes one-sided at a free
+// surface. Returns a smoothstep ramp: 1 for s >= SURFACE_BLEND_S_HI (full
+// high-order), 0 for s <= SURFACE_BLEND_S_LO (pure first order).
+static inline double smoothstepClamped(double t){
+    if (t <= 0.) return 0.;
+    if (t >= 1.) return 1.;
+    return t*t*(3.0 - 2.0*t);
+}
+
+static inline double surfaceBlendWeight(const double *B, const double xiAsym_i){
+    // (1) second-moment shape: catches stencils that lost a whole direction
+    //     (flat free surface), but is BLIND TO CORNERS -- see parameter.h.
+    double smin, smax;
+#if DIM == 2
+    const double a = B[0], b = B[1], c = B[3];
+    const double tr = a + c;
+    const double disc = std::sqrt((a - c)*(a - c) + 4.0*b*b);
+    smax = 0.5*(tr + disc);
+    smin = 0.5*(tr - disc);
+#else
+    double eval[DIM], evec[DIM*DIM];
+    Helper::eigenDecompositionSym(B, eval, evec);   // eval ascending
+    smin = eval[0];
+    smax = eval[DIM-1];
+#endif
+    if (smax <= 0.) return 0.;
+    const double s = smin / smax;                   // in (0, 1]
+    const double wS = smoothstepClamped(
+        (s - SURFACE_BLEND_S_LO) / (SURFACE_BLEND_S_HI - SURFACE_BLEND_S_LO));
+
+    // (2) first-moment (centroid) asymmetry: nonzero for ANY one-sidedness and
+    //     largest exactly at corners, where (1) fails. Ramp runs the other way:
+    //     xi = 0 (symmetric bulk) -> 1, xi >= XI_HI (surface/corner) -> 0.
+    const double wX = smoothstepClamped(
+        (SURFACE_BLEND_XI_HI - xiAsym_i) / (SURFACE_BLEND_XI_HI - SURFACE_BLEND_XI_LO));
+
+    return wS < wX ? wS : wX;                        // most conservative wins
+}
+#endif // SURFACE_GRAD_BLEND
+
+#if POLY_RECONSTRUCTION_ACTIVE
+// Higher-than-linear part of the recovered Taylor polynomial at the h-scaled
+// offset (u, v[, w]) = dx/h: sum_{k>=DIM} cH[k-DIM] * p_k. Reuses
+// buildGradBasis so the coefficient ordering can never drift out of sync
+// with the least-squares fit.
+static inline double polyHigherEval(const double (&cH)[GRAD_NUM_HIGHER],
+                                    const double u, const double v
+#if DIM == 3
+                                    , const double w
+#endif
+                                    ){
+    double p[GRAD_MAT_DIM];
+    buildGradBasis(u, v,
+#if DIM == 3
+                   w,
+#endif
+                   p);
+    double q = 0.;
+    for (int k = DIM; k < GRAD_MAT_DIM; ++k) q += cH[k-DIM]*p[k];
+    return q;
+}
+
+// Accumulates the reconstruction increment f(x_i + dx) - f_i into dst: the
+// (slope-limited) linear part, THEN the higher-order Taylor terms, as two
+// separate additions -- floating-point addition is not associative, and
+// matching this order to a hand-written "dst += linear; ...; dst += higher;"
+// two-statement sequence keeps every call site bit-reproducible regardless
+// of how the helper is invoked. Call sites use the APPLY_GRADIENTS macro
+// below, which degrades to the plain "dst += dotProduct(grad, dx)" linear
+// extrapolation when the flag is off.
+static inline void applyGradients(double &dst, const double *grad,
+                                  const double (&cH)[GRAD_NUM_HIGHER],
+                                  const double hInv, const double *dx){
+    dst += grad[0]*dx[0] + grad[1]*dx[1]
+#if DIM == 3
+         + grad[2]*dx[2]
+#endif
+    ;
+    dst += polyHigherEval(cH, dx[0]*hInv, dx[1]*hInv
+#if DIM == 3
+                          , dx[2]*hInv
+#endif
+           );
+}
+#endif // POLY_RECONSTRUCTION_ACTIVE
+
+#if SURFACE_GRAD_BLEND
+// Face-weighted reconstruction increment, written as
+//     first-order reconstruction  +  w_ij * (high-order correction)
+// so w_ij = 0 reproduces the pure FIRST-ORDER face state exactly and w_ij = 1 the
+// pure high-order one. Applied with the same w_ij on BOTH sides of a face, this
+// removes the mixed-order face: fading only particle i (per-particle w_i) still
+// let its bulk neighbour j push a full high-order state across the shared face,
+// so the surface never reduced to first order. Two separate `dst +=` keep the
+// accumulation order stable, as in applyGradients.
+static inline void applyGradientsFace(double &dst,
+                                      const double *gradFO, const double *gradHi,
+#if POLY_RECONSTRUCTION_ACTIVE
+                                      const double (&cH)[GRAD_NUM_HIGHER],
+                                      const double hInv,
+#endif
+                                      const double w, const double *dx){
+    dst += gradFO[0]*dx[0] + gradFO[1]*dx[1]
+#if DIM == 3
+         + gradFO[2]*dx[2]
+#endif
+    ;
+    double corr = (gradHi[0]-gradFO[0])*dx[0] + (gradHi[1]-gradFO[1])*dx[1]
+#if DIM == 3
+                + (gradHi[2]-gradFO[2])*dx[2]
+#endif
+    ;
+#if POLY_RECONSTRUCTION_ACTIVE
+    corr += polyHigherEval(cH, dx[0]*hInv, dx[1]*hInv
+#if DIM == 3
+                           , dx[2]*hInv
+#endif
+            );
+#endif
+    dst += w*corr;
+}
+#endif // SURFACE_GRAD_BLEND
+#endif
+
+// Accumulates the reconstruction increment at offset dx from a particle into
+// dst: polynomial when active (cH = per-field higher-order coefficients,
+// hInv = 1/sml of that particle), plain gradient extrapolation otherwise. A
+// macro so the cH/hInv arguments vanish entirely from the expansion when the
+// machinery is compiled out -- they need not even be declared at a call site
+// that only builds with the plain-gradient expansion (see the "COMPILES
+// FINE" check on the pattern). APPLY_GRADIENTS gates on the primitive fields
+// (rho/P/v); APPLY_GRADIENTS_S gates on the stress fields, which only carry a
+// polynomial on the solid-HLLC path (POLY_RECONSTRUCTION_STRESS_ACTIVE
+// excludes GIZMO_ELASTIC_FLUX).
+// Array selectors: only a face-blend build has the separate FO/Hi gradient sets;
+// otherwise both slots resolve to the single existing gradient array, so the
+// call sites below are identical in every configuration.
+#if SURFACE_GRAD_BLEND && SECOND_ORDER_GRADIENTS
+#define GRAD_FO(f) f##GradFO
+#define GRAD_HI(f) f##GradHi
+#else
+#define GRAD_FO(f) f##Grad
+#define GRAD_HI(f) f##Grad
+#endif
+
+#if SURFACE_GRAD_BLEND && SECOND_ORDER_GRADIENTS
+#if POLY_RECONSTRUCTION_ACTIVE
+#define APPLY_GRADIENTS_F(dst, gradFO, gradHi, cH, hInv, w, dx) \
+        applyGradientsFace(dst, gradFO, gradHi, cH, hInv, w, dx)
+#else
+#define APPLY_GRADIENTS_F(dst, gradFO, gradHi, cH, hInv, w, dx) \
+        applyGradientsFace(dst, gradFO, gradHi, w, dx)
+#endif
+#elif POLY_RECONSTRUCTION_ACTIVE
+#define APPLY_GRADIENTS_F(dst, gradFO, gradHi, cH, hInv, w, dx) applyGradients(dst, gradHi, cH, hInv, dx)
+#else
+#define APPLY_GRADIENTS_F(dst, gradFO, gradHi, cH, hInv, w, dx) dst += Helper::dotProduct(gradHi, dx)
+#endif
+
+#if POLY_RECONSTRUCTION_ACTIVE
+#define APPLY_GRADIENTS(dst, grad, cH, hInv, dx) applyGradients(dst, grad, cH, hInv, dx)
+#else
+#define APPLY_GRADIENTS(dst, grad, cH, hInv, dx) dst += Helper::dotProduct(grad, dx)
+#endif
+#if POLY_RECONSTRUCTION_STRESS_ACTIVE
+#define APPLY_GRADIENTS_S(dst, grad, cH, hInv, dx) applyGradients(dst, grad, cH, hInv, dx)
+#else
+#define APPLY_GRADIENTS_S(dst, grad, cH, hInv, dx) dst += Helper::dotProduct(grad, dx)
 #endif
 
 Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
@@ -131,6 +314,36 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     fce = new double[numParticles];
     for (int i=0; i<numParticles; ++i) fce[i] = 1.;
 #endif
+#if SURFACE_GRAD_BLEND
+    // First-moment stencil asymmetry, filled by compOmega; the corner-aware half
+    // of the SURFACE_GRAD_BLEND detector. Allocated for every Particles object
+    // because compOmega runs on all of them.
+    xiAsym = new double[numParticles]();
+#if SECOND_ORDER_GRADIENTS
+    rhoGradFO = new double[numParticles][DIM]();
+    vxGradFO  = new double[numParticles][DIM]();
+    vyGradFO  = new double[numParticles][DIM]();
+    PGradFO   = new double[numParticles][DIM]();
+    rhoGradHi = new double[numParticles][DIM]();
+    vxGradHi  = new double[numParticles][DIM]();
+    vyGradHi  = new double[numParticles][DIM]();
+    PGradHi   = new double[numParticles][DIM]();
+#if DIM == 3
+    vzGradFO  = new double[numParticles][DIM]();
+    vzGradHi  = new double[numParticles][DIM]();
+#endif
+#if ELASTIC
+    SxxGradFO = new double[numParticles][DIM]();
+    SxyGradFO = new double[numParticles][DIM]();
+    SyyGradFO = new double[numParticles][DIM]();
+#if DIM == 3
+    SxzGradFO = new double[numParticles][DIM]();
+    SyzGradFO = new double[numParticles][DIM]();
+    SzzGradFO = new double[numParticles][DIM]();
+#endif
+#endif
+#endif
+#endif
 #if EXPLICIT_VOL_INTEGRATION
     rhoExplicit = new double[numParticles]();
     rhoKernel   = new double[numParticles]();
@@ -149,6 +362,30 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         psijTilde_xi = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
 #if SECOND_ORDER_GRADIENTS
         psijTildeGrad_xi = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
+#if SURFACE_GRAD_BLEND
+        gradBlend = new double[numParticles]();
+#endif
+#if POLY_RECONSTRUCTION_ACTIVE
+        polyOK = new bool[numParticles]();
+        gradMatInv = new double[(size_t)numParticles*GRAD_MAT_DIM*GRAD_MAT_DIM];
+        rhoPolyH = new double[numParticles][GRAD_NUM_HIGHER]();
+        PPolyH   = new double[numParticles][GRAD_NUM_HIGHER]();
+        vxPolyH  = new double[numParticles][GRAD_NUM_HIGHER]();
+        vyPolyH  = new double[numParticles][GRAD_NUM_HIGHER]();
+#if DIM == 3
+        vzPolyH  = new double[numParticles][GRAD_NUM_HIGHER]();
+#endif
+#if POLY_RECONSTRUCTION_STRESS_ACTIVE
+        SxxPolyH = new double[numParticles][GRAD_NUM_HIGHER]();
+        SxyPolyH = new double[numParticles][GRAD_NUM_HIGHER]();
+        SyyPolyH = new double[numParticles][GRAD_NUM_HIGHER]();
+#if DIM == 3
+        SxzPolyH = new double[numParticles][GRAD_NUM_HIGHER]();
+        SyzPolyH = new double[numParticles][GRAD_NUM_HIGHER]();
+        SzzPolyH = new double[numParticles][GRAD_NUM_HIGHER]();
+#endif
+#endif // POLY_RECONSTRUCTION_STRESS_ACTIVE
+#endif // POLY_RECONSTRUCTION_ACTIVE
 #endif
         Aij = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
         WijL = new double[numParticles*MAX_NUM_INTERACTIONS][DIM+2];
@@ -159,8 +396,21 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         mF = new double[numParticles];
         vF = new double[numParticles][DIM];
         eF = new double[numParticles];
-#if AM_TORQUE_TRACK
+#if TORQUE_ACCUM
         tqF = new double[numParticles];
+#endif
+#if ELASTIC_FACE_MODE == 1
+        elasticB = new double[numParticles][DIM*DIM];
+#endif
+#if TORQUE_DIAG
+        tqHLLC    = new double[numParticles];
+        tqDev     = new double[numParticles];
+        tqWtT     = new double[numParticles];
+        tqWtR     = new double[numParticles];
+        consResid = new double[numParticles];
+        for (int i=0; i<numParticles; ++i){
+            tqHLLC[i] = tqDev[i] = tqWtT[i] = tqWtR[i] = consResid[i] = 0.;
+        }
 #endif
 #if AM_SPIN
         spin = new double[numParticles];
@@ -216,6 +466,22 @@ Particles::~Particles() {
     delete[] omega;
 #if SURFACE_VOLCORR
     delete[] fce;
+#endif
+#if SURFACE_GRAD_BLEND
+    delete[] xiAsym;
+#if SECOND_ORDER_GRADIENTS
+    delete[] rhoGradFO; delete[] vxGradFO; delete[] vyGradFO; delete[] PGradFO;
+    delete[] rhoGradHi; delete[] vxGradHi; delete[] vyGradHi; delete[] PGradHi;
+#if DIM == 3
+    delete[] vzGradFO; delete[] vzGradHi;
+#endif
+#if ELASTIC
+    delete[] SxxGradFO; delete[] SxyGradFO; delete[] SyyGradFO;
+#if DIM == 3
+    delete[] SxzGradFO; delete[] SyzGradFO; delete[] SzzGradFO;
+#endif
+#endif
+#endif
 #endif
 #if EXPLICIT_VOL_INTEGRATION
     delete[] rhoExplicit;
@@ -283,6 +549,30 @@ Particles::~Particles() {
         delete[] psijTilde_xi;
 #if SECOND_ORDER_GRADIENTS
         delete[] psijTildeGrad_xi;
+#if SURFACE_GRAD_BLEND
+        delete[] gradBlend;
+#endif
+#if POLY_RECONSTRUCTION_ACTIVE
+        delete[] polyOK;
+        delete[] gradMatInv;
+        delete[] rhoPolyH;
+        delete[] PPolyH;
+        delete[] vxPolyH;
+        delete[] vyPolyH;
+#if DIM == 3
+        delete[] vzPolyH;
+#endif
+#if POLY_RECONSTRUCTION_STRESS_ACTIVE
+        delete[] SxxPolyH;
+        delete[] SxyPolyH;
+        delete[] SyyPolyH;
+#if DIM == 3
+        delete[] SxzPolyH;
+        delete[] SyzPolyH;
+        delete[] SzzPolyH;
+#endif
+#endif // POLY_RECONSTRUCTION_STRESS_ACTIVE
+#endif // POLY_RECONSTRUCTION_ACTIVE
 #endif
         delete[] WijL;
         delete[] WijR;
@@ -291,8 +581,18 @@ Particles::~Particles() {
         delete[] mF;
         delete[] vF;
         delete[] eF;
-#if AM_TORQUE_TRACK
+#if TORQUE_ACCUM
         delete[] tqF;
+#endif
+#if ELASTIC_FACE_MODE == 1
+        delete[] elasticB;
+#endif
+#if TORQUE_DIAG
+        delete[] tqHLLC;
+        delete[] tqDev;
+        delete[] tqWtT;
+        delete[] tqWtR;
+        delete[] consResid;
 #endif
 #if AM_SPIN
         delete[] spin;
@@ -380,7 +680,14 @@ void Particles::computeFabMonaghan(){
 // Port of GIZMO solids/elastic_stress_tensor_force.h (eigenvalue branch), in the
 // demonstrator's lab frame. Computed once per pair (i<jj); the flux-symmetry copy
 // negates it for jj, matching GIZMO's antisymmetric +i/-j application.
-void Particles::addGizmoElasticStressFlux(int i, int jj, const double &f, double *Fout){
+void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f, double *Fout
+#if RECON_FACE_TRACTION
+                                          , const double *SfaceI, const double *SfaceJ
+#endif
+                                          ){
+#if !RECON_FACE_DV
+    (void)ii;
+#endif
 #if DIM == 2
     const double dx = x[i] - x[jj], dy = y[i] - y[jj];
     const double r2 = dx*dx + dy*dy;
@@ -391,7 +698,35 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, const double &f, double
     const double dwk = std::fabs(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, sml[jj]));
     const double rhoi = rho[i], rhoj = rho[jj];
     const double FNormT = m[i]*m[jj]*dwk / (rhoi*rhoj);
+#if ELASTIC_FACE_MODE == 0
     const double FVec[2] = { FNormT*dx*rinv, FNormT*dy*rinv };
+#elif ELASTIC_FACE_MODE == 1
+    // Bonet-Lok corrected traction area. The correction matrix is averaged over
+    // the pair so it is invariant under i<->jj: that keeps the pair force exactly
+    // antisymmetric, hence linear momentum machine-exact, which a one-sided B_i
+    // would destroy. NOTE only the traction is corrected -- FNormT below still
+    // feeds wt_r/wt_t as a scalar, so the longitudinal channel stays radial and
+    // therefore torque-free.
+    const double FRaw[2] = { FNormT*dx*rinv, FNormT*dy*rinv };
+    const double b0 = 0.5*(elasticB[i][0] + elasticB[jj][0]);
+    const double b1 = 0.5*(elasticB[i][1] + elasticB[jj][1]);
+    const double b2 = 0.5*(elasticB[i][2] + elasticB[jj][2]);
+    const double b3 = 0.5*(elasticB[i][3] + elasticB[jj][3]);
+    const double FVec[2] = { b0*FRaw[0] + b1*FRaw[1],
+                             b2*FRaw[0] + b3*FRaw[1] };
+#else // ELASTIC_FACE_MODE == 2
+    // The MFM face itself: M = -2 V_tot I identically, so isotropy is exact
+    // rather than restored by an inverse.
+    // SIGN: psijTilde_xi[j](x_i) = B_i (x_j - x_i) psi_j with B = E^-1 SPD
+    // (Particles.cpp:2809), and BOTH terms of Aij = Vi psij(xi) - Vj psii(xj)
+    // therefore point from i towards j -- i.e. along -dx, opposite to the raw
+    // area FNormT*dx*rinv of mode 0. Without the minus the deviatoric force is
+    // anti-restoring and the body flies apart (measured: rotating disc disrupts
+    // by t~0.9). T1 cannot catch this: it tests the torque, which is invariant
+    // under a global sign flip, and the earlier 288-particle check ran
+    // pre-contact where S ~ 0.
+    const double FVec[2] = { -Aij[ii][0], -Aij[ii][1] };
+#endif
 
     // mean-velocity interface (the -0.5 carries GIZMO's required sign)
     const double v_int[2] = { -0.5*(vx[i]+vx[jj]), -0.5*(vy[i]+vy[jj]) };
@@ -422,14 +757,26 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, const double &f, double
 #else
     const double wt_t = (denT > 0.) ? rhoi*cTi*rhoj*cTj / denT * FNormT : 0.;
 #endif
+#if RECON_FACE_DV
+    // wt_rt is the fused radial coefficient of the raw-dv form; the RECON_FACE_DV
+    // path uses the explicitly decomposed wt_r/wt_t channels instead.
+#else
     const double wt_rt = (wt_r - wt_t) * vdotr * rinv * rinv;
+#endif
 
     // deviatoric stress force: project face onto stress eigenvectors, damp tensile
     // (positive) principal components by (1 - f); summed over both sides at wt=-0.5
     double cmag[2] = {0., 0.};
     for (int side = 0; side < 2; ++side){
         const int p = (side == 0) ? i : jj;
+#if RECON_FACE_TRACTION
+        // per-side reconstructed face stress (i-side = SfaceI, j-side = SfaceJ)
+        const double *Sf = (side == 0) ? SfaceI : SfaceJ;
+        double a = Sf[0], b = Sf[1], c = Sf[2];
+        (void)p;   // p only needed for the raw-stress / damage lookups below
+#else
         double a = Sxx[p], b = Sxy[p], c = Syy[p];
+#endif
 #if FRAGMENTATION && DAMAGE_ACTS_ON_S
         // Grady-Kipp: damaged material carries less deviatoric stress (matches the
         // solid-HLLC path in Riemann.cpp). Pressure damage flows through the solver.
@@ -456,9 +803,84 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, const double &f, double
             cmag[1] += prefac * e[kk][1];
         }
     }
+#if TORQUE_DIAG
+    // Deviatoric traction, captured before the dissipation terms touch cmag.
+    const double cDev[2] = { cmag[0], cmag[1] };
+#endif
     // HLL-type dissipation of velocity differences (longitudinal + transverse shear wave)
+#if RECON_FACE_DV
+    // Reconstructed face jump: WijR[ii] is particle i extrapolated to the shared
+    // face point xij, WijL[ii] is particle jj extrapolated to the same point.
+    // Both carry the same vFrame, so it cancels in the difference. For any linear
+    // velocity field (rigid rotation included) the two agree exactly -> zero jump
+    // -> zero dissipation, which is what kills the spurious rotational braking.
+    // Written in the explicitly decomposed form wt_r*dv_radial + wt_t*dv_transverse
+    // (algebraically identical to the wt_rt form below when both use the same dv),
+    // so the two channels can be sourced independently.
+    {
+        const double dvF[2] = { WijR[ii][2] - WijL[ii][2],
+                                WijR[ii][3] - WijL[ii][3] };
+        const double projF = (dvF[0]*dx + dvF[1]*dy) * rinv * rinv;
+#if RECON_FACE_DV == 2
+        const double projR = projF;                 // longitudinal on the jump too
+#else
+        const double projR = vdotr * rinv * rinv;   // longitudinal keeps raw form
+#endif
+        cmag[0] -= wt_r*projR*dx + wt_t*(dvF[0] - projF*dx);
+        cmag[1] -= wt_r*projR*dy + wt_t*(dvF[1] - projF*dy);
+    }
+#else
     cmag[0] -= wt_rt*dx + wt_t*dv[0];
     cmag[1] -= wt_rt*dy + wt_t*dv[1];
+#endif
+#if TORQUE_DIAG
+    // Channel torque budget. The three pieces are RECOMPUTED here rather than
+    // factored out of the statements above, so the flux math stays byte-for-byte
+    // what it was and TORQUE_DIAG cannot perturb a result. The price is that the
+    // channels sum to cmag only up to round-off, which is what the tqF
+    // cross-check tolerance accounts for.
+    {
+        double cWtR[2], cWtT[2];
+#if RECON_FACE_DV
+        const double dvFd[2] = { WijR[ii][2] - WijL[ii][2],
+                                 WijR[ii][3] - WijL[ii][3] };
+        const double projFd = (dvFd[0]*dx + dvFd[1]*dy) * rinv * rinv;
+#if RECON_FACE_DV == 2
+        const double projRd = projFd;
+#else
+        const double projRd = vdotr * rinv * rinv;
+#endif
+        cWtR[0] = -wt_r*projRd*dx;
+        cWtR[1] = -wt_r*projRd*dy;
+        cWtT[0] = -wt_t*(dvFd[0] - projFd*dx);
+        cWtT[1] = -wt_t*(dvFd[1] - projFd*dy);
+#else
+        // Raw path: wt_rt*(dx,dy) is already radial, and wt_t*dv splits into a
+        // radial and a transverse part. Group everything parallel to r_ij into
+        // the longitudinal channel so the two channels mean the same thing in
+        // both builds.
+        const double projRaw = vdotr * rinv * rinv;
+        cWtR[0] = -(wt_rt*dx + wt_t*projRaw*dx);
+        cWtR[1] = -(wt_rt*dy + wt_t*projRaw*dy);
+        cWtT[0] = -wt_t*(dv[0] - projRaw*dx);
+        cWtT[1] = -wt_t*(dv[1] - projRaw*dy);
+#endif
+        // The elastic force enters Fout as -cmag (see the sign comment below),
+        // so a channel contributing c to cmag contributes -c to the flux. tqF's
+        // convention is tq = dx*Fflux_y - dy*Fflux_x, hence the leading minus.
+        // Half of each pair's torque goes to each partner, exactly as in
+        // collectFluxes, so the per-particle field is origin-independent and
+        // sums to the true total.
+        auto tqdAccum = [&](double *arr, const double *c){
+            const double tqPair = -(dx*c[1] - dy*c[0]);
+            arr[i]  += 0.5*tqPair;
+            arr[jj] += 0.5*tqPair;
+        };
+        tqdAccum(tqDev, cDev);
+        tqdAccum(tqWtT, cWtT);
+        tqdAccum(tqWtR, cWtR);   // must come out at round-off: cWtR || r_ij
+    }
+#endif
     const double cmag_E = cmag[0]*v_int[0] + cmag[1]*v_int[1];
 
     // demonstrator convention: dp_i/dt = -sum_j Fij, so add the negative of GIZMO's force
@@ -499,7 +921,12 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, const double &f, double
     const double wt_r = rhoi*ci*rhoj*cj / (rhoi*ci + rhoj*cj) * FNormT;
     const double denT = rhoi*cTi + rhoj*cTj;
     const double wt_t = (denT > 0.) ? rhoi*cTi*rhoj*cTj / denT * FNormT : 0.;
+#if RECON_FACE_DV
+    // wt_rt is the fused radial coefficient of the raw-dv form; the RECON_FACE_DV
+    // path uses the explicitly decomposed wt_r/wt_t channels instead.
+#else
     const double wt_rt = (wt_r - wt_t) * vdotr * rinv * rinv;
+#endif
 
     // deviatoric stress force: project face onto stress eigenvectors, damp tensile
     // (positive) principal components by (1 - f); summed over both sides at wt=-0.5.
@@ -530,9 +957,27 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, const double &f, double
         }
     }
     // HLL-type dissipation of velocity differences (longitudinal + transverse shear wave)
+#if RECON_FACE_DV
+    // see the DIM == 2 branch for the rationale (reconstructed face jump)
+    {
+        const double dvF[3] = { WijR[ii][2] - WijL[ii][2],
+                                WijR[ii][3] - WijL[ii][3],
+                                WijR[ii][4] - WijL[ii][4] };
+        const double projF = (dvF[0]*dx + dvF[1]*dy + dvF[2]*dz) * rinv * rinv;
+#if RECON_FACE_DV == 2
+        const double projR = projF;                 // longitudinal on the jump too
+#else
+        const double projR = vdotr * rinv * rinv;   // longitudinal keeps raw form
+#endif
+        cmag[0] -= wt_r*projR*dx + wt_t*(dvF[0] - projF*dx);
+        cmag[1] -= wt_r*projR*dy + wt_t*(dvF[1] - projF*dy);
+        cmag[2] -= wt_r*projR*dz + wt_t*(dvF[2] - projF*dz);
+    }
+#else
     cmag[0] -= wt_rt*dx + wt_t*dv[0];
     cmag[1] -= wt_rt*dy + wt_t*dv[1];
     cmag[2] -= wt_rt*dz + wt_t*dv[2];
+#endif
     const double cmag_E = cmag[0]*v_int[0] + cmag[1]*v_int[1] + cmag[2]*v_int[2];
 
     // demonstrator convention: dp_i/dt = -sum_j Fij, so add the negative of GIZMO's force
@@ -2203,11 +2648,13 @@ void Particles::updateAllSmoothingLengths(const Particles &ghostParticles){
 void Particles::compOmega(int i){
     const double hi = sml[i];
     double omg = 0.;
-#if SURFACE_VOLCORR
+#if SURFACE_VOLCORR || SURFACE_GRAD_BLEND
     // Asymmetry of the neighbour kernel sum: S_i = sum_j W_ij * (x_i - x_j).
     // Zero in a symmetric (bulk) stencil; nonzero at a free surface where
     // half the support is empty. xi_i = |S_i| / (h_i Omega_i) is the
-    // dimensionless closure asymmetry from Reinhardt & Stadel 2017.
+    // dimensionless closure asymmetry from Reinhardt & Stadel 2017. Used by
+    // SURFACE_VOLCORR (volume closure) and, independently, as the corner-aware
+    // surface detector of SURFACE_GRAD_BLEND -- hence computed for either flag.
     double sx = 0., sy = 0.;
 #if DIM == 3
     double sz = 0.;
@@ -2226,7 +2673,7 @@ void Particles::compOmega(int i){
         double r = sqrt(dSqr);
         double wij = kernel(r, hi);
         omg += wij;
-#if SURFACE_VOLCORR
+#if SURFACE_VOLCORR || SURFACE_GRAD_BLEND
         sx += wij * dx;
         sy += wij * dy;
 #if DIM == 3
@@ -2238,13 +2685,18 @@ void Particles::compOmega(int i){
     if (omega[i] < 0){
         Logger(WARN) << "Negative Omega encountered, i = " << i;
     }
-#if SURFACE_VOLCORR
+#if SURFACE_VOLCORR || SURFACE_GRAD_BLEND
     // Self-contribution to S_i is zero (r_ii = 0), so no diagonal term.
     double S2 = sx*sx + sy*sy;
 #if DIM == 3
     S2 += sz*sz;
 #endif
     double xi_asym = sqrt(S2) / (hi * omega[i]);
+#endif
+#if SURFACE_GRAD_BLEND
+    xiAsym[i] = xi_asym;
+#endif
+#if SURFACE_VOLCORR
     double fce_raw = SURFACE_VOLCORR_A - SURFACE_VOLCORR_B * xi_asym;
     if (fce_raw > 1.0) fce_raw = 1.0;
     if (fce_raw < SURFACE_VOLCORR_FLOOR) fce_raw = SURFACE_VOLCORR_FLOOR;
@@ -2323,6 +2775,14 @@ void Particles::compPsijTilde(Helper &helper){
 #endif
 #endif
 
+#if SECOND_ORDER_GRADIENTS && SURFACE_GRAD_BLEND
+        // Surface-fade weight from the first-order matrix B, captured BEFORE the
+        // in-place inverse below overwrites it. Order- and resolution-independent
+        // (see SURFACE_GRAD_BLEND in parameter.h). Overwritten with the actually
+        // applied weight (0 on the singular fallback) in the block further down.
+        gradBlend[i] = surfaceBlendWeight(B, xiAsym[i]);
+#endif
+
         helper.inverseMatrix(B, DIM);
 
 #if OUTPUT_CONDITION_NUMBER
@@ -2390,6 +2850,15 @@ void Particles::compPsijTilde(Helper &helper){
             }
             useSecond = helper.inverseMatrixChecked(Mmat, GRAD_MAT_DIM);
         }
+#if SURFACE_GRAD_BLEND
+        // psijTildeGrad_xi stays PURE high-order here. The surface fade is NOT
+        // applied per particle any more: it is applied per FACE in
+        // compRiemannStatesLR as w_ij = min(w_i, w_j), because a face has two
+        // sides -- fading only particle i still let its bulk neighbour j push a
+        // full high-order state across the shared face, which is why the surface
+        // never reduced to first order. gradBlend[i] just carries w_i to the face.
+        const double w = useSecond ? gradBlend[i] : 0.;
+        gradBlend[i] = w;
         if (useSecond){
             for (int j=0; j<noi[i]; ++j){
                 iP = nnl[j+i*MAX_NUM_INTERACTIONS];
@@ -2417,17 +2886,270 @@ void Particles::compPsijTilde(Helper &helper){
                     psijTildeGrad_xi[j+i*MAX_NUM_INTERACTIONS][alpha]
                         = psijTilde_xi[j+i*MAX_NUM_INTERACTIONS][alpha];
         }
+#if POLY_RECONSTRUCTION_ACTIVE
+        // polyOK only tracks whether M was invertible; the surface fade is
+        // applied per face (w_ij), so the coefficients are stored UNSCALED.
+        polyOK[i] = useSecond;
+        if (useSecond){
+            double *dst = &gradMatInv[(size_t)i*GRAD_MAT_DIM*GRAD_MAT_DIM];
+            for (int k=0; k<GRAD_MAT_DIM*GRAD_MAT_DIM; ++k) dst[k] = Mmat[k];
+        }
+#endif
+#else // !SURFACE_GRAD_BLEND: original GRAD_MAT_COND_MAX hard switch
+        if (useSecond){
+            for (int j=0; j<noi[i]; ++j){
+                iP = nnl[j+i*MAX_NUM_INTERACTIONS];
+                double dSqr = pow(x[i]-x[iP],2) + pow(y[i]-y[iP],2);
+#if DIM == 3
+                dSqr += pow(z[i]-z[iP],2);
+#endif
+                double r = sqrt(dSqr);
+                double psij_xi = kernel(r, hi)/omega[i];
+                buildGradBasis((x[iP]-x[i])*sInv, (y[iP]-y[i])*sInv,
+#if DIM == 3
+                               (z[iP]-z[i])*sInv,
+#endif
+                               pbasis);
+                for (int alpha=0; alpha<DIM; ++alpha){
+                    double val = 0.;
+                    for (int k=0; k<GRAD_MAT_DIM; ++k)
+                        val += Mmat[alpha*GRAD_MAT_DIM+k]*pbasis[k];
+                    psijTildeGrad_xi[j+i*MAX_NUM_INTERACTIONS][alpha] = sInv*val*psij_xi;
+                }
+            }
+        } else {
+            for (int j=0; j<noi[i]; ++j)
+                for (int alpha=0; alpha<DIM; ++alpha)
+                    psijTildeGrad_xi[j+i*MAX_NUM_INTERACTIONS][alpha]
+                        = psijTilde_xi[j+i*MAX_NUM_INTERACTIONS][alpha];
+        }
+#if POLY_RECONSTRUCTION_ACTIVE
+        // Keep M^-1 for compPolyCoefficients; kappa-fallback particles get
+        // polyOK = false and thus zero higher-order Taylor coefficients.
+        polyOK[i] = useSecond;
+        if (useSecond){
+            double *dst = &gradMatInv[(size_t)i*GRAD_MAT_DIM*GRAD_MAT_DIM];
+            for (int k=0; k<GRAD_MAT_DIM*GRAD_MAT_DIM; ++k) dst[k] = Mmat[k];
+        }
+#endif
+#endif // SURFACE_GRAD_BLEND
 #endif
     }
 }
 
+#if SURFACE_GRAD_BLEND && SECOND_ORDER_GRADIENTS
+void Particles::compFirstOrderGradients(){
+    // On entry the main arrays (rhoGrad, ..., SxxGrad, ...) hold the LIMITED
+    // PURE HIGH-ORDER gradients. Here we (a) build the matching first-order set
+    // with the same estimator and limiter, (b) stash the high-order set for the
+    // face reconstruction, and (c) collapse the main arrays to the per-particle
+    // effective gradient  w_i*Hi + (1-w_i)*FO.
+    //
+    // (c) is essential: the face is not the only gradient consumer. The MUSCL
+    // half-step and integrateStressTensor (strain rate + stress advection) also
+    // read these arrays, and if they stay pure high-order a surface particle
+    // still evolves with a high-order gradient -- so w=0 would NOT reproduce
+    // first order. With this collapse it provably does.
+    gradient(rho, rhoGradFO, true);
+    gradient(vx, vxGradFO, true);
+    gradient(vy, vyGradFO, true);
+#if DIM == 3
+    gradient(vz, vzGradFO, true);
+#endif
+    gradient(P, PGradFO, true);
+#if ELASTIC
+    gradient(Sxx, SxxGradFO, true);
+    gradient(Sxy, SxyGradFO, true);
+    gradient(Syy, SyyGradFO, true);
+#if DIM == 3
+    gradient(Sxz, SxzGradFO, true);
+    gradient(Syz, SyzGradFO, true);
+    gradient(Szz, SzzGradFO, true);
+#endif
+#endif
+#if SLOPE_LIMITING
+    slopeLimiter(rho, rhoGradFO, nullptr, nullptr);
+    slopeLimiter(vx, vxGradFO, nullptr, nullptr);
+    slopeLimiter(vy, vyGradFO, nullptr, nullptr);
+#if DIM == 3
+    slopeLimiter(vz, vzGradFO, nullptr, nullptr);
+#endif
+    slopeLimiter(P, PGradFO, nullptr, nullptr);
+#if ELASTIC
+    slopeLimiter(Sxx, SxxGradFO, nullptr, nullptr);
+    slopeLimiter(Sxy, SxyGradFO, nullptr, nullptr);
+    slopeLimiter(Syy, SyyGradFO, nullptr, nullptr);
+#if DIM == 3
+    slopeLimiter(Sxz, SxzGradFO, nullptr, nullptr);
+    slopeLimiter(Syz, SyzGradFO, nullptr, nullptr);
+    slopeLimiter(Szz, SzzGradFO, nullptr, nullptr);
+#endif
+#endif
+#endif // SLOPE_LIMITING
 
-void Particles::gradient(double *f, double (*grad)[DIM]){
+    for (int i=0; i<N; ++i){
+        const double w = gradBlend[i], w1 = 1. - w;
+        for (int a=0; a<DIM; ++a){
+            rhoGradHi[i][a] = rhoGrad[i][a];
+            vxGradHi[i][a]  = vxGrad[i][a];
+            vyGradHi[i][a]  = vyGrad[i][a];
+            PGradHi[i][a]   = PGrad[i][a];
+            rhoGrad[i][a] = w*rhoGradHi[i][a] + w1*rhoGradFO[i][a];
+            vxGrad[i][a]  = w*vxGradHi[i][a]  + w1*vxGradFO[i][a];
+            vyGrad[i][a]  = w*vyGradHi[i][a]  + w1*vyGradFO[i][a];
+            PGrad[i][a]   = w*PGradHi[i][a]   + w1*PGradFO[i][a];
+#if DIM == 3
+            vzGradHi[i][a] = vzGrad[i][a];
+            vzGrad[i][a]   = w*vzGradHi[i][a] + w1*vzGradFO[i][a];
+#endif
+#if ELASTIC
+            SxxGrad[i][a] = w*SxxGrad[i][a] + w1*SxxGradFO[i][a];
+            SxyGrad[i][a] = w*SxyGrad[i][a] + w1*SxyGradFO[i][a];
+            SyyGrad[i][a] = w*SyyGrad[i][a] + w1*SyyGradFO[i][a];
+#if DIM == 3
+            SxzGrad[i][a] = w*SxzGrad[i][a] + w1*SxzGradFO[i][a];
+            SyzGrad[i][a] = w*SyzGrad[i][a] + w1*SyzGradFO[i][a];
+            SzzGrad[i][a] = w*SzzGrad[i][a] + w1*SzzGradFO[i][a];
+#endif
+#endif
+        }
+    }
+}
+
+void Particles::blendGradientsStressPass(){
+    gradient(vx, vxGradFO, true);
+    gradient(vy, vyGradFO, true);
+#if DIM == 3
+    gradient(vz, vzGradFO, true);
+#endif
+#if ELASTIC
+    gradient(Sxx, SxxGradFO, true);
+    gradient(Sxy, SxyGradFO, true);
+    gradient(Syy, SyyGradFO, true);
+#if DIM == 3
+    gradient(Sxz, SxzGradFO, true);
+    gradient(Syz, SyzGradFO, true);
+    gradient(Szz, SzzGradFO, true);
+#endif
+#if SLOPE_LIMITING
+    // that pass limits only the stress gradients, so match it exactly
+    slopeLimiter(Sxx, SxxGradFO, nullptr, nullptr);
+    slopeLimiter(Sxy, SxyGradFO, nullptr, nullptr);
+    slopeLimiter(Syy, SyyGradFO, nullptr, nullptr);
+#if DIM == 3
+    slopeLimiter(Sxz, SxzGradFO, nullptr, nullptr);
+    slopeLimiter(Syz, SyzGradFO, nullptr, nullptr);
+    slopeLimiter(Szz, SzzGradFO, nullptr, nullptr);
+#endif
+#endif
+#endif // ELASTIC
+    for (int i=0; i<N; ++i){
+        const double w = gradBlend[i], w1 = 1. - w;
+        for (int a=0; a<DIM; ++a){
+            vxGrad[i][a] = w*vxGrad[i][a] + w1*vxGradFO[i][a];
+            vyGrad[i][a] = w*vyGrad[i][a] + w1*vyGradFO[i][a];
+#if DIM == 3
+            vzGrad[i][a] = w*vzGrad[i][a] + w1*vzGradFO[i][a];
+#endif
+#if ELASTIC
+            SxxGrad[i][a] = w*SxxGrad[i][a] + w1*SxxGradFO[i][a];
+            SxyGrad[i][a] = w*SxyGrad[i][a] + w1*SxyGradFO[i][a];
+            SyyGrad[i][a] = w*SyyGrad[i][a] + w1*SyyGradFO[i][a];
+#if DIM == 3
+            SxzGrad[i][a] = w*SxzGrad[i][a] + w1*SxzGradFO[i][a];
+            SyzGrad[i][a] = w*SyzGrad[i][a] + w1*SyzGradFO[i][a];
+            SzzGrad[i][a] = w*SzzGrad[i][a] + w1*SzzGradFO[i][a];
+#endif
+#endif
+        }
+    }
+}
+#endif
+
+#if POLY_RECONSTRUCTION_ACTIVE
+void Particles::compPolyCoefficients(){
+    // Fields reconstructed at the faces. The stress components only feed the
+    // Riemann solver on the solid-HLLC path; the GIZMO elastic flux uses
+    // cell-centered stress and needs no polynomial.
+    double *flds[] = { rho, P, vx, vy
+#if DIM == 3
+                       , vz
+#endif
+#if POLY_RECONSTRUCTION_STRESS_ACTIVE
+                       , Sxx, Sxy, Syy
+#if DIM == 3
+                       , Sxz, Syz, Szz
+#endif
+#endif
+    };
+    double (*out[])[GRAD_NUM_HIGHER] = { rhoPolyH, PPolyH, vxPolyH, vyPolyH
+#if DIM == 3
+                                         , vzPolyH
+#endif
+#if POLY_RECONSTRUCTION_STRESS_ACTIVE
+                                         , SxxPolyH, SxyPolyH, SyyPolyH
+#if DIM == 3
+                                         , SxzPolyH, SyzPolyH, SzzPolyH
+#endif
+#endif
+    };
+    constexpr int NF = sizeof(flds)/sizeof(flds[0]);
+
+    for (int i=0; i<N; ++i){
+        if (!polyOK[i]){
+            for (int f=0; f<NF; ++f)
+                for (int k=0; k<GRAD_NUM_HIGHER; ++k) out[f][i][k] = 0.;
+            continue;
+        }
+        // Least-squares RHS b_k = sum_j (f_j - f_i) p_k(dx/h_i) psij, one
+        // neighbour pass for all fields; then c = M^-1 b with the inverse
+        // stored by compPsijTilde. The first DIM coefficients reproduce the
+        // gradient already recovered there; only the higher rows are kept.
+        double b[NF][GRAD_MAT_DIM] = {};
+        const double hi = sml[i];
+        const double sInv = 1./hi;
+        for (int j=0; j<noi[i]; ++j){
+            const int iP = nnl[j+i*MAX_NUM_INTERACTIONS];
+            double dSqr = pow(x[i]-x[iP],2) + pow(y[i]-y[iP],2);
+#if DIM == 3
+            dSqr += pow(z[i]-z[iP],2);
+#endif
+            const double r = sqrt(dSqr);
+            const double psij_xi = kernel(r, hi)/omega[i];
+            buildGradBasis((x[iP]-x[i])*sInv, (y[iP]-y[i])*sInv,
+#if DIM == 3
+                           (z[iP]-z[i])*sInv,
+#endif
+                           pbasis);
+            for (int k=0; k<GRAD_MAT_DIM; ++k) pbasis[k] *= psij_xi;
+            for (int f=0; f<NF; ++f){
+                const double df = flds[f][iP] - flds[f][i];
+                for (int k=0; k<GRAD_MAT_DIM; ++k)
+                    b[f][k] += df*pbasis[k];
+            }
+        }
+        const double *Minv = &gradMatInv[(size_t)i*GRAD_MAT_DIM*GRAD_MAT_DIM];
+        for (int f=0; f<NF; ++f){
+            for (int alpha=DIM; alpha<GRAD_MAT_DIM; ++alpha){
+                double c = 0.;
+                for (int k=0; k<GRAD_MAT_DIM; ++k)
+                    c += Minv[alpha*GRAD_MAT_DIM+k]*b[f][k];
+                out[f][i][alpha-DIM] = c;
+            }
+        }
+    }
+}
+#endif // POLY_RECONSTRUCTION_ACTIVE
+
+void Particles::gradient(double *f, double (*grad)[DIM], bool useFirstOrderWeights){
     // Second-order weights when enabled, else the first-order estimator. The
     // MFM effective faces (compEffectiveFace) always keep psijTilde_xi.
+    // useFirstOrderWeights forces psijTilde_xi even in a second-order build, to
+    // build the FO gradient set that the face-weighted blend needs.
 #if SECOND_ORDER_GRADIENTS
-    auto *psiTildeGrad = psijTildeGrad_xi;
+    auto *psiTildeGrad = useFirstOrderWeights ? psijTilde_xi : psijTildeGrad_xi;
 #else
+    (void)useFirstOrderWeights;
     auto *psiTildeGrad = psijTilde_xi;
 #endif
     for (int i=0; i<N; ++i) {
@@ -2505,7 +3227,343 @@ void Particles::compPressure(){
         }
 #endif
     }
+#if AM_SELFTEST == 1
+    // T1 measures the torque under a UNIFORM total stress state. Seeding a
+    // uniform S is not enough: jitter perturbs the kernel density, hence P, and a
+    // non-uniform P breaks the very premise the test rests on (that is exactly
+    // why the HLLC channel stopped reading machine zero under jitter). Force it.
+    // Safe because T1 is a single-pass test that never advances the state.
+    for (int i=0; i<N; ++i) P[i] = AM_SELFTEST_P;
+#endif
 }
+
+#if AM_SELFTEST
+// Overwrite the state with the analytically known field of the selected test.
+// Called once, on step 0, before densities/gradients/faces are built, so the
+// whole normal machinery then operates on the test field.
+void Particles::amSelfTestSetup(){
+    // Jitter FIRST: T2's velocity field has to be an exact rigid rotation of the
+    // positions the solver actually sees, so the seeding below must read the
+    // final coordinates. (Doing it the other way round leaves a small
+    // non-rigid residual and the test measures that instead of the limiter.)
+    jitterPositionsForSelfTest();
+
+    double cx = 0., cy = 0.;
+    for (int i=0; i<N; ++i){ cx += x[i]; cy += y[i]; }
+    cx /= N; cy /= N;
+
+    for (int i=0; i<N; ++i){
+#if AM_SELFTEST == 1
+        // T1: static. With v = 0 the strain rate and the Jaumann terms vanish,
+        // so the seeded S survives integrateStressTensor unchanged.
+        vx[i] = 0.; vy[i] = 0.;
+#else
+        // T2/T3: exact rigid rotation about the particle centroid.
+        vx[i] = -AM_SELFTEST_OMEGA * (y[i] - cy);
+        vy[i] =  AM_SELFTEST_OMEGA * (x[i] - cx);
+#endif
+#if AM_SELFTEST != 2
+        // T2 keeps S = 0 so the reconstruction is measured in isolation.
+        Sxx[i] = AM_SELFTEST_SXX;
+        Sxy[i] = AM_SELFTEST_SXY;
+        Syy[i] = AM_SELFTEST_SYY;
+#endif
+    }
+    Logger(INFO) << "  > [AM_SELFTEST " << AM_SELFTEST << "] state seeded"
+                 << " (centroid " << cx << ", " << cy << ")";
+}
+
+// Break the symmetry that would otherwise cancel the global moment. Fixed LCG
+// seed so the test is reproducible run to run. (Runtime `if` on purpose: the
+// preprocessor cannot compare floating-point constants; the compiler folds this
+// away when the amplitude is 0.)
+void Particles::jitterPositionsForSelfTest(){
+    if (AM_SELFTEST_JITTER > 0.){
+        // mean spacing from the bounding box and the particle count
+        double xmn = x[0], xmx = x[0], ymn = y[0], ymx = y[0];
+        for (int i=1; i<N; ++i){
+            if (x[i] < xmn) xmn = x[i];  if (x[i] > xmx) xmx = x[i];
+            if (y[i] < ymn) ymn = y[i];  if (y[i] > ymx) ymx = y[i];
+        }
+        const double dp = sqrt((xmx-xmn)*(ymx-ymn)/(N > 0 ? N : 1));
+        const double amp = AM_SELFTEST_JITTER * dp;
+        unsigned long s = 88172645463325252UL;
+        auto rnd = [&](){ s ^= s<<13; s ^= s>>7; s ^= s<<17;
+                          return 2.*((double)(s>>11)/9007199254740992.) - 1.; };
+        for (int i=0; i<N; ++i){ x[i] += amp*rnd(); y[i] += amp*rnd(); }
+        Logger(INFO) << "  > [AM_SELFTEST] jittered positions by "
+                     << AM_SELFTEST_JITTER << " * dp (dp = " << dp << ")";
+    }
+}
+
+// Measure and report. Returns true when the caller should stop after this step
+// (T1/T2 are single-pass tests; T3 is a full run).
+bool Particles::amSelfTestReport(){
+#if AM_SELFTEST == 1
+    // T1: per-channel torque under a UNIFORM stress state. The MFM face gives
+    // M = -2 V_tot I exactly, so its channel must be machine zero regardless of
+    // how anisotropic the stencils are; the raw SPH area of the elastic flux
+    // does not, so its channel is the anisotropy in disguise.
+    double sH = 0., sD = 0., sT = 0., sR = 0., residMax = 0., residMean = 0.;
+    for (int i=0; i<N; ++i){
+        sH += tqHLLC[i]; sD += tqDev[i]; sT += tqWtT[i]; sR += tqWtR[i];
+        residMean += consResid[i];
+        if (consResid[i] > residMax) residMax = consResid[i];
+    }
+    residMean /= (N > 0 ? N : 1);
+    // Scale to compare against: the torque a single pair would exert if the
+    // traction were fully transverse, summed as |S| * total face area proxy.
+    double refScale = 0.;
+    for (int i=0; i<N; ++i) refScale += std::fabs(tqDev[i]) + std::fabs(tqHLLC[i]);
+
+    Logger(INFO) << "  > [T1] uniform S = (" << AM_SELFTEST_SXX << ", "
+                 << AM_SELFTEST_SXY << ", " << AM_SELFTEST_SYY << "), v = 0, N = " << N;
+    Logger(INFO) << "  > [T1] net torque   hllc = " << sH
+                 << "   dev = " << sD << "   wtT = " << sT << "   wtR = " << sR;
+    Logger(INFO) << "  > [T1] |torque| sum over particles (scale) = " << refScale;
+    Logger(INFO) << "  > [T1] relative     hllc = "
+                 << (refScale > 0. ? std::fabs(sH)/refScale : 0.)
+                 << "   dev = " << (refScale > 0. ? std::fabs(sD)/refScale : 0.);
+    Logger(INFO) << "  > [T1] per-particle stencil anisotropy  max = " << residMax
+                 << "   mean = " << residMean << "   (NOT the predictor)";
+
+    // The predictor is the GLOBAL moment. Report its anisotropy and the closed
+    // form it implies, then check that against what the flux actually produced.
+    const double Mxx = 0.5*gGxx, Mxy = 0.5*gGxy, Myy = 0.5*gGyy;
+    const double Mtr = 0.5*(Mxx + Myy);
+    const double predicted = torqueFromG(AM_SELFTEST_SXX, AM_SELFTEST_SXY,
+                                         AM_SELFTEST_SYY);
+    Logger(INFO) << "  > [T1] GLOBAL moment anisotropy  (Mxx-Myy)/tr = "
+                 << (Mtr > 0. ? (Mxx-Myy)/Mtr : 0.)
+                 << "   Mxy/tr = " << (Mtr > 0. ? Mxy/Mtr : 0.);
+    Logger(INFO) << "  > [T1] dev torque  predicted = " << predicted
+                 << "   measured = " << sD
+                 << "   ratio = " << (std::fabs(predicted) > 0. ? sD/predicted : 0.);
+    Logger(INFO) << "  > [T1] NOTE: per-pair torques are O(1); they cancel only when"
+                 << " the global bond-direction distribution is isotropic. On a"
+                 << " symmetric lattice that happens BY SYMMETRY -> false pass."
+                 << " Use AM_SELFTEST_JITTER > 0 for a discriminating test.";
+    Logger(INFO) << "  > [T1] EXPECT: hllc ~ machine zero at ANY geometry (the MFM"
+                 << " face has M = -2 V_tot I by construction); dev tracks the"
+                 << " global-moment anisotropy until WP2 corrects the elastic area.";
+    return true;
+
+#elif AM_SELFTEST == 2
+    // T2: how much of an exactly linear (rigid-rotation) velocity field survives
+    // the reconstruction as a spurious face jump. RECON_FACE_DV dissipates on
+    // exactly this quantity, so a non-zero value here is a direct L_z leak.
+    double jumpMax = 0., jumpSq = 0., rawMax = 0., rawSq = 0.;
+    long   nPair = 0;
+    for (int i=0; i<N; ++i){
+        for (int jn=0; jn<noi[i]; ++jn){
+            const int ii = i*MAX_NUM_INTERACTIONS + jn;
+            const int j  = nnl[ii];
+            // both sides carry the same vFrame, so it cancels in the difference
+            const double jx = WijR[ii][2] - WijL[ii][2];
+            const double jy = WijR[ii][3] - WijL[ii][3];
+            const double jm = sqrt(jx*jx + jy*jy);
+            const double rx = vx[i] - vx[j], ry = vy[i] - vy[j];
+            const double rm = sqrt(rx*rx + ry*ry);
+            if (jm > jumpMax) jumpMax = jm;
+            if (rm > rawMax)  rawMax  = rm;
+            jumpSq += jm*jm; rawSq += rm*rm;
+            ++nPair;
+        }
+    }
+    const double jumpRms = (nPair > 0) ? sqrt(jumpSq/nPair) : 0.;
+    const double rawRms  = (nPair > 0) ? sqrt(rawSq /nPair) : 0.;
+    Logger(INFO) << "  > [T2] rigid rotation omega = " << AM_SELFTEST_OMEGA
+                 << ", pairs = " << nPair
+                 << ", SLOPE_LIMITING = " << SLOPE_LIMITING
+                 << ", PAIRWISE_LIMITER = " << PAIRWISE_LIMITER;
+    Logger(INFO) << "  > [T2] reconstructed face jump   max = " << jumpMax
+                 << "   rms = " << jumpRms;
+    Logger(INFO) << "  > [T2] raw particle difference   max = " << rawMax
+                 << "   rms = " << rawRms;
+    Logger(INFO) << "  > [T2] ratio jump/raw            max = "
+                 << (rawMax > 0. ? jumpMax/rawMax : 0.)
+                 << "   rms = " << (rawRms > 0. ? jumpRms/rawRms : 0.);
+    Logger(INFO) << "  > [T2] EXPECT: ratio ~ machine zero. A finite ratio is the"
+                 << " limiter converting rigid spin into strain (WP1).";
+    return true;
+
+#else
+    // T3 runs to completion; the check is on L_z and on S staying rigid.
+    return false;
+#endif
+}
+#endif // AM_SELFTEST
+
+#if TORQUE_DIAG
+// Anisotropy of the area the GIZMO elastic stress flux integrates over.
+//
+// For an antisymmetric pair force F_ij = sigma . A_ij with symmetric sigma, the
+// total torque is eps:(M sigma) with M = sum_pairs r_ij (x) A_ij. It vanishes for
+// EVERY uniform stress iff M is proportional to the identity -- symmetric M is not
+// enough, since a product of two symmetric matrices is symmetric only if they
+// commute.
+//
+// The MFM face A_ij satisfies this exactly: the least-squares construction B=E^-1
+// enforces sum_j psiTilde_j(x_i) (x) (x_j-x_i) = I per particle, which makes
+// M = -2 V_tot I. The elastic flux does NOT use that face -- it uses the raw SPH
+// area FNormT*rhat (see addGizmoElasticStressFlux), whose
+//     G_i = sum_j FNormT_ij r_ij (rhat (x) rhat)
+// is symmetric but anisotropic wherever the stencil is. This routine measures that
+// anisotropy, normalised so it is independent of the overall scale of G:
+//     consResid[i] = || G_i/(tr G_i / DIM) - I ||_F
+// ~0 on an isotropic bulk lattice, O(1) on a one-sided free-surface stencil.
+void Particles::compAreaAnisotropy(){
+    gGxx = gGxy = gGyy = 0.;
+    for (int i=0; i<N; ++i){
+        double Gxx = 0., Gxy = 0., Gyy = 0.;
+        for (int jn=0; jn<noi[i]; ++jn){
+            const int j = nnl[jn + i*MAX_NUM_INTERACTIONS];
+            const double dx = x[i] - x[j], dy = y[i] - y[j];
+            const double r2 = dx*dx + dy*dy;
+            if (r2 <= 0.) continue;
+            const double r = sqrt(r2);
+            // identical to FNormT in addGizmoElasticStressFlux; the extra 1/r
+            // turns FNormT*(rhat (x) rhat)*r into a plain outer product of (dx,dy)
+            const double dwk = std::fabs(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, sml[j]));
+            const double w   = m[i]*m[j]*dwk / (rho[i]*rho[j]) / r;
+            Gxx += w*dx*dx; Gxy += w*dx*dy; Gyy += w*dy*dy;
+        }
+        // The GLOBAL moment is what controls the net torque -- see torqueFromG().
+        // Each unordered pair is counted twice here (once from each end), so the
+        // pair sum is half of this.
+        gGxx += Gxx; gGxy += Gxy; gGyy += Gyy;
+
+        const double tr = 0.5*(Gxx + Gyy);
+        if (!(tr > 0.)){ consResid[i] = 0.; continue; }
+        const double a = Gxx/tr - 1., b = Gxy/tr, c = Gyy/tr - 1.;
+        consResid[i] = sqrt(a*a + 2.*b*b + c*c);
+    }
+}
+
+// Closed-form net torque of the elastic deviatoric flux under a UNIFORM stress S.
+//
+// The pair force is cmag = -(S . FVec) with FVec = FNormT * rhat, so the pair
+// torque is  -FNormT * r * [rhat x (S rhat)]_z  and
+//     [rhat x (S rhat)]_z = S_xy cos(2t) + (S_yy - S_xx)/2 sin(2t).
+// Summing over pairs turns the direction average into the GLOBAL moment
+//     M = sum_pairs FNormT r (rhat (x) rhat) = 0.5 * sum_i G_i,
+// giving, in the flux sign convention used by tqDev,
+//     sum tqDev = S_xy (M_xx - M_yy) - (S_xx - S_yy) M_xy.
+//
+// The important consequence: the individual pair torques are O(1) and only
+// cancel because the BOND DIRECTIONS are isotropic in the global sum. A
+// symmetric configuration (e.g. two square blocks on a square lattice) cancels
+// them by symmetry even though every surface particle has a strongly anisotropic
+// stencil -- so per-particle anisotropy is NOT the predictor, and a symmetric
+// test case will report a false pass.
+double Particles::torqueFromG(double Sxx_, double Sxy_, double Syy_) const {
+    const double Mxx = 0.5*gGxx, Mxy = 0.5*gGxy, Myy = 0.5*gGyy;
+    return Sxy_*(Mxx - Myy) - (Sxx_ - Syy_)*Mxy;
+}
+
+// Reduce the four channels, advance their running time integrals and log both the
+// instantaneous L_z production rate and the accumulated loss per mechanism.
+// Sign convention follows tqF: orbital dL_z/dt = -sum_i tq[i].
+void Particles::torqueDiagReport(const double &dt, double simTime){
+    double sH = 0., sD = 0., sT = 0., sR = 0., sTot = 0.;
+    double residMax = 0., residSum = 0.;
+    for (int i=0; i<N; ++i){
+        sH += tqHLLC[i]; sD += tqDev[i]; sT += tqWtT[i]; sR += tqWtR[i];
+        sTot += tqF[i];
+        residSum += consResid[i];
+        if (consResid[i] > residMax) residMax = consResid[i];
+    }
+    tqIntHLLC -= dt*sH; tqIntDev -= dt*sD;
+    tqIntWtT  -= dt*sT; tqIntWtR -= dt*sR;
+    tqIntTot  -= dt*sTot;
+
+    // Consistency of the split against the independently accumulated total.
+    const double sSum  = sH + sD + sT + sR;
+    double scale = 1e-300;
+    if (std::fabs(sH)   > scale) scale = std::fabs(sH);
+    if (std::fabs(sD)   > scale) scale = std::fabs(sD);
+    if (std::fabs(sT)   > scale) scale = std::fabs(sT);
+    if (std::fabs(sTot) > scale) scale = std::fabs(sTot);
+    const double mismatch = std::fabs(sSum - sTot)/scale;
+
+    Logger(INFO) << "    > [TQDIAG] t=" << simTime
+                 << " dLz/dt: hllc=" << -sH << " dev=" << -sD
+                 << " wtT=" << -sT << " wtR=" << -sR
+                 << " | split=" << -sSum << " tqF=" << -sTot
+                 << " mismatch=" << mismatch;
+    Logger(INFO) << "    > [TQDIAG] intLz: hllc=" << tqIntHLLC << " dev=" << tqIntDev
+                 << " wtT=" << tqIntWtT << " wtR=" << tqIntWtR
+                 << " | total=" << tqIntTot
+                 << " | anisotropy max=" << residMax
+                 << " mean=" << (N > 0 ? residSum/N : 0.);
+
+    // Self-checks. wtR is built as a multiple of (dx,dy) and so is exactly
+    // parallel to r_ij: its pair torque must vanish identically. A non-trivial
+    // value means the instrumentation (not the physics) is wrong.
+    if (std::fabs(sR) > 1e-10*scale){
+        Logger(WARN) << "    > [TQDIAG] longitudinal channel is not torque-free: "
+                     << sR << " (rel " << std::fabs(sR)/scale
+                     << ") -- instrumentation bug, not a physics result.";
+    }
+    if (mismatch > 1e-6){
+        Logger(WARN) << "    > [TQDIAG] channel split does not reproduce tqF: rel "
+                     << mismatch << " -- a torque source is unaccounted for.";
+    }
+}
+#endif // TORQUE_DIAG
+
+#if ELASTIC_FACE_MODE == 1
+// Bonet-Lok correction of the elastic stress area.
+//
+// The uncorrected area fails the consistency identity: with FVec_ij pointing from
+// j to i (the code's dx = x_i - x_j convention),
+//     sum_j FVec_ij (x) (x_j - x_i) = -G_i,   G_i = sum_j (FNormT/r) dx (x) dx,
+// which is only proportional to the identity when the stencil happens to be
+// isotropic. Choosing B_i = V_i G_i^-1 and correcting FVec -> B_i FVec makes the
+// sum exactly -V_i I for EVERY particle, which is the condition the torque
+// analysis needs (see torqueFromG / ELASTIC_FACE_MODE in parameter.h).
+//
+// G_i is symmetric positive definite, so the 2x2 inverse is done in closed form;
+// LAPACK would be wasted here and this runs every step.
+void Particles::compElasticAreaCorrection(){
+    int nFallback = 0;
+    for (int i=0; i<N; ++i){
+        double Gxx = 0., Gxy = 0., Gyy = 0.;
+        for (int jn=0; jn<noi[i]; ++jn){
+            const int j = nnl[jn + i*MAX_NUM_INTERACTIONS];
+            const double dx = x[i] - x[j], dy = y[i] - y[j];
+            const double r2 = dx*dx + dy*dy;
+            if (r2 <= 0.) continue;
+            const double r = sqrt(r2);
+            // must stay identical to FNormT in addGizmoElasticStressFlux
+            const double dwk = std::fabs(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, sml[j]));
+            const double w   = m[i]*m[j]*dwk / (rho[i]*rho[j]) / r;
+            Gxx += w*dx*dx; Gxy += w*dx*dy; Gyy += w*dy*dy;
+        }
+        const double det = Gxx*Gyy - Gxy*Gxy;
+        // Frobenius condition estimate of a 2x2 SPD matrix, same spirit as
+        // GRAD_MAT_COND_MAX: ||G||_F * ||G^-1||_F = ||G||_F^2 / |det|.
+        const double nrm2 = Gxx*Gxx + 2.*Gxy*Gxy + Gyy*Gyy;
+        const bool ok = (det > 0.) && (nrm2/det < ELASTIC_FACE_COND_MAX);
+        if (!ok){
+            // one-sided stencil: leave the area uncorrected rather than amplify it
+            elasticB[i][0] = 1.; elasticB[i][1] = 0.;
+            elasticB[i][2] = 0.; elasticB[i][3] = 1.;
+            ++nFallback;
+            continue;
+        }
+        const double Vi = m[i]/rho[i];
+        const double s  = Vi/det;
+        elasticB[i][0] =  s*Gyy;  elasticB[i][1] = -s*Gxy;
+        elasticB[i][2] = -s*Gxy;  elasticB[i][3] =  s*Gxx;
+    }
+    if (nFallback > 0){
+        Logger(DEBUG) << "      > elastic area correction: " << nFallback << " / " << N
+                      << " particles fell back to B = I (cond > "
+                      << ELASTIC_FACE_COND_MAX << ")";
+    }
+}
+#endif // ELASTIC_FACE_MODE == 1
 
 void Particles::compEffectiveFace(){
     for (int i=0; i<N; ++i){
@@ -2989,18 +4047,33 @@ void Particles::compRiemannStatesLR(const double &dt){
                 WijL_raw[nu] = WijL[iW][nu];
             }
 
-            // reconstruction at effective face
-            WijR[iW][0] += Helper::dotProduct(rhoGrad[i], xijxi);
-            WijL[iW][0] += Helper::dotProduct(rhoGrad[j], xijxj);
-            WijR[iW][1] += Helper::dotProduct(PGrad[i], xijxi);
-            WijL[iW][1] += Helper::dotProduct(PGrad[j], xijxj);
-            WijR[iW][2] += Helper::dotProduct(vxGrad[i], xijxi);
-            WijL[iW][2] += Helper::dotProduct(vxGrad[j], xijxj);
-            WijR[iW][3] += Helper::dotProduct(vyGrad[i], xijxi);
-            WijL[iW][3] += Helper::dotProduct(vyGrad[j], xijxj);
+            // Reconstruction at the effective face: slope-limited gradient,
+            // plus (when POLY_RECONSTRUCTION_ACTIVE) the higher-order Taylor
+            // terms of the same least-squares fit on top. See APPLY_GRADIENTS.
+            // rhoPolyH/hInv_* are unused, dropped macro arguments when the
+            // flag is off -- they need not even be declared in that build.
+#if POLY_RECONSTRUCTION_ACTIVE
+            const double hInv_i = 1./sml[i], hInv_j = 1./sml[j];
+#endif
+#if SURFACE_GRAD_BLEND && SECOND_ORDER_GRADIENTS
+            // ONE weight for the whole face: the more conservative endpoint. Both
+            // sides then drop to first order together, so a surface face behaves
+            // exactly like the pure first-order scheme.
+            const double wF = gradBlend[i] < gradBlend[j] ? gradBlend[i] : gradBlend[j];
+#else
+            const double wF = 1.;
+#endif
+            APPLY_GRADIENTS_F(WijR[iW][0], GRAD_FO(rho)[i], GRAD_HI(rho)[i], rhoPolyH[i], hInv_i, wF, xijxi);
+            APPLY_GRADIENTS_F(WijL[iW][0], GRAD_FO(rho)[j], GRAD_HI(rho)[j], rhoPolyH[j], hInv_j, wF, xijxj);
+            APPLY_GRADIENTS_F(WijR[iW][1], GRAD_FO(P)[i], GRAD_HI(P)[i], PPolyH[i], hInv_i, wF, xijxi);
+            APPLY_GRADIENTS_F(WijL[iW][1], GRAD_FO(P)[j], GRAD_HI(P)[j], PPolyH[j], hInv_j, wF, xijxj);
+            APPLY_GRADIENTS_F(WijR[iW][2], GRAD_FO(vx)[i], GRAD_HI(vx)[i], vxPolyH[i], hInv_i, wF, xijxi);
+            APPLY_GRADIENTS_F(WijL[iW][2], GRAD_FO(vx)[j], GRAD_HI(vx)[j], vxPolyH[j], hInv_j, wF, xijxj);
+            APPLY_GRADIENTS_F(WijR[iW][3], GRAD_FO(vy)[i], GRAD_HI(vy)[i], vyPolyH[i], hInv_i, wF, xijxi);
+            APPLY_GRADIENTS_F(WijL[iW][3], GRAD_FO(vy)[j], GRAD_HI(vy)[j], vyPolyH[j], hInv_j, wF, xijxj);
 #if DIM==3
-            WijR[iW][4] += Helper::dotProduct(vzGrad[i], xijxi);
-            WijL[iW][4] += Helper::dotProduct(vzGrad[j], xijxj);
+            APPLY_GRADIENTS_F(WijR[iW][4], GRAD_FO(vz)[i], GRAD_HI(vz)[i], vzPolyH[i], hInv_i, wF, xijxi);
+            APPLY_GRADIENTS_F(WijL[iW][4], GRAD_FO(vz)[j], GRAD_HI(vz)[j], vzPolyH[j], hInv_j, wF, xijxj);
 #endif // DIM == 3
 
             // Post-grad-extrap snapshot for diagnostics.
@@ -3291,6 +4364,15 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #if USE_HLLC
     double n_unit[DIM];
 #endif
+#if TORQUE_DIAG
+    // The channel accumulators are filled from inside the pair loop below (each
+    // pair is visited once, at compute time -- ENFORCE_FLUX_SYM mirrors the
+    // other direction), so they must be cleared here rather than in
+    // collectFluxes, which runs afterwards.
+    for (int i=0; i<N; ++i){
+        tqHLLC[i] = 0.; tqDev[i] = 0.; tqWtT[i] = 0.; tqWtR[i] = 0.;
+    }
+#endif
     for (int i=0; i<N; ++i){
 
         // if (!(i % (N/VERBOSITY_PARTICLES))){
@@ -3376,24 +4458,51 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 xijxi_loc[2] = .5*(z[jj] - z[i]);
                 xijxj_loc[2] = -xijxi_loc[2];
 #endif
-                double fSxxR = Sxx[i]  + Helper::dotProduct(SxxGrad[i], xijxi_loc);
-                double fSxyR = Sxy[i]  + Helper::dotProduct(SxyGrad[i], xijxi_loc);
-                double fSyyR = Syy[i]  + Helper::dotProduct(SyyGrad[i], xijxi_loc);
-                double fSxxL = Sxx[jj] + Helper::dotProduct(SxxGrad[jj], xijxj_loc);
-                double fSxyL = Sxy[jj] + Helper::dotProduct(SxyGrad[jj], xijxj_loc);
-                double fSyyL = Syy[jj] + Helper::dotProduct(SyyGrad[jj], xijxj_loc);
+                // Stress reconstruction: SxxPolyH etc. are unused, dropped
+                // macro arguments (need not be declared) unless
+                // POLY_RECONSTRUCTION_STRESS_ACTIVE (off, or GIZMO_ELASTIC_FLUX
+                // is on and uses cell-centered stress instead). See
+                // APPLY_GRADIENTS_S.
+#if POLY_RECONSTRUCTION_STRESS_ACTIVE
+                const double hInv_i = 1./sml[i], hInv_j = 1./sml[jj];
+#endif
+                double fSxxR = Sxx[i];
+                APPLY_GRADIENTS_S(fSxxR, SxxGrad[i], SxxPolyH[i], hInv_i, xijxi_loc);
+                double fSxyR = Sxy[i];
+                APPLY_GRADIENTS_S(fSxyR, SxyGrad[i], SxyPolyH[i], hInv_i, xijxi_loc);
+                double fSyyR = Syy[i];
+                APPLY_GRADIENTS_S(fSyyR, SyyGrad[i], SyyPolyH[i], hInv_i, xijxi_loc);
+                double fSxxL = Sxx[jj];
+                APPLY_GRADIENTS_S(fSxxL, SxxGrad[jj], SxxPolyH[jj], hInv_j, xijxj_loc);
+                double fSxyL = Sxy[jj];
+                APPLY_GRADIENTS_S(fSxyL, SxyGrad[jj], SxyPolyH[jj], hInv_j, xijxj_loc);
+                double fSyyL = Syy[jj];
+                APPLY_GRADIENTS_S(fSyyL, SyyGrad[jj], SyyPolyH[jj], hInv_j, xijxj_loc);
 #if GIZMO_ELASTIC_FLUX
+#if RECON_FACE_TRACTION
+                // capture the reconstructed face stress before it is zeroed for the
+                // isotropic Riemann solve; the separate stress flux uses it instead
+                // of the raw cell-centered Sij[p].
+                const double SfaceI_loc[3] = { fSxxR, fSxyR, fSyyR };
+                const double SfaceJ_loc[3] = { fSxxL, fSxyL, fSyyL };
+#endif
                 // GIZMO keeps the Riemann problem isotropic; the deviatoric stress
                 // is added as a separate SPH flux after the solve (see below).
                 fSxxR = fSxyR = fSyyR = fSxxL = fSxyL = fSyyL = 0.;
 #endif
 #if DIM == 3
-                double fSxzR = Sxz[i]  + Helper::dotProduct(SxzGrad[i], xijxi_loc);
-                double fSyzR = Syz[i]  + Helper::dotProduct(SyzGrad[i], xijxi_loc);
-                double fSzzR = Szz[i]  + Helper::dotProduct(SzzGrad[i], xijxi_loc);
-                double fSxzL = Sxz[jj] + Helper::dotProduct(SxzGrad[jj], xijxj_loc);
-                double fSyzL = Syz[jj] + Helper::dotProduct(SyzGrad[jj], xijxj_loc);
-                double fSzzL = Szz[jj] + Helper::dotProduct(SzzGrad[jj], xijxj_loc);
+                double fSxzR = Sxz[i];
+                APPLY_GRADIENTS_S(fSxzR, SxzGrad[i], SxzPolyH[i], hInv_i, xijxi_loc);
+                double fSyzR = Syz[i];
+                APPLY_GRADIENTS_S(fSyzR, SyzGrad[i], SyzPolyH[i], hInv_i, xijxi_loc);
+                double fSzzR = Szz[i];
+                APPLY_GRADIENTS_S(fSzzR, SzzGrad[i], SzzPolyH[i], hInv_i, xijxi_loc);
+                double fSxzL = Sxz[jj];
+                APPLY_GRADIENTS_S(fSxzL, SxzGrad[jj], SxzPolyH[jj], hInv_j, xijxj_loc);
+                double fSyzL = Syz[jj];
+                APPLY_GRADIENTS_S(fSyzL, SyzGrad[jj], SyzPolyH[jj], hInv_j, xijxj_loc);
+                double fSzzL = Szz[jj];
+                APPLY_GRADIENTS_S(fSzzL, SzzGrad[jj], SzzPolyH[jj], hInv_j, xijxj_loc);
 #endif
 #endif
 #if USE_MATID
@@ -3422,15 +4531,37 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #endif
                 };
                 solver.HLLCFlux(Fij[ii]);
+#if TORQUE_DIAG
+                // Pressure/Riemann channel: snapshot the torque of the pure HLLC
+                // momentum flux BEFORE the elastic flux is added on top. Same
+                // half-to-each-partner convention as collectFluxes' tqF.
+                {
+                    const int jt = nnl[ii];
+                    const double tqPair = (x[i]-x[jt])*Fij[ii][3]
+                                        - (y[i]-y[jt])*Fij[ii][2];
+                    tqHLLC[i]  += 0.5*tqPair;
+                    tqHLLC[jt] += 0.5*tqPair;
+                }
+#endif
 #if PAIRDBG_WATCH >= 0
                 for(int d=0; d<DIM+2; ++d) FhDbg[d] = Fij[ii][d];
 #endif
 #if GIZMO_ELASTIC_FLUX
                 double fTC = 0.;
-#if TENSILE_CORRECTION
+#if TENSILE_CORRECTION && AM_SELFTEST != 1
                 fTC = TENSILE_CORRECTION_PREFAC * pow(fabMonaghan[ii], TENSILE_CORRECTION_POWER);
+#elif TENSILE_CORRECTION
+                // T1 only: the tensile correction damps POSITIVE stress
+                // eigenvalues by (1-f), which makes the effective per-pair stress
+                // direction-dependent and is not modelled by torqueFromG(). Leave
+                // it out so predicted and measured are comparable.
+                (void)0;
 #endif
-                addGizmoElasticStressFlux(i, jj, fTC, Fij[ii]);
+                addGizmoElasticStressFlux(i, jj, ii, fTC, Fij[ii]
+#if RECON_FACE_TRACTION
+                                          , SfaceI_loc, SfaceJ_loc
+#endif
+                                          );
 #endif
 #else
 #if USE_MATID
@@ -3665,7 +4796,7 @@ void Particles::collectFluxes(Helper &helper){
         vF[i][2] = 0.;
 #endif
         eF[i] = 0.;
-#if AM_TORQUE_TRACK
+#if TORQUE_ACCUM
         tqF[i] = 0.;
 #endif
 
@@ -3714,7 +4845,7 @@ void Particles::collectFluxes(Helper &helper){
 
             eF[i] += Fij[ii][1];
 
-#if AM_TORQUE_TRACK
+#if TORQUE_ACCUM
             // Half of the pair's spurious torque [(r_i - r_j) x F]_z; the
             // mirrored pair contributes the identical value on the j side, so
             // sum_i tqF[i] = total spurious L_z production rate (flux sign
@@ -5326,6 +6457,13 @@ void Particles::dump2file(std::string filename, double simTime){
     HighFive::DataSet PDataSet = h5File.createDataSet<double>("/P", HighFive::DataSpace(N));
     HighFive::DataSet smlDataSet = h5File.createDataSet<double>("/sml", HighFive::DataSpace(N));
     HighFive::DataSet noiDataSet = h5File.createDataSet<int>("/noi", HighFive::DataSpace(N));
+#if TORQUE_DIAG
+    HighFive::DataSet tqHLLCDataSet = h5File.createDataSet<double>("/tqHLLC", HighFive::DataSpace(N));
+    HighFive::DataSet tqDevDataSet  = h5File.createDataSet<double>("/tqDev",  HighFive::DataSpace(N));
+    HighFive::DataSet tqWtTDataSet  = h5File.createDataSet<double>("/tqWtT",  HighFive::DataSpace(N));
+    HighFive::DataSet tqWtRDataSet  = h5File.createDataSet<double>("/tqWtR",  HighFive::DataSpace(N));
+    HighFive::DataSet consResidDataSet = h5File.createDataSet<double>("/consResid", HighFive::DataSpace(N));
+#endif
 #if OUTPUT_CONDITION_NUMBER
     HighFive::DataSet condDataSet = h5File.createDataSet<double>("/conditionNumber", HighFive::DataSpace(N));
 #if DIM == 2
@@ -5466,6 +6604,20 @@ void Particles::dump2file(std::string filename, double simTime){
         std::vector<double> rhoKernelVec(rhoKernel,     rhoKernel+N);
         rhoExplicitDataSet.write(rhoExplicitVec);
         rhoKernelDataSet.write(rhoKernelVec);
+    }
+#endif
+#if TORQUE_DIAG
+    {
+        std::vector<double> tqHLLCVec(tqHLLC, tqHLLC+N);
+        std::vector<double> tqDevVec (tqDev,  tqDev +N);
+        std::vector<double> tqWtTVec (tqWtT,  tqWtT +N);
+        std::vector<double> tqWtRVec (tqWtR,  tqWtR +N);
+        std::vector<double> consResidVec(consResid, consResid+N);
+        tqHLLCDataSet.write(tqHLLCVec);
+        tqDevDataSet.write(tqDevVec);
+        tqWtTDataSet.write(tqWtTVec);
+        tqWtRDataSet.write(tqWtRVec);
+        consResidDataSet.write(consResidVec);
     }
 #endif
 #if OUTPUT_CONDITION_NUMBER

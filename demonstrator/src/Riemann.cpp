@@ -313,8 +313,31 @@ void Riemann::HLLCFlux(double *Fij){
 #endif
 #endif
     // traction-continuity solver; needs no dummy pressure by construction
+#if TENSILE_CORRECTION && TENSILE_CORRECTION_1
+    // pre-solve total normal tractions (same quantity as pEff on the legacy
+    // path); captured here because the solver does not modify WL/WR/SijRot
+    const double tEffL = WL[1] - SijRotL[0];
+    const double tEffR = WR[1] - SijRotR[0];
+#endif
     double Sstar = 0.;
     HLLC::xSplitElasticHLLCEP(matIdL, matIdR, WR, WL, SijRotR, SijRotL, Fij, MeshlessEOS, Sstar);
+#if TENSILE_CORRECTION && TENSILE_CORRECTION_1
+    // Monaghan anti-clumping repulsion, EP-compatible form. The legacy path
+    // shifts both pressures by pDummy = -min(pEff) and removes only
+    // (1 - fTC)*pDummy after the solve, so its net effect is a repulsive
+    // normal pressure fTC*pDummy on tensile faces. The EP solver needs no
+    // dummy shift for well-posedness (it works on the raw traction), so the
+    // same net repulsion is added directly after the solve, leaving the
+    // traction-continuity wave fan untouched. The term acts purely along the
+    // face normal, so the pair-radial variant (ELASTIC_HLLC_EP 2) keeps its
+    // central pair flux and machine-exact L_z.
+    const double tEffMin = std::min(tEffL, tEffR);
+    if (tEffMin < 0.){
+        const double pRepulse = -tensileCorrectionFactor * tEffMin;
+        Fij[2] += pRepulse;
+        Fij[1] += pRepulse * Sstar;
+    }
+#endif
 #else // ELASTIC_HLLC_EP
 
 // As implemented by Hopkins in GIZMO, before the Riemann solver, add a dummy pressure to make the Riemann problem well-behaved.

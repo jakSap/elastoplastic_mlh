@@ -57,6 +57,12 @@ void MeshlessScheme::run(){
     do {
         Logger(INFO) << "  > TIME: " << t << ", STEP: " << step;
 
+#if AM_SELFTEST
+        // Seed the analytic test field before anything derived from the state is
+        // built, so densities, gradients, faces and the reconstruction all see it.
+        if (step == 0) particles->amSelfTestSetup();
+#endif
+
         // Search radius used for the grid, NNS and ghost-particle generation.
         // With VARIABLE_SML, h_i may grow beyond config.kernelSize. To keep
         // neighbor relations symmetric (i in nnl[j] iff j in nnl[i]), we
@@ -297,6 +303,19 @@ void MeshlessScheme::run(){
         particles->slopeLimiterStress();
 #endif // ELASTIC
 #endif // SLOPE_LIMITING
+#if SURFACE_GRAD_BLEND && SECOND_ORDER_GRADIENTS
+        // Second, purely first-order gradient set. The face reconstruction needs
+        // both orders so the high-order part can carry the FACE weight
+        // w_ij = min(w_i, w_j) rather than a per-particle weight.
+        Logger(DEBUG) << "      > Computing first-order gradient set (face blend)";
+        particles->compFirstOrderGradients();
+#endif
+#if POLY_RECONSTRUCTION_ACTIVE
+        // Recover the higher-order Taylor coefficients for the polynomial
+        // face reconstruction (fields are final for this step's flux pass).
+        Logger(DEBUG) << "      > Computing higher-order Taylor coefficients";
+        particles->compPolyCoefficients();
+#endif
 #endif
 #if ELASTIC
 	Logger(INFO) << "    > Performing stress integration 1 / 2";
@@ -332,6 +351,16 @@ void MeshlessScheme::run(){
         Logger(INFO) << "    > Preparing Riemann solver";
         Logger(DEBUG) << "      > Computing effective faces";
         particles->compEffectiveFace();
+#if ELASTIC_FACE_MODE == 1
+        // Must run after compEffectiveFace (needs the same rho the faces used)
+        // and before the flux pass that consumes elasticB.
+        particles->compElasticAreaCorrection();
+#endif
+#if TORQUE_DIAG
+        // Stencil anisotropy of the elastic stress area; the field the deviatoric
+        // torque is predicted to track. Positions/rho/sml are final for this step.
+        particles->compAreaAnisotropy();
+#endif
 #if PERIODIC_BOUNDARIES
         particles->compEffectiveFace(ghostParticles);
 #endif // PERIODIC_BOUNDARIES
@@ -342,7 +371,15 @@ void MeshlessScheme::run(){
 #endif
 
         Logger(DEBUG) << "      > Computing fluxes";
+#if AM_SELFTEST == 2
+        // T2 isolates the SPATIAL reconstruction. dt enters compRiemannStatesLR
+        // only through the dt/2 MUSCL half-step terms, so dt = 0 removes the
+        // time-centering; without this the measured face jump is dominated by
+        // that half-step and says nothing about the limiter.
+        particles->compRiemannStatesLR(0.);
+#else
         particles->compRiemannStatesLR(timeStep);
+#endif
 
 #if PERIODIC_BOUNDARIES
         Logger(DEBUG) << "      > Computing ghost fluxes";
@@ -406,6 +443,15 @@ void MeshlessScheme::run(){
         particles->solveRiemannProblems(ghostParticlesDummy);
 #endif
 
+#if AM_SELFTEST
+        // T1 needs the flux pass (channel torques), T2 only the reconstruction --
+        // both are available by now. T3 returns false and runs on normally.
+        if (step == 0 && particles->amSelfTestReport()){
+            Logger(INFO) << "  > [AM_SELFTEST] single-pass test complete, stopping.";
+            break;
+        }
+#endif
+
 #if DEBUG_LVL
         Logger(DEBUG) << "    > Checking flux symmetry";
 #if PERIODIC_BOUNDARIES
@@ -418,6 +464,11 @@ void MeshlessScheme::run(){
         Logger(INFO) << "    > Collecting fluxes";
 
         particles->collectFluxes(helper);
+#if TORQUE_DIAG
+        // After collectFluxes so tqF is available for the split cross-check, and
+        // before the state update so the reported rate belongs to this step.
+        particles->torqueDiagReport(timeStep, t);
+#endif
 #if !ELASTIC
 	Logger(INFO) << "    > Updating state and position";
         particles->updateStateAndPosition(timeStep, domain);
@@ -469,6 +520,10 @@ void MeshlessScheme::run(){
         particles->slopeLimiterStress();
 #endif
 #endif // PERIODIC_BOUNDARIES
+#if SURFACE_GRAD_BLEND && SECOND_ORDER_GRADIENTS
+        // these gradients were just rebuilt as pure high-order; fade them again
+        particles->blendGradientsStressPass();
+#endif
 
         Logger(INFO) << "    > Performing stress integration 2 / 2";
         particles->integrateStressTensor(timeStep / 2.0);

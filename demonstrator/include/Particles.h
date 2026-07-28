@@ -58,6 +58,49 @@ public:
     double *fce;
 #endif
 
+#if SURFACE_GRAD_BLEND
+    /// First-moment stencil asymmetry xi = |sum_j W_ij (x_i-x_j)|/(h_i Omega_i),
+    /// filled by compOmega (independently of SURFACE_VOLCORR). Corner-aware
+    /// surface detector for SURFACE_GRAD_BLEND -- lambda_min/lambda_max alone is
+    /// blind to corners; see parameter.h.
+    double *xiAsym;
+#if SECOND_ORDER_GRADIENTS
+    /// Purely FIRST-ORDER (psijTilde_xi) gradients, slope-limited exactly like the
+    /// high-order ones. The face reconstruction needs BOTH orders per particle so
+    /// the high-order part can be weighted by the FACE weight w_ij = min(w_i,w_j)
+    /// instead of the per-particle w_i -- otherwise a faded surface particle still
+    /// receives a full high-order state from its bulk neighbour across the shared
+    /// face, and the surface never reduces to first order. See SURFACE_GRAD_BLEND.
+    double (*rhoGradFO)[DIM], (*vxGradFO)[DIM], (*vyGradFO)[DIM], (*PGradFO)[DIM];
+    /// Pure HIGH-order copies, kept for the face reconstruction. The main arrays
+    /// (rhoGrad, ...) are collapsed to the per-particle effective gradient
+    /// w_i*Hi + (1-w_i)*FO, so that every OTHER gradient consumer -- the MUSCL
+    /// half-step and integrateStressTensor's strain rate / advection -- fades at
+    /// the surface as well. Without that, w=0 does NOT reproduce first order.
+    double (*rhoGradHi)[DIM], (*vxGradHi)[DIM], (*vyGradHi)[DIM], (*PGradHi)[DIM];
+#if DIM == 3
+    double (*vzGradFO)[DIM], (*vzGradHi)[DIM];
+#endif
+#if ELASTIC
+    /// Stress gradients need only the FO set: they are blended in place (stress
+    /// is not face-reconstructed on the GIZMO_ELASTIC_FLUX path).
+    double (*SxxGradFO)[DIM], (*SxyGradFO)[DIM], (*SyyGradFO)[DIM];
+#if DIM == 3
+    double (*SxzGradFO)[DIM], (*SyzGradFO)[DIM], (*SzzGradFO)[DIM];
+#endif
+#endif
+    /// Compute + slope-limit the first-order gradient set (call right after the
+    /// regular gradients have been computed and limited).
+    void compFirstOrderGradients();
+    /// Second blend pass, for the velocity/stress gradients that are RECOMPUTED
+    /// before `integrateStressTensor 2/2`. That pass rebuilds them as pure
+    /// high-order, so without this the surface would still take a high-order
+    /// strain rate in the second half-step and w=0 would not give first order.
+    /// Mirrors that pass exactly: velocities unlimited, stress limited.
+    void blendGradientsStressPass();
+#endif
+#endif
+
 #if EXPLICIT_VOL_INTEGRATION
     /// Explicitly-integrated density (GIZMO Density_ExplicitInt). After the
     /// first compDensity() call this replaces `rho` everywhere downstream and
@@ -111,7 +154,14 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
 #if GIZMO_ELASTIC_FLUX
     // GIZMO-faithful deviatoric stress flux (solids/elastic_stress_tensor_force.h),
     // added to the pair flux Fout after the isotropic Riemann solve.
-    void addGizmoElasticStressFlux(int i, int jj, const double &f, double *Fout);
+    /// @param ii interaction index i->jj, needed by RECON_FACE_DV to read the
+    ///           reconstructed face states WijR[ii] (particle i) / WijL[ii] (jj)
+    void addGizmoElasticStressFlux(int i, int jj, int ii, const double &f, double *Fout
+#if RECON_FACE_TRACTION
+                                   // per-side reconstructed face stress {Sxx,Sxy,Syy}
+                                   , const double *SfaceI, const double *SfaceJ
+#endif
+                                   );
 #endif
 #if FRAGMENTATION
     /// Grady-Kipp damage state (Benz & Asphaug 1995).
@@ -271,10 +321,51 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
 #endif // VARIABLE_SML
 
     void compPsijTilde(Helper &helper);
-    void gradient(double *f, double (*grad)[DIM]);
+    /// @param useFirstOrderWeights force the first-order psijTilde_xi weights even
+    ///        when SECOND_ORDER_GRADIENTS is on (used for the FO gradient set).
+    void gradient(double *f, double (*grad)[DIM], bool useFirstOrderWeights=false);
+#if POLY_RECONSTRUCTION_ACTIVE
+    /// Recover the higher-than-linear Taylor coefficients of the augmented
+    /// least-squares fit for every reconstructed field, using the per-particle
+    /// M^-1 stored by compPsijTilde. Must be called after the gradients
+    /// (fields final for this step), before compRiemannStatesLR.
+    void compPolyCoefficients();
+#endif
     void slopeLimiter(Particles *ghostParticles=nullptr);
     void compPressure();
     void compEffectiveFace();
+#if ELASTIC_FACE_MODE == 1
+    /// Per-particle Bonet-Lok correction matrix for the elastic stress area,
+    /// B_i = V_i G_i^-1 (row-major DIM*DIM). Identity where G_i is too ill-
+    /// conditioned to invert (ELASTIC_FACE_COND_MAX).
+    double (*elasticB)[DIM*DIM];
+    /// Rebuild elasticB from the current positions/densities/smoothing lengths.
+    /// Call once per step, before the flux pass.
+    void compElasticAreaCorrection();
+#endif
+#if AM_SELFTEST
+    /// Overwrite the state with the analytically known field of the selected
+    /// self-test. Call once on step 0, before densities/gradients/faces.
+    void amSelfTestSetup();
+    /// Deterministic position jitter (AM_SELFTEST_JITTER * dp). Applied BEFORE
+    /// the analytic field is seeded, so the field is exact for the final layout.
+    void jitterPositionsForSelfTest();
+    /// Measure and log. Returns true when the run should stop after this step
+    /// (T1/T2 are single-pass tests; T3 runs to completion).
+    bool amSelfTestReport();
+#endif
+#if TORQUE_DIAG
+    /// Fill consResid[] from the current positions/densities/smoothing lengths.
+    /// Call once per step, any time before the flux pass.
+    void compAreaAnisotropy();
+    /// Reduce the four torque channels, advance their time integrals and log both
+    /// the instantaneous dL_z/dt and the accumulated loss per mechanism. Call
+    /// after collectFluxes (needs tqF for the split cross-check).
+    void torqueDiagReport(const double &dt, double simTime);
+    /// Closed-form net deviatoric torque under a uniform stress, predicted from
+    /// the global moment. Compare against the measured tqDev sum.
+    double torqueFromG(double Sxx_, double Sxy_, double Syy_) const;
+#endif
 
     double compGlobalTimestep();
     void compRiemannStatesLR(const double &dt);
@@ -356,6 +447,41 @@ private:
     // Second-order (quadratic-exact) gradient weights. Separate from
     // psijTilde_xi, which must stay first order for the MFM effective faces.
     double (*psijTildeGrad_xi)[DIM];
+#if SURFACE_GRAD_BLEND
+    // Per-particle surface-fade weight w in [0,1] for the higher-order
+    // reconstruction (1 = full high-order bulk, 0 = pure first-order surface),
+    // derived in compPsijTilde from the first-order moment matrix eigenvalue
+    // ratio and reused by compPolyCoefficients to scale the Taylor coefficients.
+    double *gradBlend;
+#endif
+#if POLY_RECONSTRUCTION_ACTIVE
+    // Full-polynomial reconstruction: per-particle acceptance flag and stored
+    // inverse of the augmented moment matrix (both filled in compPsijTilde),
+    // plus the recovered higher-than-linear Taylor coefficients per field.
+    // Coefficients live in h_i-scaled coordinates: the face correction is
+    // sum_{k>=DIM} c_k p_k(dx/h_i), evaluated by polyHigherEval.
+    bool *polyOK;
+    double *gradMatInv;                       // [N * GRAD_MAT_DIM^2]
+    double (*rhoPolyH)[GRAD_NUM_HIGHER];
+    double (*PPolyH)[GRAD_NUM_HIGHER];
+    double (*vxPolyH)[GRAD_NUM_HIGHER];
+    double (*vyPolyH)[GRAD_NUM_HIGHER];
+#if DIM == 3
+    double (*vzPolyH)[GRAD_NUM_HIGHER];
+#endif
+#if POLY_RECONSTRUCTION_STRESS_ACTIVE
+    // Only the solid-HLLC path reconstructs S at the face; the GIZMO elastic
+    // flux uses cell-centered stress and needs no polynomial.
+    double (*SxxPolyH)[GRAD_NUM_HIGHER];
+    double (*SxyPolyH)[GRAD_NUM_HIGHER];
+    double (*SyyPolyH)[GRAD_NUM_HIGHER];
+#if DIM == 3
+    double (*SxzPolyH)[GRAD_NUM_HIGHER];
+    double (*SyzPolyH)[GRAD_NUM_HIGHER];
+    double (*SzzPolyH)[GRAD_NUM_HIGHER];
+#endif
+#endif // POLY_RECONSTRUCTION_STRESS_ACTIVE
+#endif // POLY_RECONSTRUCTION_ACTIVE
 #endif
     double (*Aij)[DIM];
     double (*WijL)[DIM+2], (*WijR)[DIM+2]; // DIM velocity components, density and pressure
@@ -366,13 +492,40 @@ private:
 
     /// variables for integration
     double *mF, *eF, (*vF)[DIM];
-#if AM_TORQUE_TRACK
+#if TORQUE_ACCUM
     // Per-particle residual-torque accumulator (z-component, 2D): half of each
     // pair's spurious torque [(r_i - r_j) x F_ij]_z is attributed to each
     // partner. Summed over all particles this equals the total spurious L_z
     // production rate of the flux update (physical exchange cancels pairwise).
     // Flux sign convention: orbital dL_i = -dt * tqF[i].
     double *tqF;
+#endif
+#if TORQUE_DIAG
+    // Per-channel split of the same pair torque, in the SAME convention and
+    // normalisation as tqF (half of each pair's torque on each partner, flux
+    // sign, so orbital dL_z/dt = -sum_i tq*[i]).
+    //   tqHLLC : pressure / Riemann flux through the MFM face A_ij
+    //   tqDev  : deviatoric traction (GIZMO eigenvalue loop)
+    //   tqWtT  : transverse (shear-wave) HLL dissipation
+    //   tqWtR  : longitudinal HLL dissipation -- radial by construction, so this
+    //            must land at round-off; it is the instrumentation self-check.
+    // Invariant: tqHLLC + tqDev + tqWtT + tqWtR == tqF, particle by particle.
+    double *tqHLLC, *tqDev, *tqWtT, *tqWtR;
+    // Anisotropy of the elastic stress area:  || Ghat_i - I ||_F  with
+    // Ghat_i = G_i / (tr G_i / DIM)  and  G_i = sum_j FNormT_ij r_ij rhat (x) rhat.
+    // Zero on an isotropic stencil, O(1) where the stencil is one-sided. The
+    // M ~ I analysis predicts the deviatoric torque tracks this field.
+    double *consResid;
+    // Running time integrals of the four channels (and of tqF), i.e. the L_z
+    // each mechanism has destroyed so far.
+    double tqIntHLLC { 0. }, tqIntDev { 0. }, tqIntWtT { 0. }, tqIntWtR { 0. },
+           tqIntTot { 0. };
+    /// GLOBAL moment sum_i G_i of the elastic stress area (twice the pair sum).
+    /// Its anisotropy -- not the per-particle consResid -- is what sets the net
+    /// deviatoric torque; see torqueFromG().
+    double gGxx { 0. }, gGxy { 0. }, gGyy { 0. };
+    // (compAreaAnisotropy / torqueDiagReport are declared in the public section:
+    //  MeshlessScheme::run() drives them.)
 #endif
 #if AM_SPIN
     // Spin ledger absorbing the residual pair torque so that

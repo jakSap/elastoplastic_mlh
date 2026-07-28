@@ -12,6 +12,7 @@
 //   1 = linear-exact  (classic Hopkins-2015 MFM first moment matrix)
 //   2 = quadratic-exact (augmented with the symmetric Hessian terms)
 //   3 = cubic-exact     (also the third-derivative terms)
+//   4 = quartic-exact   (also the fourth-derivative terms)
 #define GRADIENT_ORDER 1
 
 // The augmented moment-matrix machinery (separate psijTildeGrad array, PxP
@@ -19,19 +20,51 @@
 // size GRAD_MAT_DIM and the polynomial basis grow with the order.
 #define SECOND_ORDER_GRADIENTS (GRADIENT_ORDER >= 2)
 
+// Use the FULL recovered Taylor polynomial in the face reconstruction, not
+// only its gradient. Without this, GRADIENT_ORDER >= 2 merely makes the
+// gradient itself higher-order accurate while the face extrapolation stays
+// linear (f_face = f_i + grad.dx); the Hessian / third-derivative
+// coefficients determined by the same least-squares solve are discarded.
+// With this flag, compPolyCoefficients() recovers all P Taylor coefficients
+// per particle and field (rho, P, v, and -- on the solid-HLLC path -- S), and
+// the reconstruction adds the quadratic-and-above terms on top of the linear
+// extrapolation. The linear part remains today's slope-limited, SPH-blended
+// gradient (bit-identical when the higher coefficients are zero); particles
+// on the GRAD_MAT_COND_MAX kappa-fallback get zero higher coefficients, and
+// the pairwise limiter clamps the full polynomial face value, so the
+// stabilization strategy of the 20260720 study carries over unchanged.
+// Only meaningful when GRADIENT_ORDER >= 2 (no-op otherwise).
+#define POLY_RECONSTRUCTION 1
+#define POLY_RECONSTRUCTION_ACTIVE (POLY_RECONSTRUCTION && SECOND_ORDER_GRADIENTS)
+// Stress-field polynomial additionally requires ELASTIC (S exists at all)
+// and !GIZMO_ELASTIC_FLUX (that path uses cell-centered stress -- the
+// deviatoric flux is SPH, not a face reconstruction -- so the S*PolyH
+// arrays are only allocated when this is true; see the matching guard in
+// Particles.h/Particles.cpp). Evaluated lazily wherever used, so it is safe
+// to reference ELASTIC/GIZMO_ELASTIC_FLUX here even though both are defined
+// later in this file.
+#define POLY_RECONSTRUCTION_STRESS_ACTIVE (POLY_RECONSTRUCTION_ACTIVE && ELASTIC && !GIZMO_ELASTIC_FLUX)
+
 // Size of the least-squares moment matrix = number of polynomial basis terms
 // (no constant term). GRAD_MAT_DIM also sizes the LAPACK scratch buffers in
 // Helper, so it is always defined.
-//   order 1: DIM                                             (2D: 2,  3D: 3)
-//   order 2: + DIM*(DIM+1)/2          symmetric Hessian      (2D: 5,  3D: 9)
-//   order 3: + DIM*(DIM+1)*(DIM+2)/6  symmetric 3rd deriv    (2D: 9,  3D: 19)
+//   order 1: DIM                                                (2D: 2,  3D: 3)
+//   order 2: + DIM*(DIM+1)/2             symmetric Hessian       (2D: 5,  3D: 9)
+//   order 3: + DIM*(DIM+1)*(DIM+2)/6     symmetric 3rd deriv     (2D: 9,  3D: 19)
+//   order 4: + DIM*(DIM+1)*(DIM+2)*(DIM+3)/24  symmetric 4th deriv (2D: 14, 3D: 34)
 #if GRADIENT_ORDER == 1
 #define GRAD_MAT_DIM (DIM)
 #elif GRADIENT_ORDER == 2
 #define GRAD_MAT_DIM (DIM + (DIM*(DIM+1))/2)
-#else
+#elif GRADIENT_ORDER == 3
 #define GRAD_MAT_DIM (DIM + (DIM*(DIM+1))/2 + (DIM*(DIM+1)*(DIM+2))/6)
+#else
+#define GRAD_MAT_DIM (DIM + (DIM*(DIM+1))/2 + (DIM*(DIM+1)*(DIM+2))/6 + (DIM*(DIM+1)*(DIM+2)*(DIM+3))/24)
 #endif
+
+// Number of higher-than-linear Taylor coefficients stored per particle and
+// field by POLY_RECONSTRUCTION (Hessian terms and above).
+#define GRAD_NUM_HIGHER (GRAD_MAT_DIM - DIM)
 
 // Conditioning guard for the augmented least-squares gradient fit
 // (inverseMatrixChecked). A one-sided free-surface stencil makes the moment
@@ -43,10 +76,73 @@
 // the estimator falls back to the first-order weights for that particle. This
 // is the primary tuning knob: lower -> fall back sooner (safer, closer to
 // first order), higher -> keep the high-order fit on more marginal stencils.
+// With SURFACE_GRAD_BLEND on it degrades to a pure singularity net (the smooth
+// surface fade below does the discrimination), so it can be left loose.
 #define GRAD_MAT_COND_MAX 1.0e5
+
+// --- Surface-aware high-order gradient blend -------------------------------
+// A more elegant surface switch than thresholding GRAD_MAT_COND_MAX. kappa_F of
+// the *augmented* (order-dependent) moment matrix is a poor surface proxy: its
+// bulk value grows steeply with the order (kappa_F ~ 9 / 48 / 205 for order
+// 2/3/4) so the single threshold separating healthy bulk from a diverging
+// one-sided surface stencil must be retuned per order AND per resolution -- and
+// for order 4 the bulk value overlaps the surface tail so no threshold works.
+//
+// Instead, detect the surface from the FIRST-ORDER moment matrix
+//   B_i = sum_j (x_j - x_i)(x_j - x_i)^T psi_j        (already built every step)
+// via its eigenvalue ratio
+//   s_i = lambda_min(B_i) / lambda_max(B_i)   in (0, 1].
+// s_i is (a) dimensionless -> RESOLUTION-independent, and (b) evaluated at first
+// order -> IDENTICAL for every GRADIENT_ORDER, so ONE threshold works for all
+// orders and resolutions. s ~ 1 in an isotropic bulk stencil; s -> 0 as the
+// stencil goes one-sided at a free surface (the standard Marrone et al. 2010
+// delta-SPH surface detector). The higher-than-linear reconstruction is then
+// faded with a smoothstep ramp
+//   s >= SURFACE_BLEND_S_HI : w = 1  full high-order (bulk)
+//   s <= SURFACE_BLEND_S_LO : w = 0  pure first order (surface)
+// The gradient weights blend  w*high-order + (1-w)*first-order and the poly
+// coefficients scale by w, so the order transition is spatially CONTINUOUS (no
+// hard order jump injecting noise at the surface) and high-order usage is
+// MAXIMISED: w = 1 across the whole bulk at every order, only the thin surface
+// shell fades. Set to 0 to reproduce the pure GRAD_MAT_COND_MAX hard-switch
+// behaviour of the 20260720 study exactly.
+#define SURFACE_GRAD_BLEND 1
+// Ramp endpoints on s = lambda_min/lambda_max. s ~ 1 (isotropic bulk) -> full
+// high-order; ~0.4-0.5 at a flat free surface, lower at corners. The window
+// [LO, HI] is where the reconstruction fades (in smoothstep) from first to full
+// high order. Order- and resolution-independent by construction.
+#define SURFACE_BLEND_S_LO 0.35
+#define SURFACE_BLEND_S_HI 0.75
+
+// SECOND detector: first-moment (centroid) asymmetry of the stencil,
+//   xi_i = |sum_j W_ij (x_i - x_j)| / (h_i Omega_i)          (Reinhardt & Stadel)
+// xi = 0 only for a genuinely symmetric stencil, and grows with ANY one-sidedness.
+//
+// This is needed because s = lambda_min/lambda_max is a SECOND-moment quantity and
+// is structurally BLIND TO CORNERS: a corner stencil is missing roughly a quadrant,
+// so the remaining support still spans both directions and B stays near-isotropic
+// (measured: s ~ 0.81 on the most-damaged corner particles, i.e. ABOVE S_HI -> full
+// high order), while a flat surface is missing a half-plane, collapses one principal
+// direction, and is caught. The first moment has no such blind spot -- the centroid
+// offset is in fact LARGEST at corners. Measured on the 300 most-damaged particles of
+// the blocks collision: s flags 40%, xi flags 77%.
+//
+// The combined weight is the more conservative of the two ramps,
+//   w = min( smoothstep((s - S_LO)/(S_HI - S_LO)),
+//            smoothstep((XI_HI - xi)/(XI_HI - XI_LO)) ),
+// so xi covers corners and s covers degenerate-direction stencils. xi is dimensionless
+// (normalised by h_i Omega_i), so it is order- and resolution-independent like s.
+// Calibration: bulk xi ~ 0; xi = 0.0103 is where the SURFACE_VOLCORR fit saturates
+// (fce = 1); a flat free surface is xi ~ 0.149 (fce ~ 0.65); corners run to xi ~ 0.27.
+#define SURFACE_BLEND_XI_LO 0.02
+#define SURFACE_BLEND_XI_HI 0.15
 
 /// define if periodic boundaries should be employed
 #define PERIODIC_BOUNDARIES 0
+
+#if POLY_RECONSTRUCTION_ACTIVE && PERIODIC_BOUNDARIES
+#error "POLY_RECONSTRUCTION only wires the non-periodic path (compPolyCoefficients ignores ghost neighbours). Set POLY_RECONSTRUCTION to 0 for periodic runs."
+#endif
 
 /// define if timestep is adaptive
 #define ADAPTIVE_TIMESTEP 1
@@ -240,6 +336,13 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // bypassed on this path -- and Davis-type wave speeds clamped to bracket the
 // interface. The star density / deviatoric stress split (their eq. 33 log
 // closure) is the hook for the later plastic-wave cases.
+// TENSILE_CORRECTION_1 is supported on this path: the Monaghan anti-clumping
+// repulsion fTC*max(0,-min(t_L,t_R)) is added to the normal momentum (and
+// Sstar-weighted energy) flux after the solve -- the net effect of the legacy
+// dummy-pressure+TC1 combination, without perturbing the wave fan. It is
+// purely normal, so variant 2 keeps machine-exact L_z. Without it the elastic
+// EP solvers are tensile-unstable at ring resolution dp<=0.05 (20260719 study:
+// variant 1 fractures, variant 2 fills the contact zone with pairing noise).
 //   0 = off (existing solvers)
 //   1 = face-normal solver, replaces the solid HLLC on the ELASTIC path (A')
 //   2 = pair-radial (B'): additionally project the effective face onto the
@@ -303,6 +406,173 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // (consistency guards live below, after USE_HLLC is defined)
 #define GIZMO_ELASTIC_FLUX 1
 
+// Feed the HLL velocity dissipation in the GIZMO elastic stress flux with the
+// RECONSTRUCTED face jump instead of the raw particle velocity difference.
+//
+// Why: `dv = v_i - v_j` is non-zero for a rigid-body rotation (dv = omega x r_ij,
+// purely transverse) even though the physical shear rate is exactly zero, so the
+// transverse term `wt_t*dv` brakes any rotating body. The 20260720 rotating-disc
+// null test measured -89% of L_z in a single rotation with no contact anywhere in
+// the problem. This is the classic SPH failure mode the Balsara switch cures; the
+// transverse HLL term here has no such guard. AM_METHOD 3 fixes L_z by dropping
+// wt_t entirely, but that also discards the physical shear-wave damping.
+//
+// Both sides reconstruct to the SAME face point xij (compRiemannStatesLR), so for
+// any linear velocity field -- rigid rotation and resolved shear alike -- the
+// reconstructed jump vanishes identically and no dissipation is applied, while
+// genuine discontinuities are still damped. That is what a Godunov scheme should
+// do; the raw form is effectively 1st-order dissipative, hence the O(1) L_z error.
+//
+//   0 = off, raw velocity difference (baseline, bit-identical to pre-fix code)
+//   1 = transverse (S-wave) channel on the face jump; longitudinal (P-wave)
+//       channel keeps the raw, more diffusive form. Minimal change: targets
+//       exactly the spurious rotational braking, leaves shock capturing alone.
+//       VALIDATED (20260720): rotating disc L_z err 6.2e-1 -> 2.5e-5, rotating
+//       block -99.9% -> -0.4%, offset rings -10.5% -> -1.8%, all matching or
+//       slightly better than AM_METHOD 3, with ring integrity and machine-exact
+//       E/p unchanged. Recommended setting.
+//   2 = both channels on the face jump. REJECTED (20260720): removing the
+//       longitudinal dissipation as well is UNSTABLE -- the rotating block
+//       overshoots and reverses (L_z drift -290%, omega goes negative), the disc
+//       degrades to -80% spin-down. The raw-difference P-wave term is load-
+//       bearing for stability. Kept only to document the negative result.
+#define RECON_FACE_DV 1
+
+// Feed the deviatoric TRACTION in the GIZMO elastic stress flux with the
+// spatially reconstructed face stress (Sij extrapolated to the shared face
+// point xij, per side) instead of the raw cell-centered Sij[p]. Companion to
+// RECON_FACE_DV: with both on, every dynamical input to the stress flux (stress
+// AND velocity) is taken from the reconstructed face states, so the flux stops
+// violating the scheme's own MUSCL reconstruction standard.
+//
+// NOTE the velocity is space+time centered (WijR carries the half-step), but the
+// stress reconstruction here is SPATIAL only -- there is no dS/dt half-step in
+// the Riemann reconstruction anywhere in this code (stress time integration lives
+// in the separate RK2 integrateStressTensor). So this matches how the elastic
+// HLLC path already reconstructs stress; full time-centering of S is a further step.
+//
+//   0 = off, raw cell-centered Sij[p] (baseline)
+//   1 = per-side reconstructed face stress
+#define RECON_FACE_TRACTION 0
+
+// Angular-momentum TORQUE BUDGET instrumentation (WP0 of the 20260727 plan).
+//
+// Splits the spurious pair torque that drives the L_z drain into the four
+// channels that can produce it, so the loss can be attributed to a mechanism
+// instead of inferred from a parameter sweep:
+//
+//   tqHLLC : pressure / Riemann flux through the MFM face A_ij
+//   tqDev  : deviatoric traction (GIZMO eigenvalue loop)
+//   tqWtT  : transverse (shear-wave) HLL dissipation
+//   tqWtR  : longitudinal HLL dissipation
+//
+// tqWtR is the SELF-CHECK: that term is built as a multiple of (dx,dy), i.e.
+// exactly parallel to r_ij, so its pair torque r_ij x F_ij vanishes identically.
+// If the reported tqWtR is not at round-off, the instrumentation is wrong.
+// Likewise tqHLLC+tqDev+tqWtT+tqWtR must reproduce tqF particle by particle
+// (up to the round-off of recomputing the channels separately).
+//
+// Also computes consResid[i], the anisotropy of the elastic stress area
+// (|| Ghat_i - I ||_F). The torque-free condition for a pair force
+// F_ij = sigma . A_ij with symmetric sigma is M = sum r_ij (x) A_ij ~ I; the MFM
+// face satisfies it exactly, the raw SPH area of the elastic flux does not, and
+// consResid measures by how much. Doubles as the free-surface classifier.
+//
+// Diagnostic only: the flux math is left byte-for-byte untouched, the channels
+// are recomputed alongside it. 0 = off (production), 1 = on.
+#define TORQUE_DIAG 0
+
+// tqF (per-particle residual torque accumulator) is needed by the AM_METHOD 4-6
+// repair strategies AND by the torque budget above.
+#define TORQUE_ACCUM (AM_TORQUE_TRACK || TORQUE_DIAG)
+
+// Variationally consistent face AREA for the GIZMO elastic stress flux
+// (WP2 of the 20260727 plan).
+//
+// The deviatoric flux integrates over the RAW SPH area FVec = FNormT * rhat
+// (addGizmoElasticStressFlux), which carries no consistency guarantee. T1
+// measures the consequence exactly: the net torque under a uniform stress S is
+//     sum tqDev = S_xy (M_xx - M_yy) - (S_xx - S_yy) M_xy,
+//     M = sum_pairs FNormT r (rhat (x) rhat) = 0.5 * sum_i G_i,
+// reproduced to ratio 1.000 by torqueFromG(). It vanishes only when the GLOBAL
+// moment M is isotropic -- true by symmetry on a pristine lattice, false as soon
+// as the configuration is disordered, which is exactly the regime where L_z is
+// actually lost. The MFM face A_ij has no such problem: B = E^-1 makes
+// M = -2 V_tot I identically, and T1 measures its channel at 1e-17 relative even
+// under 20% position jitter.
+//
+//   0 = raw SPH radial area (baseline, bit-identical to pre-WP2 code)
+//
+//   1 = pair-symmetric Bonet-Lok correction. Build the per-particle consistency
+//       matrix G_i = sum_j FNormT_ij r_ij (rhat (x) rhat) and correct the area
+//       with B_i = V_i G_i^-1, applied pair-symmetrically as 0.5*(B_i + B_j).
+//       The symmetrisation is the point: the standard objection to gradient
+//       correction is that B_i != B_j destroys pairwise antisymmetry and with it
+//       exact linear momentum, and 0.5*(B_i+B_j) is invariant under i<->j, so
+//       A_ij = -A_ji survives and p stays machine-exact (checkFluxSymmetry
+//       confirms). Only the TRACTION is corrected -- wt_r/wt_t keep the scalar
+//       FNormT, because making the acoustic impedances anisotropic is a separate
+//       question and because a radial wt_r is torque-free by construction.
+//
+//   2 = use the MFM face A_ij itself. Isotropy is then exact rather than
+//       approximate. Riskier: GIZMO chose the radial area specifically to avoid
+//       the tensile instability, so the ring is the regression gate.
+#define ELASTIC_FACE_MODE 0
+// Reject the correction and fall back to B_i = I when G_i is this badly
+// conditioned (one-sided surface stencils). Counted and reported.
+#define ELASTIC_FACE_COND_MAX 1.0e3
+
+// Angular-momentum SELF-TESTS (WP-T of the 20260727 plan). These overwrite the
+// particle state with an analytically known field on step 0 and measure a single
+// quantity, so a hypothesis that would otherwise cost a resolution campaign is
+// settled in seconds. Run them on any 2D elastic IC that has a free surface --
+// the standard offset-blocks IC is a good default (bulk + flat faces + corners).
+//
+//   0 = off, normal run.
+//
+//   1 = T1, UNIFORM-STRESS TORQUE. v := 0 and S := const, then one flux pass.
+//       Reports the per-channel torque and exits. The torque-free condition
+//       M ~ I predicts: the HLLC/MFM-face channel is machine zero even on a
+//       strongly anisotropic surface stencil, while the elastic channel -- which
+//       uses the raw SPH area, not the MFM face -- is O(1) * anisotropy.
+//       THIS IS THE GATE FOR WP2: the corrected area must drive the elastic
+//       channel to machine zero too. Requires TORQUE_DIAG 1.
+//
+//   2 = T2, RIGID-ROTATION RECONSTRUCTION. v := Omega x r, then one
+//       reconstruction pass. Reports the reconstructed face velocity jump
+//       against the raw particle difference and exits. RECON_FACE_DV's whole
+//       justification is that a linear velocity field reconstructs to zero jump;
+//       that holds with the limiter off and FAILS once the limiter clips vx and
+//       vy by different alphas. THIS IS THE GATE FOR WP1: the jump must be at
+//       round-off with SLOPE_LIMITING on as well as off.
+//
+//   3 = T3, PRE-STRESSED ROTATION. v := Omega x r AND S := const, then a NORMAL
+//       run (no early exit). The existing rotating-disc null test is stress-FREE
+//       and therefore blind to an inconsistency between the velocity gradient
+//       the Jaumann terms in integrateStressTensor use and the one the flux pass
+//       uses; such an inconsistency would be a torque source upstream of
+//       everything else. Here S must simply rotate rigidly and L_z must hold.
+#define AM_SELFTEST 0
+#define AM_SELFTEST_OMEGA 0.1
+// Deterministic position jitter for T1, as a fraction of the mean particle
+// spacing (0 = off). ESSENTIAL for a meaningful T1: the net deviatoric torque is
+// controlled by the GLOBAL moment M = sum_pairs FNormT r rhat (x) rhat, and on a
+// symmetric configuration (two square blocks on a square lattice) M is isotropic
+// BY SYMMETRY -- the O(1) per-pair torques cancel exactly and the test reports a
+// false pass, even though every surface particle has a strongly anisotropic
+// stencil. Jitter breaks that cancellation, which is also what the real problem
+// does: L_z is lost during DISORDERED contact, not on a pristine lattice.
+#define AM_SELFTEST_JITTER 0.0
+// Uniform pressure forced in T1 (see compPressure). Without this the jitter
+// perturbs rho and hence P, and the "uniform stress" premise the test rests on
+// is violated -- the HLLC channel then reads a real torque that has nothing to do
+// with the face geometry under test.
+#define AM_SELFTEST_P 1.0
+// Constant deviatoric stress for T1/T3 (traceless in 2D).
+#define AM_SELFTEST_SXX  1.0
+#define AM_SELFTEST_SXY  0.5
+#define AM_SELFTEST_SYY -1.0
+
 /** maximum interactions with ghost particles
  *  ignored when `PERIODIC_BOUNDARIES` is not set
 **/
@@ -333,6 +603,46 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // GIZMO_ELASTIC_FLUX consistency guards (USE_HLLC/ELASTIC are now defined)
 #if GIZMO_ELASTIC_FLUX && !(USE_HLLC && ELASTIC)
 #error "GIZMO_ELASTIC_FLUX requires USE_HLLC == 1 and ELASTIC == 1."
+#endif
+#if RECON_FACE_DV && !GIZMO_ELASTIC_FLUX
+#error "RECON_FACE_DV only affects the GIZMO elastic stress flux; enable GIZMO_ELASTIC_FLUX."
+#endif
+#if RECON_FACE_DV && AM_NO_TDISS
+#error "RECON_FACE_DV and AM_METHOD 3/7 (wt_t=0) both target the transverse dissipation; pick one."
+#endif
+#if RECON_FACE_TRACTION && !GIZMO_ELASTIC_FLUX
+#error "RECON_FACE_TRACTION only affects the GIZMO elastic stress flux; enable GIZMO_ELASTIC_FLUX."
+#endif
+// TORQUE_DIAG consistency guards
+#if TORQUE_DIAG && DIM != 2
+#error "TORQUE_DIAG reports the z-torque only; implemented for DIM == 2."
+#endif
+#if TORQUE_DIAG && !(USE_HLLC && GIZMO_ELASTIC_FLUX)
+#error "TORQUE_DIAG splits the HLLC + GIZMO elastic channels; both must be active."
+#endif
+// (the ENFORCE_FLUX_SYM guard for TORQUE_DIAG lives below, after that flag is defined)
+// ELASTIC_FACE_MODE consistency guards
+#if ELASTIC_FACE_MODE && !GIZMO_ELASTIC_FLUX
+#error "ELASTIC_FACE_MODE only affects the GIZMO elastic stress flux; enable GIZMO_ELASTIC_FLUX."
+#endif
+#if ELASTIC_FACE_MODE && DIM != 2
+#error "ELASTIC_FACE_MODE is implemented for DIM == 2 only."
+#endif
+#if ELASTIC_FACE_MODE > 2
+#error "ELASTIC_FACE_MODE must be 0 (raw), 1 (Bonet-Lok) or 2 (MFM face)."
+#endif
+#if ELASTIC_FACE_MODE == 2 && RECON_FACE_TRACTION
+#error "ELASTIC_FACE_MODE 2 replaces the area, RECON_FACE_TRACTION the stress; combination untested."
+#endif
+// AM_SELFTEST consistency guards
+#if AM_SELFTEST && !(DIM == 2 && ELASTIC)
+#error "AM_SELFTEST seeds a 2D deviatoric stress state; needs DIM == 2 and ELASTIC 1."
+#endif
+#if AM_SELFTEST == 1 && !TORQUE_DIAG
+#error "AM_SELFTEST 1 (T1) reports the per-channel torque; enable TORQUE_DIAG."
+#endif
+#if RECON_FACE_TRACTION && DIM != 2
+#error "RECON_FACE_TRACTION is currently implemented for DIM == 2 only."
 #endif
 // 3D MFM is supported: the GIZMO elastic stress flux and tensile-principal damping use the
 // dimension-agnostic Helper::eigenDecompositionSym (3x3 eigenbasis via LAPACK), the z/vz
@@ -375,6 +685,10 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 
 /// enforcing flux symmetry by only calculating on side
 #define ENFORCE_FLUX_SYM 1
+
+#if TORQUE_DIAG && ENFORCE_FLUX_SYM != 1
+#error "TORQUE_DIAG accumulates each pair once at compute time; needs ENFORCE_FLUX_SYM 1."
+#endif
 
 /// define if particles should move, otherwise a fixed grid is used
 #define MOVE_PARTICLES 1
