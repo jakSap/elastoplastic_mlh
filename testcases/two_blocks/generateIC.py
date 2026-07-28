@@ -31,7 +31,9 @@ if __name__ == "__main__":
     parser.add_argument("--density", metavar="float", type=float,
                         default=1.0, help="reference particle density (default: 1.0)")
     parser.add_argument("--u", metavar="float", type=float,
-                        default=0.0, help="specific internal energy (default: 0.0, equilibrium for Murnaghan at rho=rho0)")
+                        default=1.0, help="specific internal energy (default: 1.0, equilibrium for Murnaghan at rho=rho0)")
+    parser.add_argument("--rotate", "-r", metavar="float", type=float,
+                        default=0.0, help="rotate left block CW and right block CCW by this many degrees (default: 0.0)")
     parser.add_argument("--fillUp", "-f", action="store_true",
                         help="fill up coordinates to 3D with z=0")
     parser.add_argument("--plot", action="store_true",
@@ -64,6 +66,8 @@ if __name__ == "__main__":
     print(f"  delta_p = {delta_p}, block = {block_size} x {block_size}")
     print(f"  left block center=(-{offset}, 0), right block center=({offset}, 0)")
     print(f"  individual velocity = {v_p}, closing velocity = {2*v_p}")
+    if args.rotate != 0.0:
+        print(f"  rotation: left block CW {args.rotate} deg, right block CCW {args.rotate} deg")
     print(f"  density = {density}, u = {u_const}")
     print(f"  mass per particle = {mass}")
 
@@ -76,13 +80,29 @@ if __name__ == "__main__":
     y_flat = yy.ravel()
     N_block = len(x_flat)
 
+    # Optional rotation: left block CW, right block CCW by args.rotate degrees
+    if args.rotate != 0.0:
+        theta = np.radians(args.rotate)
+        c, s = np.cos(theta), np.sin(theta)
+        # Clockwise: [[c, s], [-s, c]]
+        x_left_loc =  c * x_flat + s * y_flat
+        y_left_loc = -s * x_flat + c * y_flat
+        # Counterclockwise: [[c, -s], [s, c]]
+        x_right_loc = c * x_flat - s * y_flat
+        y_right_loc = s * x_flat + c * y_flat
+    else:
+        x_left_loc  = x_flat
+        y_left_loc  = y_flat
+        x_right_loc = x_flat
+        y_right_loc = y_flat
+
     # Left block: centered at (-offset, 0), velocity +v_p in x
-    x_left = x_flat - offset
-    y_left = y_flat
+    x_left = x_left_loc - offset
+    y_left = y_left_loc
 
     # Right block: centered at (+offset, 0), velocity -v_p in x
-    x_right = x_flat + offset
-    y_right = y_flat
+    x_right = x_right_loc + offset
+    y_right = y_right_loc
 
     x_all = np.concatenate([x_left, x_right])
     y_all = np.concatenate([y_left, y_right])
@@ -102,10 +122,11 @@ if __name__ == "__main__":
     m          = np.ones(N) * mass
     u          = np.ones(N) * u_const
     materialId = np.zeros(N, dtype=np.int8)
-    materialId[N_block:] = 1  # right block gets material id 1
+    materialId[N_block:] = 0  # right block gets material id 1
 
     suffix   = "3D" if fillUp else "2D"
-    filename = f"two_blocks_deltap{delta_p}-{suffix}.h5"
+    rot_tag  = f"-rot{args.rotate:g}deg" if args.rotate != 0.0 else ""
+    filename = f"two_blocks_deltap{delta_p}-{suffix}{rot_tag}.h5"
 
     outH5 = h5.File(filename, "w")
     outH5.create_dataset("x",          data=pos)
@@ -132,8 +153,9 @@ if __name__ == "__main__":
         blk_r  = plt.Rectangle(( offset - half, -half), block_size, block_size,
                                 linewidth=1, edgecolor="red",  facecolor="none", linestyle="-")
         ax.add_patch(domain)
-        ax.add_patch(blk_l)
-        ax.add_patch(blk_r)
+        if args.rotate == 0.0:
+            ax.add_patch(blk_l)
+            ax.add_patch(blk_r)
         ax.set_title("Two colliding elastic blocks initial conditions")
         ax.set_xlabel("$x$")
         ax.set_ylabel("$y$")

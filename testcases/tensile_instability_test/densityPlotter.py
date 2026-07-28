@@ -34,6 +34,12 @@ pref = 'S'
 ENVELOPE_MATID = 2
 ENVELOPE_SCALE = 1.0 / 3.0
 
+# --fabField draws this many top-f_ab neighbours per particle as separate
+# arrows. Colors are two complementary pairs (red/green, blue/orange) so
+# adjacent ranks read as visually distinct.
+FAB_TOP_K = 4
+FAB_RANK_COLORS = ['#e41a1c', '#4daf4a', '#377eb8', '#ff7f00']
+
 
 def is_gizmo_file(path):
     """GADGET-style snapshot (PartType0/...) vs the demonstrator's flat layout.
@@ -72,7 +78,7 @@ def _marker_sizes(data, markerSize):
     sizes = np.full(matId.shape, float(markerSize))
     sizes[matId == ENVELOPE_MATID] = float(markerSize) * ENVELOPE_SCALE
     return sizes
-def setDomainLimits(ax, pos, h5File, openBorders):
+def setDomainLimits(ax, pos, h5File, openBorders, domain=None):
     if openBorders:
         margin = 0.05 * max(pos[:,0].max() - pos[:,0].min(), pos[:,1].max() - pos[:,1].min())
         if (np.isnan(pos[:,0].min())):
@@ -82,11 +88,19 @@ def setDomainLimits(ax, pos, h5File, openBorders):
         else:
             ax.set_xlim((pos[:,0].min() - margin, pos[:,0].max() + margin))
             ax.set_ylim((pos[:,1].min() - margin, pos[:,1].max() + margin))
+    elif domain is not None:
+        ax.set_xlim((domain[0], domain[1]))
+        ax.set_ylim((domain[2], domain[3]))
     elif "Ghosts" not in str(h5File):
         ax.set_xlim((0., 1.))
         ax.set_ylim((0., 1.))
+    if domain is not None:
+        for xv in (domain[0], domain[1]):
+            ax.axvline(xv, color='grey', linestyle='--', linewidth=0.8, alpha=0.7)
+        for yv in (domain[2], domain[3]):
+            ax.axhline(yv, color='grey', linestyle='--', linewidth=0.8, alpha=0.7)
 
-def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
+def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=False, domain=None, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200, velScale=0.5):
     data = open_snapshot(h5File)
     gizmo = is_gizmo_file(h5File)
     pos = data["x"][:]
@@ -113,7 +127,7 @@ def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=Fals
     # rhoPlt = ax.scatter(pos[:,0], pos[:,1], c=rho, s=5.) # good for 128**2 particles
     rhoPlt = ax.scatter(pos[:,0], pos[:,1], c=cm, s=_marker_sizes(data, markerSize))#, vmin=vmin, vmax=vmax) # good for 128**2 particles
 
-    setDomainLimits(ax, pos, h5File, openBorders)
+    setDomainLimits(ax, pos, h5File, openBorders, domain)
 
     # Plot gradient
     if plotGrad and not plotVel:
@@ -122,7 +136,7 @@ def createPlot(h5File, outDir, plotGrad, plotVel, stress, iNNL, openBorders=Fals
         else:
             plotGradient(data["rhoGrad"][:], pos, ax)
     elif not plotGrad and plotVel:
-        plotVelocity(data["v"][:], pos, ax)
+        plotVelocity(data["v"][:], pos, ax, velScale)
     elif plotGrad and plotVel:
         print("WARNING: command line arguments '--plotVelocity' and '--plotGradient' are incompatible. - Plotting neither.")
 
@@ -171,16 +185,26 @@ def plotGradient(grad, pos, ax):
     #    if np.linalg.norm(rhoGrad) > .05:
     #        print("rhoGrad @", i, "=", rhoGrad)
 
-def plotVelocity(vel, pos, ax):
-    ax.quiver(pos[:,0], pos[:,1], vel[:,0], vel[:,1], angles='xy', scale_units='xy', scale=.5)
+def plotVelocity(vel, pos, ax, scale=0.5):
+    ax.quiver(pos[:,0], pos[:,1], vel[:,0], vel[:,1], angles='xy', scale_units='xy', scale=scale)
 
 def get_output_prefix(args):
+    if args.fab is not None and args.fab >= 0:   # fab arrow mode
+        if args.stress: return "fabArrowS"
+        elif args.fce:  return "fabArrowFce"
+        else:           return "fabArrow"
+    if args.fabField:                             # all-particle fab vector field
+        if args.stress: return "fabFieldS"
+        elif args.fce:  return "fabFieldFce"
+        else:           return "fabField"
     if args.combined:          return "comb"
     elif args.pressure:        return "P"
     elif args.energy:          return "u"
     elif args.noi:             return "noi"
     elif args.conditionNumber: return "ncond"
-    elif args.fab:             return "fab"
+    elif args.fabMax:          return "fabMax"
+    elif args.fab is not None: return "fab"
+    elif args.fce:             return "fce"
     elif args.stress:          return pref
     else:                      return ""
 
@@ -204,7 +228,7 @@ def plotNNL(h5File, iNNL, pos, ax):
     ax.scatter(pos[iNNL,0], pos[iNNL,1], s=5., marker='x', color='r')
     ax.scatter(posNNL[:,0], posNNL[:,1], s=5, marker='x', color='m')
 
-def createEnergyPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
+def createEnergyPlot(h5File, outDir, openBorders=False, domain=None, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
 
@@ -214,7 +238,7 @@ def createEnergyPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, ma
     #uPlt = ax.scatter(pos[:,0], pos[:,1], c=u, s=200.) # good for ~400 particles
     uPlt = ax.scatter(pos[:,0], pos[:,1], c=u, s=_marker_sizes(data, markerSize), vmin=vmin, vmax=vmax)
 
-    setDomainLimits(ax, pos, h5File, openBorders)
+    setDomainLimits(ax, pos, h5File, openBorders, domain)
 
     if iHi > -1:
         plotKernelCircle(data, iHi, pos, ax)
@@ -228,7 +252,7 @@ def createEnergyPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, ma
     plt.savefig(outDir + "/u" + pathlib.Path(h5File).stem + ".png")
     plt.close()
 
-def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
+def createPressurePlot(h5File, outDir, openBorders=False, domain=None, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
 
@@ -244,7 +268,7 @@ def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, 
     #PPlt = ax.scatter(pos[:,0], pos[:,1], c=P, s=10.) # good for 10**4 particles
     PPlt = ax.scatter(pos[:,0], pos[:,1], c=P, s=_marker_sizes(data, markerSize), vmin=vmin, vmax=vmax)
 
-    setDomainLimits(ax, pos, h5File, openBorders)
+    setDomainLimits(ax, pos, h5File, openBorders, domain)
 
     if iHi > -1:
         plotKernelCircle(data, iHi, pos, ax)
@@ -267,7 +291,7 @@ def createPressurePlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, 
     plt.savefig(outDir + "/P" + pathlib.Path(h5File).stem + ".png")
     plt.close()
 
-def createNoiPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
+def createNoiPlot(h5File, outDir, openBorders=False, domain=None, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
 
@@ -275,7 +299,7 @@ def createNoiPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, marke
     fig, ax = plt.subplots(figsize=(8,6), dpi=dpi)
     noiPlt = ax.scatter(pos[:,0], pos[:,1], c=noi, s=_marker_sizes(data, markerSize), vmin=vmin, vmax=vmax)
 
-    setDomainLimits(ax, pos, h5File, openBorders)
+    setDomainLimits(ax, pos, h5File, openBorders, domain)
 
     if iHi > -1:
         plotKernelCircle(data, iHi, pos, ax)
@@ -289,7 +313,7 @@ def createNoiPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, marke
     plt.savefig(outDir + "/noi" + pathlib.Path(h5File).stem + ".png")
     plt.close()
 
-def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., threshold=None, iHi=-1, dpi=200):
+def createConditionNumberPlot(h5File, outDir, openBorders=False, domain=None, vmin=None, vmax=None, markerSize=1., threshold=None, iHi=-1, dpi=200):
     data = h5.File(h5File, 'r')
     pos = data["x"][:]
     time = data["time"][0]
@@ -309,7 +333,7 @@ def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax
             ax.scatter(pos[mask,0], pos[mask,1], s=markerSize*4,
                        facecolors='none', edgecolors='r', linewidths=0.5)
 
-    setDomainLimits(ax, pos, h5File, openBorders)
+    setDomainLimits(ax, pos, h5File, openBorders, domain)
 
     if iHi > -1:
         plotKernelCircle(data, iHi, pos, ax)
@@ -379,7 +403,7 @@ def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax
         for ax, vals, label in zip(axes, [lambdaMin, lambdaMax],
                                    [r"$\lambda_{\min}$", r"$\lambda_{\max}$"]):
             sc = ax.scatter(pos[:,0], pos[:,1], c=vals, s=markerSize)
-            setDomainLimits(ax, pos, h5File, openBorders)
+            setDomainLimits(ax, pos, h5File, openBorders, domain)
             ax.set_aspect('equal')
             ax.set_title(label + r" at $t = " + f"{time:.4f}" + r"$")
             ax.set_xlabel("$x$")
@@ -402,7 +426,7 @@ def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax
         ax.quiver(pos[::step,0], pos[::step,1],
                   eigvec[::step,0], eigvec[::step,1],
                   angles='xy', scale_units='xy', scale=30., width=0.002, color='red', alpha=0.6)
-        setDomainLimits(ax, pos, h5File, openBorders)
+        setDomainLimits(ax, pos, h5File, openBorders, domain)
         ax.set_aspect('equal')
         ax.set_title(r"$\vec{e}_{\lambda_{\min}}$ at $t = " + f"{time:.4f}" + r"$")
         ax.set_xlabel("$x$")
@@ -416,37 +440,262 @@ def createConditionNumberPlot(h5File, outDir, openBorders=False, vmin=None, vmax
         plt.savefig(evecPath)
         plt.close()
 
-def createFabPlot(h5File, outDir, openBorders=False, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
+def createFabPlot(h5File, outDir, openBorders=False, domain=None, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200, use_max=False):
+    field = "fabMax" if use_max else "fabAvg"
     data = h5.File(h5File, 'r')
-    if "fabAvg" not in data:
-        print(f"WARNING: fabAvg unavailable for {h5File} (compile with OUTPUT_FAB), skipping.")
+    if field not in data:
+        print(f"WARNING: {field} unavailable for {h5File} (compile with OUTPUT_FAB), skipping.")
         return
     pos = data["x"][:]
     time = data["time"][0]
-    fab = data["fabAvg"][()]
+    fab = data[field][()]
 
     plt.rcParams.update({'font.size': 18})
     fig, ax = plt.subplots(figsize=(7,5), dpi=dpi)
     fabPlt = ax.scatter(pos[:,0], pos[:,1], c=fab, s=markerSize, vmin=vmin, vmax=vmax)
 
-    setDomainLimits(ax, pos, h5File, openBorders)
+    setDomainLimits(ax, pos, h5File, openBorders, domain)
 
     if iHi > -1:
         plotKernelCircle(data, iHi, pos, ax)
 
-    plt.title(r"Avg. $\bar{f}_{ab}$ at $t = " + f"{time:.4f}" + r"$")
+    cbar_label = r"$f_{ab}^{\max}$" if use_max else r"$\bar{f}_{ab}$"
+    prefix = "fabMax" if use_max else "fab"
+    plt.title(cbar_label + r" at $t = " + f"{time:.4f}" + r"$")
     plt.xlabel("$x$")
     plt.ylabel("$y$")
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("right", size="5%", pad=0.05)
-    fig.colorbar(fabPlt, cax=cax)
+    fig.colorbar(fabPlt, cax=cax, label=cbar_label)
     ax.set_aspect('equal')
     plt.tight_layout()
-    print("Saving figure to", outDir + "/fab" + pathlib.Path(h5File).stem + ".png")
-    plt.savefig(outDir + "/fab" + pathlib.Path(h5File).stem + ".png", dpi=dpi)
+    print("Saving figure to", outDir + "/" + prefix + pathlib.Path(h5File).stem + ".png")
+    plt.savefig(outDir + "/" + prefix + pathlib.Path(h5File).stem + ".png", dpi=dpi)
     plt.close()
 
-def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSize=1.,
+def createFcePlot(h5File, outDir, openBorders=False, domain=None, vmin=None, vmax=None, markerSize=1., iHi=-1, dpi=200):
+    data = h5.File(h5File, 'r')
+    if "fce" not in data:
+        print(f"WARNING: fce unavailable for {h5File} (compile with SURFACE_VOLCORR), skipping.")
+        return
+    pos = data["x"][:]
+    time = data["time"][0]
+    fce = data["fce"][()]
+
+    plt.rcParams.update({'font.size': 18})
+    fig, ax = plt.subplots(figsize=(7,5), dpi=dpi)
+    fcePlt = ax.scatter(pos[:,0], pos[:,1], c=fce, s=markerSize, vmin=vmin, vmax=vmax)
+
+    setDomainLimits(ax, pos, h5File, openBorders, domain)
+
+    if iHi > -1:
+        plotKernelCircle(data, iHi, pos, ax)
+
+    cbar_label = r"$f_{ce}$"
+    plt.title(r"Surface volume correction " + cbar_label + r" at $t = " + f"{time:.4f}" + r"$")
+    plt.xlabel("$x$")
+    plt.ylabel("$y$")
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    fig.colorbar(fcePlt, cax=cax, label=cbar_label)
+    ax.set_aspect('equal')
+    plt.tight_layout()
+    print("Saving figure to", outDir + "/fce" + pathlib.Path(h5File).stem + ".png")
+    plt.savefig(outDir + "/fce" + pathlib.Path(h5File).stem + ".png", dpi=dpi)
+    plt.close()
+
+def createFabArrowPlot(h5File, outDir, fabIdx, stress=False, fce=False,
+                       openBorders=False, domain=None, markerSize=1., dpi=200):
+    """For particle `fabIdx` (a), find the neighbour (b) with the largest pairwise
+    f_ab and draw an arrow a->b on top of a background scatter (density by default,
+    or |S| with --stress, or f_ce with --fce). Requires /fabAll (OUTPUT_FAB,
+    DEBUG_LVL>=2) plus the companion <step>NNL.h5 file that dumpNNL() writes
+    under the same DEBUG_LVL>=2 gate (neighbour index /nnl<i>)."""
+    data = h5.File(h5File, 'r')
+    if "fabAll" not in data:
+        print(f"WARNING: fabAll unavailable for {h5File} "
+              f"(compile with OUTPUT_FAB and DEBUG_LVL>=2), skipping.")
+        return
+    pos = data["x"][:]
+    time = data["time"][0]
+    nPart = pos.shape[0]
+    if fabIdx < 0 or fabIdx >= nPart:
+        print(f"WARNING: --fab index {fabIdx} out of range [0,{nPart}) for {h5File}, skipping.")
+        return
+    nnlFile = str(h5File).replace(".h5", "NNL.h5")
+    if not os.path.exists(nnlFile):
+        print(f"WARNING: companion NNL file {nnlFile} unavailable "
+              f"(compile with OUTPUT_FAB and DEBUG_LVL>=2), skipping.")
+        return
+    nnlData = h5.File(nnlFile, 'r')
+
+    # choose the background quantity / colorbar label / output prefix
+    if stress:
+        Sxx = np.array(data["Sxx"][:]); Sxy = np.array(data["Sxy"][:]); Syy = np.array(data["Syy"][:])
+        cm = np.sqrt(Sxx**2 + Sxy**2 + Syy**2)
+        bg_label = r"$" + pref + r"$"
+        prefix = "fabArrowS"
+    elif fce:
+        if "fce" not in data:
+            print(f"WARNING: fce unavailable for {h5File} (compile with SURFACE_VOLCORR), skipping.")
+            return
+        cm = data["fce"][()]
+        bg_label = r"$f_{ce}$"
+        prefix = "fabArrowFce"
+    else:
+        cm = data["rho"][()]
+        bg_label = r"$\varrho$"
+        prefix = "fabArrow"
+
+    # neighbour b = argmax_j fabAll[a][j] over valid (j < noi[a]) slots
+    fabRow = data["fabAll"][fabIdx][:]
+    noiIdx = int(data["noi"][fabIdx])
+    bIdx = None
+    if noiIdx > 0 and f"nnl{fabIdx}" in nnlData:
+        jmax = int(np.argmax(fabRow[:noiIdx]))
+        bIdx = int(nnlData[f"nnl{fabIdx}"][jmax])
+        fabVal = float(fabRow[jmax])
+    else:
+        print(f"WARNING: particle {fabIdx} has no valid neighbours in {h5File}, drawing background only.")
+
+    plt.rcParams.update({'font.size': 18})
+    fig, ax = plt.subplots(figsize=(7,5), dpi=dpi)
+    bgPlt = ax.scatter(pos[:,0], pos[:,1], c=cm, s=_marker_sizes(data, markerSize))
+
+    setDomainLimits(ax, pos, h5File, openBorders, domain)
+
+    # mark particle a and draw the a->b arrow
+    ax.scatter(pos[fabIdx,0], pos[fabIdx,1], s=float(markerSize)*6., marker='o',
+               facecolors='none', edgecolors='red', linewidths=1.0, zorder=5)
+    if bIdx is not None:
+        # mutation_scale (arrowhead size) defaults to the font size (~18) if
+        # unset, which makes the head ~20x too big; pin it small explicitly.
+        ax.annotate("", xy=(pos[bIdx,0], pos[bIdx,1]),
+                    xytext=(pos[fabIdx,0], pos[fabIdx,1]),
+                    arrowprops=dict(arrowstyle="->", color='red', lw=0.7,
+                                    mutation_scale=1.0), zorder=6)
+        ax.annotate(rf"$f_{{ab}}^{{\max}}={fabVal:.3g}$" + "\n" + rf"$a={fabIdx}\to b={bIdx}$",
+                    xy=(pos[bIdx,0], pos[bIdx,1]), xytext=(8, 8),
+                    textcoords='offset points', fontsize=8, color='red', zorder=6)
+
+    plt.title(rf"Max $f_{{ab}}$ from particle {fabIdx} over " + bg_label +
+              r" at $t = " + f"{time:.4f}" + r"$", fontsize=14)
+    plt.xlabel("$x$")
+    plt.ylabel("$y$")
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    fig.colorbar(bgPlt, cax=cax, label=bg_label)
+    ax.set_aspect('equal')
+    plt.tight_layout()
+    out = outDir + "/" + prefix + pathlib.Path(h5File).stem + ".png"
+    print("Saving figure to", out)
+    plt.savefig(out, dpi=dpi)
+    plt.close()
+
+def createFabFieldPlot(h5File, outDir, stress=False, fce=False, openBorders=False,
+                       domain=None, markerSize=1., scale=1.0, dpi=200):
+    """For every particle a, find its top-FAB_TOP_K neighbours by pairwise f_ab
+    and draw one vector per rank along the unit direction a->b, scaled by the
+    f_ab value (and a readability `scale` factor), each rank in its own color,
+    on top of a background scatter (density by default, or |S| with --stress,
+    or f_ce with --fce). Requires /fabAll (OUTPUT_FAB, DEBUG_LVL>=2) plus the
+    companion <step>NNL.h5 file that dumpNNL() writes under the same
+    DEBUG_LVL>=2 gate (neighbour positions /nnlPrtcls<i>)."""
+    data = h5.File(h5File, 'r')
+    if "fabAll" not in data:
+        print(f"WARNING: fabAll unavailable for {h5File} "
+              f"(compile with OUTPUT_FAB and DEBUG_LVL>=2), skipping.")
+        return
+    nnlFile = str(h5File).replace(".h5", "NNL.h5")
+    if not os.path.exists(nnlFile):
+        print(f"WARNING: companion NNL file {nnlFile} unavailable "
+              f"(compile with OUTPUT_FAB and DEBUG_LVL>=2), skipping.")
+        return
+    nnlData = h5.File(nnlFile, 'r')
+
+    pos = data["x"][:]
+    time = data["time"][0]
+    nPart = pos.shape[0]
+    noi = data["noi"][:]
+
+    # rank the neighbours of each particle by f_ab, restricted to valid
+    # (j < noi[a]) slots; topIdx[:,k] is the slot of the (k+1)-th largest f_ab
+    fabAll = data["fabAll"][:]
+    maxSlots = fabAll.shape[1]
+    valid = np.arange(maxSlots)[None, :] < noi[:, None]
+    fabMasked = np.where(valid, fabAll, -np.inf)
+    K = min(FAB_TOP_K, maxSlots)
+    topIdx = np.argsort(fabMasked, axis=1)[:, :-K-1:-1]
+    topFab = np.take_along_axis(fabMasked, topIdx, axis=1)
+    topValid = topFab > -np.inf   # False past rank noi[a]
+
+    # neighbour position comes straight from dumpNNL()'s companion file, in the
+    # same i*MAX_NUM_INTERACTIONS+jn slot order as fabAll — no index lookup needed
+    vecs = np.zeros((nPart, K, pos.shape[1]))
+    for i in np.nonzero(np.any(topValid, axis=1))[0]:
+        dsname = f"nnlPrtcls{int(i)}"
+        if dsname not in nnlData:
+            continue
+        nnlPos = nnlData[dsname][:]
+        for k in range(K):
+            if not topValid[i, k]:
+                break   # ranks are sorted descending: once invalid, so are the rest
+            bPos = np.asarray(nnlPos[int(topIdx[i, k])])
+            diff = bPos[:pos.shape[1]] - pos[i]
+            norm = np.linalg.norm(diff)
+            if norm == 0.:
+                continue
+            vecs[i, k] = (diff / norm) * (topFab[i, k] * scale)
+
+    if not np.any(topValid):
+        print(f"WARNING: no particle in {h5File} has a valid f_ab neighbour, drawing background only.")
+
+    # choose the background quantity / colorbar label / output prefix
+    if stress:
+        Sxx = np.array(data["Sxx"][:]); Sxy = np.array(data["Sxy"][:]); Syy = np.array(data["Syy"][:])
+        cm = np.sqrt(Sxx**2 + Sxy**2 + Syy**2)
+        bg_label = r"$" + pref + r"$"
+        prefix = "fabFieldS"
+    elif fce:
+        if "fce" not in data:
+            print(f"WARNING: fce unavailable for {h5File} (compile with SURFACE_VOLCORR), skipping.")
+            return
+        cm = data["fce"][()]
+        bg_label = r"$f_{ce}$"
+        prefix = "fabFieldFce"
+    else:
+        cm = data["rho"][()]
+        bg_label = r"$\varrho$"
+        prefix = "fabField"
+
+    plt.rcParams.update({'font.size': 18})
+    fig, ax = plt.subplots(figsize=(7,5), dpi=dpi)
+    bgPlt = ax.scatter(pos[:,0], pos[:,1], c=cm, s=_marker_sizes(data, markerSize))
+
+    setDomainLimits(ax, pos, h5File, openBorders, domain)
+
+    for k in range(K):
+        color = FAB_RANK_COLORS[k % len(FAB_RANK_COLORS)]
+        ax.quiver(pos[:,0], pos[:,1], vecs[:,k,0], vecs[:,k,1], angles='xy', scale_units='xy',
+                  scale=1., color=color, width=0.0015, alpha=0.8,
+                  label=f"rank {k+1}")
+    ax.legend(loc='upper right', fontsize=7, framealpha=0.8)
+
+    plt.title(rf"Top-{K} $f_{{ab}}$ vectors (scale$={scale:g}$) over " + bg_label +
+              r" at $t = " + f"{time:.4f}" + r"$", fontsize=13)
+    plt.xlabel("$x$")
+    plt.ylabel("$y$")
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    fig.colorbar(bgPlt, cax=cax, label=bg_label)
+    ax.set_aspect('equal')
+    plt.tight_layout()
+    out = outDir + "/" + prefix + pathlib.Path(h5File).stem + ".png"
+    print("Saving figure to", out)
+    plt.savefig(out, dpi=dpi)
+    plt.close()
+
+def createCombinedPlot(h5File, outDir, openBorders=False, domain=None, vminmax=None, markerSize=1.,
                        diff=False, first_frame_data=None, diff_vminmax=None, iHi=-1, dpi=200):
     data = h5.File(h5File, 'r')
     pos  = data["x"][:]
@@ -487,7 +736,7 @@ def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSi
                            vmax=max(dm[1], max(dm[0], DIFF_FLOOR) * 10.))
             sc = ax.scatter(pos[:,0], pos[:,1], c=diff_vals, s=markerSize,
                             norm=norm, cmap='viridis')
-            setDomainLimits(ax, pos, h5File, openBorders)
+            setDomainLimits(ax, pos, h5File, openBorders, domain)
             ax.set_aspect('equal')
             ax.set_title(dlabel)
             ax.set_xlabel("$x$")
@@ -506,7 +755,7 @@ def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSi
             vals = np.where(np.isfinite(vals), vals, 0.)
             sc = ax.scatter(pos[:,0], pos[:,1], c=vals, s=_marker_sizes(data, markerSize), vmin=vlo, vmax=vhi)
 
-            setDomainLimits(ax, pos, h5File, openBorders)
+            setDomainLimits(ax, pos, h5File, openBorders, domain)
             if iHi > -1:
                 plotKernelCircle(data, iHi, pos, ax)
             ax.set_aspect('equal')
@@ -526,25 +775,34 @@ def createCombinedPlot(h5File, outDir, openBorders=False, vminmax=None, markerSi
 
 
 def _worker(task):
-    (h5File, outDir, grad, vel, stress, iNNL, borders, vmin, vmax,
-     pressure, energy, noi, conditionNumber, condThreshold, fab,
+    (h5File, outDir, grad, vel, stress, iNNL, borders, domain, vmin, vmax,
+     pressure, energy, noi, conditionNumber, condThreshold, fab, fabMax, fce,
+     fabField, fabScale,
      combined, combined_vminmax,
-     markerSize, diff, first_frame_data, diff_vminmax, iHi, dpi) = task
-    if combined:
-        createCombinedPlot(h5File, outDir, borders, combined_vminmax, markerSize,
+     markerSize, diff, first_frame_data, diff_vminmax, iHi, dpi, velScale) = task
+    if fab is not None and fab >= 0:
+        createFabArrowPlot(h5File, outDir, fab, stress, fce, borders, domain, markerSize, dpi)
+    elif fabField:
+        createFabFieldPlot(h5File, outDir, stress, fce, borders, domain, markerSize, fabScale, dpi)
+    elif combined:
+        createCombinedPlot(h5File, outDir, borders, domain, combined_vminmax, markerSize,
                            diff, first_frame_data, diff_vminmax, iHi, dpi)
     elif pressure:
-        createPressurePlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi, dpi)
+        createPressurePlot(h5File, outDir, borders, domain, vmin, vmax, markerSize, iHi, dpi)
     elif energy:
-        createEnergyPlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi, dpi)
+        createEnergyPlot(h5File, outDir, borders, domain, vmin, vmax, markerSize, iHi, dpi)
     elif noi:
-        createNoiPlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi, dpi)
+        createNoiPlot(h5File, outDir, borders, domain, vmin, vmax, markerSize, iHi, dpi)
     elif conditionNumber:
-        createConditionNumberPlot(h5File, outDir, borders, vmin, vmax, markerSize, condThreshold, iHi, dpi)
-    elif fab:
-        createFabPlot(h5File, outDir, borders, vmin, vmax, markerSize, iHi, dpi)
+        createConditionNumberPlot(h5File, outDir, borders, domain, vmin, vmax, markerSize, condThreshold, iHi, dpi)
+    elif fabMax:
+        createFabPlot(h5File, outDir, borders, domain, vmin, vmax, markerSize, iHi, dpi, use_max=True)
+    elif fab is not None:
+        createFabPlot(h5File, outDir, borders, domain, vmin, vmax, markerSize, iHi, dpi)
+    elif fce:
+        createFcePlot(h5File, outDir, borders, domain, vmin, vmax, markerSize, iHi, dpi)
     else:
-        createPlot(h5File, outDir, grad, vel, stress, iNNL, borders, vmin, vmax, markerSize, iHi, dpi)
+        createPlot(h5File, outDir, grad, vel, stress, iNNL, borders, domain, vmin, vmax, markerSize, iHi, dpi, velScale)
 
 
 if __name__=="__main__":
@@ -562,11 +820,29 @@ if __name__=="__main__":
     parser.add_argument("--conditionNumber", "-N", action="store_true", help="plot condition number of gradient estimation matrix")
     parser.add_argument("--threshold", "-T", nargs=3, metavar=("NCOND", "EX", "EY"), type=float, default=None,
                         help="highlight particles meeting all three: Ncond > NCOND, |e_x| < EX, |e_y| < EY (use with -N)")
-    parser.add_argument("--fab", "-f", action="store_true", help="plot per-particle average f_ab (requires OUTPUT_FAB at compile time)")
+    parser.add_argument("--fab", "-f", nargs="?", type=int, const=-1, default=None, metavar="A",
+                        help="bare: plot per-particle average f_ab (requires OUTPUT_FAB). "
+                             "With an integer particle index A: draw an arrow from particle A to its "
+                             "max-f_ab neighbour over a background plot (--stress or --fce, else density); "
+                             "requires the per-pair fab dump (OUTPUT_FAB and DEBUG_LVL>=2). Incompatible with --hi.")
+    parser.add_argument("--fabMax", "-F", action="store_true", help="plot per-particle max f_ab (requires OUTPUT_FAB at compile time)")
+    parser.add_argument("--fabField", "-V", action="store_true",
+                        help="for all particles: draw a vector along the unit direction to the max-f_ab "
+                             "neighbour, scaled by the f_ab value (see --fabScale), over a background plot "
+                             "(--stress or --fce, else density); requires the per-pair fab dump "
+                             "(OUTPUT_FAB and DEBUG_LVL>=2). Incompatible with --hi.")
+    parser.add_argument("--fabScale", metavar="float", type=float, default=1.0,
+                        help="scale factor applied to vector lengths in --fabField mode, for readability (default: 1.0)")
+    parser.add_argument("--fce", "-e", action="store_true", help="plot per-particle surface volume correction f_ce (requires SURFACE_VOLCORR at compile time)")
     parser.add_argument("--plotVelocity", "-v", action="store_true", help="plot velocity")
+    parser.add_argument("--velScale", metavar="float", type=float, default=0.5,
+                        help="quiver scale for --plotVelocity (data units per arrow unit length; "
+                             "smaller values draw longer arrows, default: 0.5)")
     parser.add_argument("--iNNL", "-i", metavar="int", type=int, help="plot NNL for particles i", default=-1)
     parser.add_argument("--hi", metavar="int", type=int, help="plot kernel length h of particle i as a thin circle", default=-1)
     parser.add_argument("--openBorders", "-b", action="store_true", help="Adjust plot domain to show all real particles")
+    parser.add_argument("--domain", metavar=("LX", "UX", "LY", "UY"), nargs=4, type=float, default=None,
+                        help="draw dashed boundary lines at LX UX LY UY; also sets plot limits when --openBorders is not used")
     parser.add_argument("--continue", "-c", dest="continue_", action="store_true",
                         help="skip h5 files whose plots already exist in outDir")
     parser.add_argument("--workers", "-w", metavar="int", type=int, default=os.cpu_count(),
@@ -577,6 +853,8 @@ if __name__=="__main__":
                         help="only plot files with simulation time >= tstart")
     parser.add_argument("--diff", "-D", action="store_true",
                         help="(with --combined) add two rows showing log-scale |diff to first frame|")
+    parser.add_argument("--prescan", action="store_true",
+                        help="pre-scan all files for global color limits in fab mode (default: per-frame auto-scale)")
     parser.add_argument("--dpi", metavar="int", type=int, default=200,
                         help="output resolution in dots per inch (default: 200)")
 
@@ -586,6 +864,12 @@ if __name__=="__main__":
         print("WARNING: --diff has no effect without --combined.")
     if args.threshold is not None and not args.conditionNumber:
         print("WARNING: --threshold has no effect without --conditionNumber.")
+
+    fab_arrow = args.fab is not None and args.fab >= 0   # --fab A: arrow mode
+    if fab_arrow and args.hi > -1:
+        parser.error("--fab A (arrow mode) is incompatible with --hi")
+    if args.fabField and args.hi > -1:
+        parser.error("--fabField is incompatible with --hi")
 
     plt.rc('text', usetex=True)
     
@@ -669,7 +953,9 @@ if __name__=="__main__":
                     print(f"  diff {key}: vmin={d_lo:.4g}, vmax={d_hi:.4g}")
         else:
             # Helper to get the plotted quantity key
-            if args.pressure:
+            if fab_arrow or args.fabField:
+                colorKey = None   # arrow/field-mode background is auto-scaled per frame
+            elif args.pressure:
                 colorKey = "P"
             elif args.energy:
                 colorKey = "u"
@@ -677,23 +963,30 @@ if __name__=="__main__":
                 colorKey = "noi"
             elif args.conditionNumber:
                 colorKey = "conditionNumber"
-            elif args.fab:
-                colorKey = "fabAvg"
+            elif args.fabMax or args.fab is not None:
+                colorKey = ("fabMax" if args.fabMax else "fabAvg") if args.prescan else None
+            elif args.fce:
+                colorKey = "fce" if args.prescan else None
             else:
                 colorKey = "rho"
-            print(f"Pre-scanning {len(h5Files)} file(s) for color limits...")
-            vmin, vmax = prescan_quantity(h5Files, colorKey)
-            print(f"Global color limits: vmin={vmin:.4g}, vmax={vmax:.4g} (25% margin)")
+            if colorKey is not None:
+                print(f"Pre-scanning {len(h5Files)} file(s) for color limits...")
+                vmin, vmax = prescan_quantity(h5Files, colorKey)
+                print(f"Global color limits: vmin={vmin:.4g}, vmax={vmax:.4g} (25% margin)")
+            else:
+                print("Fab/fce mode: color limits auto-scaled per frame (pass --prescan for global scale).")
 
     if args.plotGradient or args.iNNL > -1:
         if args.pressure or args.energy or args.noi:
             print("WARNING: '--plotGradient' and '--iNNL' are ignored for this plot mode.")
 
     tasks = [(f, args.outDir, args.plotGradient, args.plotVelocity, args.stress,
-              args.iNNL, args.openBorders, vmin, vmax,
+              args.iNNL, args.openBorders, args.domain, vmin, vmax,
               args.pressure, args.energy, args.noi, args.conditionNumber,
-              args.threshold, args.fab, args.combined, combined_vminmax,
-              args.markerSize, args.diff, first_frame_data, diff_vminmax, args.hi, args.dpi)
+              args.threshold, args.fab, args.fabMax, args.fce,
+              args.fabField, args.fabScale,
+              args.combined, combined_vminmax,
+              args.markerSize, args.diff, first_frame_data, diff_vminmax, args.hi, args.dpi, args.velScale)
              for f in h5Files]
 
     nworkers = min(args.workers, len(tasks)) if tasks else 1

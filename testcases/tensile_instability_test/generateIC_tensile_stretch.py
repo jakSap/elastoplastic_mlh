@@ -54,8 +54,8 @@ import h5py
 # ----------------------------------------------------------------------------
 # Parameters (normalized units; must match config materials + box)
 # ----------------------------------------------------------------------------
-x_lo, x_hi = -10.0, 10.0  # bar extent in x (FREE ends -- not periodic in x)
-y_lo, y_hi = -1.0, 1.0    # transverse extent
+x_lo, x_hi = -8.0, 8.0  # bar extent in x (FREE ends -- not periodic in x)
+y_lo, y_hi = -1.5, 1.5    # transverse extent
 dp_default = 0.05          # default particle spacing
 sr_default = 0.1           # default strain rate; |vx| at the ends = sr * x_hi
 rho0 = 1.0                 # reference density (P = 0 at rho0)
@@ -110,7 +110,7 @@ def main():
     vel = np.zeros((N, 2))
     vel[:, 0] = a * gx
 
-    u = np.zeros(N)             # a=b=alpha=beta=0: u inert for pressure; 0 keeps HLLC energy fluxes minimal
+    u = np.ones(N)             # a=b=alpha=beta=0: u inert for pressure; 0 keeps HLLC energy fluxes minimal
     materialId = np.zeros(N, dtype=np.int8)
 
     with h5py.File(out_file, "w") as h5f:
