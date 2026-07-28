@@ -52,3 +52,36 @@ output/
 
 # Python cache files
 __pycache__/
+
+# ===== Study & run output (kept out of git) =====
+# Date-stamped run directories (YYYYMMDD*)
+testcases/**/20[0-9][0-9][0-9][0-9][0-9][0-9]*/
+# Per-study build snapshots
+testcases/**/build_*/
+# Named study directories
+testcases/am1_validation/
+testcases/am_options_study/
+testcases/angular_momentum_study/
+testcases/gradient_order_am3/
+testcases/hllc_ep_study/
+testcases/colliding_rings/compare_milu/
+testcases/colliding_rings/gizmo_mlh_comparison/
+testcases/colliding_rings/plasticity/
+testcases/rip_test/test_*/
+testcases/single_block/uniform_v_run_*/
+testcases/two_blocks/twoblocks_*/
+# Per-run logs, config snapshots and local binaries
+testcases/**/*.log
+testcases/tensile_instability_test/config_0.*.info
+testcases/tensile_instability_test/20*_config_*.info
+testcases/two_blocks/config_*.info
+testcases/two_blocks/parameter.h
+testcases/two_blocks/material.cfg
+testcases/two_blocks/mlh
+testcases/two_blocks/mlh_watch
+# Loose tools/snapshots left in testcase dirs
+demonstrator/testcase_triple/
+testcases/densityPlotter.py
+testcases/strip_log_spam.sh
+testcases/tensile_instability_test/fabHistPlotter.py
+testcases/two_blocks/convert_ic_for_miluphcuda.py
