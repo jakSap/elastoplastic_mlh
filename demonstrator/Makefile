@@ -36,9 +36,12 @@ LDFLAGS := -std=c++11 -L../../boost_installation/lib -L/usr/lib/x86_64-linux-gnu
 
 # get kernel name to be able to run sed correctly on Darwin (MacOS) or Linux kernels
 KERNEL := $(shell uname -s)
-ifeq ($(KERNEL), Darwin) 
+ifeq ($(KERNEL), Darwin)
 	SED := sed -i "~"
-	LDFLAGS += -lomp
+	# Homebrew dependency paths (hdf5, boost, lapack/blas)
+	# OpenMP is disabled (see commented -fopenmp above); add -L/opt/homebrew/opt/libomp/lib -lomp to re-enable
+	CXXFLAGS += -I/opt/homebrew/include
+	LDFLAGS += -L/opt/homebrew/lib
 else
 	SED := sed -i
 	LDFLAGS += -lgomp
@@ -62,8 +65,8 @@ check-flags: $(INCLDIR)/parameter.h
 			echo "  ERROR: '$$macro' is defined in parameter.h but never referenced"; \
 			failed=1; \
 		fi; \
-	done < <(grep -E '^\s*#\s*define\s+[A-Za-z_][A-Za-z_0-9]*' $(INCLDIR)/parameter.h \
-	         | sed -E 's/^\s*#\s*define\s+([A-Za-z_][A-Za-z_0-9]*).*/\1/' \
+	done < <(grep -E '^[[:space:]]*#[[:space:]]*define[[:space:]]+[A-Za-z_][A-Za-z_0-9]*' $(INCLDIR)/parameter.h \
+	         | sed -E 's/^[[:space:]]*#[[:space:]]*define[[:space:]]+([A-Za-z_][A-Za-z_0-9]*).*/\1/' \
 	         | grep -v '^DEMONSTRATOR_PARAMETER_H$$'); \
 	if [ "$$failed" -ne 0 ]; then \
 		echo "Build aborted: fix or remove the unused flags above from parameter.h"; \
