@@ -310,9 +310,9 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
     const double hydro_gamma = MeshlessEOS.EOSGetHydroGammaParam();
 #endif // HLLC_general_EOS
 
-    const double hydro_gamma_plus_one = hydro_gamma + 1.0d;
-    const double hydro_one_over_gamma = 1.0d / hydro_gamma;
-    const double hydro_one_over_gamma_minus_one = hydro_one_over_gamma - 1.0d;
+    const double hydro_gamma_plus_one = hydro_gamma + 1.0;
+    const double hydro_one_over_gamma = 1.0 / hydro_gamma;
+    const double hydro_one_over_gamma_minus_one = hydro_one_over_gamma - 1.0;
 
     // Step 0: velocity in interface frame
 
@@ -325,8 +325,8 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
     const double uR = WR[2] * n[0] + WR[3] * n[1];
 #endif
 
-    const double rhoLinv = (WL[0] > 0.0d) ? 1.0d / WL[0] : 0.0d;
-    const double rhoRinv = (WR[0] > 0.0d) ? 1.0d / WR[0] : 0.0d;
+    const double rhoLinv = (WL[0] > 0.0) ? 1.0 / WL[0] : 0.0;
+    const double rhoRinv = (WR[0] > 0.0) ? 1.0 / WR[0] : 0.0;
 
 #if HLLC_general_EOS
 #if EOS == 1 || EOS == 2
@@ -344,22 +344,22 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
     /* STEP 1: pressure estimate */
     const double rhobar = WL[0] + WR[0];
     const double abar = aL + aR;
-    const double pPVRS = 0.5d * ((WL[1] + WR[1]) - 0.25d * (uR - uL) * rhobar * abar);
+    const double pPVRS = 0.5 * ((WL[1] + WR[1]) - 0.25 * (uR - uL) * rhobar * abar);
 
-    const double pstar = std::max(0.0d, pPVRS);
+    const double pstar = std::max(0.0, pPVRS);
 
     /* STEP 2: wave speed estimates
        all these speeds are along the interface normal, since uL and uR are */
 #if DIM == 3
-    double qL = 1.0d;
-    if (pstar > WL[4] && WL[4] > 0.0d) {
-      qL = sqrtf(1.0d + 0.5d * hydro_gamma_plus_one * hydro_one_over_gamma *
-                            (pstar / WL[4] - 1.0d));
+    double qL = 1.0;
+    if (pstar > WL[4] && WL[4] > 0.0) {
+      qL = sqrtf(1.0 + 0.5 * hydro_gamma_plus_one * hydro_one_over_gamma *
+                            (pstar / WL[4] - 1.0));
     }
-    double qR = 1.0d;
-    if (pstar > WR[4] && WR[4] > 0.0d) {
-      qR = sqrtf(1.0d + 0.5d * hydro_gamma_plus_one * hydro_one_over_gamma *
-                            (pstar / WR[4] - 1.0d));
+    double qR = 1.0;
+    if (pstar > WR[4] && WR[4] > 0.0) {
+      qR = sqrtf(1.0 + 0.5 * hydro_gamma_plus_one * hydro_one_over_gamma *
+                            (pstar / WR[4] - 1.0));
     }
     const double SLmuL = -aL * qL;
     const double SRmuR = aR * qR;
@@ -367,15 +367,15 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
         (WR[4] - WL[4] + WL[0] * uL * SLmuL - WR[0] * uR * SRmuR) /
         (WL[0] * SLmuL - WR[0] * SRmuR);
 #else
-    double qL = 1.0d;
-    if (pstar > WL[1] && WL[1] > 0.0d) {
-      qL = sqrtf(1.0d + 0.5d * hydro_gamma_plus_one * hydro_one_over_gamma *
-                            (pstar / WL[1] - 1.0d));
+    double qL = 1.0;
+    if (pstar > WL[1] && WL[1] > 0.0) {
+      qL = sqrtf(1.0 + 0.5 * hydro_gamma_plus_one * hydro_one_over_gamma *
+                            (pstar / WL[1] - 1.0));
     }
-    double qR = 1.0d;
-    if (pstar > WR[1] && WR[1] > 0.0d) {
-      qR = sqrtf(1.0d + 0.5d * hydro_gamma_plus_one * hydro_one_over_gamma *
-                            (pstar / WR[1] - 1.0d));
+    double qR = 1.0;
+    if (pstar > WR[1] && WR[1] > 0.0) {
+      qR = sqrtf(1.0 + 0.5 * hydro_gamma_plus_one * hydro_one_over_gamma *
+                            (pstar / WR[1] - 1.0));
     }
     const double SLmuL = -aL * qL;
     const double SRmuR = aR * qR;
@@ -394,12 +394,12 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
 
     /* STEP 3: HLLC flux in a frame moving with the interface velocity */
 #if DIM == 3
-    if (Sstar >= 0.0d) {
+    if (Sstar >= 0.0) {
         const double rhoLuL = WL[0] * uL;
         const double v2 = WL[1] * WL[1] + WL[2] * WL[2] + WL[3] * WL[3];
         //const double v2 = uL * uL;
         const double eL =
-            WL[4] * rhoLinv * hydro_one_over_gamma_minus_one + 0.5d * v2;
+            WL[4] * rhoLinv * hydro_one_over_gamma_minus_one + 0.5 * v2;
         const double SL = SLmuL + uL;
 
         /* flux FL */
@@ -411,12 +411,12 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
         totflux[3] = rhoLuL * WL[3] + WL[4] * n[2];
         totflux[4] = rhoLuL * eL + WL[4] * uL;
 
-        if (SL < 0.0d) {
+        if (SL < 0.0) {
 
             const double starfac = SLmuL / (SL - Sstar);
             const double rhoLSL = WL[0] * SL;
             const double SstarmuL = Sstar - uL;
-            const double rhoLSLstarfac = rhoLSL * (starfac - 1.0d);
+            const double rhoLSLstarfac = rhoLSL * (starfac - 1.0);
             const double rhoLSLSstarmuL = rhoLSL * SstarmuL * starfac;
 
             totflux[0] += rhoLSLstarfac;
@@ -430,7 +430,7 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
         const double rhoRuR = WR[0] * uR;
         const double v2 = WR[1] * WR[1] + WR[2] * WR[2] + WR[3] * WR[3];
         const double eR =
-            WR[4] * rhoRinv * hydro_one_over_gamma_minus_one + 0.5d * v2;
+            WR[4] * rhoRinv * hydro_one_over_gamma_minus_one + 0.5 * v2;
         const double SR = SRmuR + uR;
 
         /* flux FR */
@@ -440,7 +440,7 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
         totflux[3] = rhoRuR * WR[3] + WR[4] * n[2];
         totflux[4] = rhoRuR * eR + WR[4] * uR;
 
-        if (SR > 0.0d) {
+        if (SR > 0.0) {
 
             const double starfac = SRmuR / (SR - Sstar);
             const double rhoRSR = WR[0] * SR;
@@ -457,14 +457,14 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
         }
     }
 #else
-    if (Sstar >= 0.0d) {
+    if (Sstar >= 0.0) {
         // Logger(DEBUG) << "SStar >= 0";
         // Logger(DEBUG) << " a ";
         const double rhoLuL = WL[0] * uL;
         const double v2 = WL[2] * WL[2] + WL[3] * WL[3];
         //const double v2 = uL * uL;
         const double eL =
-            WL[1] * rhoLinv * hydro_one_over_gamma_minus_one + 0.5d * v2;
+            WL[1] * rhoLinv * hydro_one_over_gamma_minus_one + 0.5 * v2;
         const double SL = SLmuL + uL;
 
         /* flux FL */
@@ -482,13 +482,13 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
         totflux[3] = rhoLuL * WL[3] + WL[1] * n[1];
 #endif //MESHLESS_FINITE_MASS
 
-        if (SL < 0.0d) {
+        if (SL < 0.0) {
             // Logger(DEBUG) << "SL < 0";
             // Logger(DEBUG) << " b ";
             const double starfac = SLmuL / (SL - Sstar);
             const double rhoLSL = WL[0] * SL;
             const double SstarmuL = Sstar - uL;
-            const double rhoLSLstarfac = rhoLSL * (starfac - 1.0d);
+            const double rhoLSLstarfac = rhoLSL * (starfac - 1.0);
             const double rhoLSLSstarmuL = rhoLSL * SstarmuL * starfac;
 #if MESHLESS_FINITE_MASS
             totflux[0] += 0;
@@ -511,7 +511,7 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
         const double rhoRuR = WR[0] * uR;
         const double v2 = WR[2] * WR[2] + WR[3] * WR[3];
         const double eR =
-            WR[1] * rhoRinv * hydro_one_over_gamma_minus_one + 0.5d * v2;
+            WR[1] * rhoRinv * hydro_one_over_gamma_minus_one + 0.5 * v2;
         const double SR = SRmuR + uR;
 
 #if MESHLESS_FINITE_MASS
@@ -529,13 +529,13 @@ void HLLC::solveHLLC1(int matIdL, int matIdR,
 #endif //MESHLESS_FINITE_MASS
 
 
-        if (SR > 0.0d) {
+        if (SR > 0.0) {
             // Logger(INFO) << "SR > 0";
             // Logger(DEBUG) << " d ";
             const double starfac = SRmuR / (SR - Sstar);
             const double rhoRSR = WR[0] * SR;
             const double SstarmuR = Sstar - uR;
-            const double rhoRSRstarfac = rhoRSR * (starfac - 1.d);
+            const double rhoRSRstarfac = rhoRSR * (starfac - 1.0);
             const double rhoRSRSstarmuR = rhoRSR * SstarmuR * starfac;
 #if MESHLESS_FINITE_MASS
             //Logger(DEBUG) << Sstar;
@@ -790,9 +790,9 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
     const double hydro_gamma = MeshlessEOS.EOSGetHydroGammaParam();
 #endif // HLLC_general_EOS
 
-    const double hydro_gamma_plus_one = hydro_gamma + 1.0d;
-    const double hydro_one_over_gamma = 1.0d / hydro_gamma;
-    const double hydro_one_over_gamma_minus_one = 1.0d / (hydro_gamma - 1.0d);
+    const double hydro_gamma_plus_one = hydro_gamma + 1.0;
+    const double hydro_one_over_gamma = 1.0 / hydro_gamma;
+    const double hydro_one_over_gamma_minus_one = 1.0 / (hydro_gamma - 1.0);
 
     // Step 1: x-split normal velocity (no projection onto n needed)
     const double vL = WL[2];
@@ -1045,9 +1045,9 @@ void HLLC::HLL(double *WL, double *WR, double *totflux, const double &hydro_gamm
     double v2L = pow(WL[2], 2) + pow(WL[3], 2);
     double v2R = pow(WR[2], 2) + pow(WR[3], 2);
 
-    double eL = WL[1] / WL[0] * (1 / hydro_gamma - 1.d)
+    double eL = WL[1] / WL[0] * (1 / hydro_gamma - 1.0)
         + v2L;
-    double eR = WR[1] / WR[0] * (1 / hydro_gamma - 1.d)
+    double eR = WR[1] / WR[0] * (1 / hydro_gamma - 1.0)
         + v2R;
 
 #if USE_ROE
@@ -1065,7 +1065,7 @@ void HLLC::HLL(double *WL, double *WR, double *totflux, const double &hydro_gamm
         / (sqrtf(WL[0]) + sqrtf(WR[0]));
 
     // Approximate sound speed:
-    double aBar = sqrtf((hydro_gamma - 1.d) * (HBar - 5.d * pow(uBar, 2)));
+    double aBar = sqrtf((hydro_gamma - 1.0) * (HBar - 5.0 * pow(uBar, 2)));
 
     // Wave speed estimate:
     double SL = uBar - aBar;
