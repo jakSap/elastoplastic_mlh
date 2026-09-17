@@ -1,0 +1,59 @@
+; TENSILE EXPERIMENT (tensileTest.sh): variant tcMonaghan, build tensile_builds/build_murnaghan_tcMonaghan
+; 2D linear travelling soundwave (Hopkins 2015, sec. 4.2.1), murnaghan EOS,
+; 256 x 64 particles (n = 256 per wavelength), N_NN = 32.
+; MASSES CORRECTED for the kernel-sum density offset at N_NN = 32 (IC soundwave_murnaghan_N256_corr.h5):
+; <rho> = rho_bar = 1, so P_bar ~ 0 (the wave has tensile half-cycles) and c = 1.
+; The offset remarks in the EOS block below refer to nominal masses.
+; Build: build_murnaghan/ -- EOS 1, ELASTIC 1 + GIZMO_ELASTIC_FLUX 0 (xSplitElasticHLLC),
+;        mu = 0 (no solid dynamics), TENSILE_CORRECTION 1, SURFACE_VOLCORR 0,
+;        EXPLICIT_VOL_INTEGRATION 1, PERIODIC_BOUNDARIES 1, Wendland C2. See makeBuilds.sh.
+; Run from this directory:  build_murnaghan/bin/mlh -c config_murnaghan_N256_corr.info   (or ./runAll.sh)
+
+initFile soundwave_murnaghan_N256_corr.h5
+outDir   output_murnaghan_N256_corr_tcMonaghan
+
+; One wave period, lambda/c = 1. ADAPTIVE_TIMESTEP: snapshots every
+; timeStep*h5DumpInterval = 0.01.
+timeStep 0.01
+timeEnd  1.0
+h5DumpInterval 1
+
+periodicBoxLimits {
+    lowerX 0.0
+    lowerY 0.0
+    lowerZ 0.0
+    upperX 1.0
+    upperY 0.25
+    upperZ 0.0
+}
+
+; ~ kernel support for N_NN = 32 on the lattice: sqrt(N_NN/pi) * dx, dx = 1/256
+kernelSize 0.0124669
+
+sml {
+    NNNTarget 32
+    tol       1e-3
+    maxIter   200
+    maxFactor 1.2
+    hMinFactor 0.1
+    hMaxFactor 3.0
+    warnFraction  0.05
+    panicFraction 0.25
+}
+
+; read only for EOS 0, kept for config-parser compatibility
+hydro_gamma 1.6666666666666667
+
+; Repo-standard Murnaghan (testcases/rip_test): P = K0/n ((rho/rho0)^n - 1),
+; c^2 = K0/rho0 (rho/rho0)^(n-1) = 1 at rho = rho0 = 1. The kernel-sum density
+; offset (+4.2e-3 at N_NN = 32) gives P_bar = +4.2e-3 and c = 1.0021.
+; mu = 0: no deviatoric stress.
+materials {
+    mat0 {
+        matId 0
+        K0    1.0
+        n     2.0
+        rho0  1.0
+        mu    0.0
+    }
+}
