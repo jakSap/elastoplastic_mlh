@@ -747,9 +747,11 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define SURFACE_VOLCORR_B 2.52444
 #define SURFACE_VOLCORR_FLOOR 0.344301
 
-#if SURFACE_VOLCORR && PERIODIC_BOUNDARIES
-#error "SURFACE_VOLCORR is only implemented for the non-periodic path. The closure asymmetry sum currently ignores ghost neighbours, which would spuriously trigger the correction at periodic boundaries. Set SURFACE_VOLCORR to 0 for periodic runs."
-#endif
+// PERIODIC_BOUNDARIES note: the closure asymmetry sum is now continued over the
+// periodic images (Particles::compOmega(i, ghostParticles) resumes the partial
+// first moment stashed in firstMoment[i]), and compDensity(ghostParticles)
+// applies the same 1/FCE lift as the non-periodic path. A particle near a box
+// face therefore sees a symmetric stencil and gets FCE = 1, as it should.
 
 // GIZMO HYDRO_EXPLICITLY_INTEGRATE_VOLUME port (Monaghan 2000 continuity).
 // When 1, the kernel-sum density rho_kern produced by compDensity() is
@@ -835,9 +837,11 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #error "EXPLICIT_VOL_SEED_RHO0 needs a material reference density (EOS 1 or 2)."
 #endif
 
-#if EXPLICIT_VOL_INTEGRATION && PERIODIC_BOUNDARIES
-#error "EXPLICIT_VOL_INTEGRATION currently only wires the non-periodic path. The periodic gradient-recompute hooks would need additional ghost updates of rhoExplicit/rhoKernel. Set EXPLICIT_VOL_INTEGRATION to 0 for periodic runs."
-#endif
+// PERIODIC_BOUNDARIES note: ghosts hold no rhoExplicit/rhoKernel of their own -
+// they do not need to. applyExplicitVolumeOverride() runs after BOTH density
+// passes, so `rho` already carries the advected value by the time
+// updateGhostState() copies it out to the images, and the div-v that drives the
+// kick comes from the ghost-aware velocity gradients.
 
 #if EXPLICIT_VOL_INTEGRATION && !ELASTIC
 #error "EXPLICIT_VOL_INTEGRATION currently only wires the ELASTIC branch of MeshlessScheme::run(). The non-ELASTIC path uses updateStateAndPosition() with no post-update gradient recompute, so the half-step splitting has no second-kick anchor. Wire a single full-step kick before updateStateAndPosition and lift this guard if you need !ELASTIC."

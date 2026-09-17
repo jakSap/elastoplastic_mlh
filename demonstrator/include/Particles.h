@@ -58,6 +58,14 @@ public:
     double *fce;
 #endif
 
+#if SURFACE_VOLCORR || SURFACE_GRAD_BLEND
+    /// Raw first moment S_i = sum_j W_ij (x_i - x_j) of the kernel stencil, kept
+    /// so the periodic pass (compOmega(i, ghostParticles)) can CONTINUE the sum
+    /// over the periodic images rather than restart it. xi and fce are then
+    /// re-derived from the completed sum.
+    double (*firstMoment)[DIM];
+#endif
+
 #if SURFACE_GRAD_BLEND
     /// First-moment stencil asymmetry xi = |sum_j W_ij (x_i-x_j)|/(h_i Omega_i),
     /// filled by compOmega (independently of SURFACE_VOLCORR). Corner-aware
@@ -148,7 +156,20 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
 #endif // DIM == 3
 #if TENSILE_CORRECTION
     double *fabMonaghan;    //f_ab berechnet nach Monaghan et al, 2000
-    void computeFabMonaghan();
+#if PERIODIC_BOUNDARIES
+    /// Monaghan f_ab for the ghost (periodic image) pairs, indexed
+    /// i*MAX_NUM_GHOST_INTERACTIONS + jn to mirror nnlGhosts. Without it the
+    /// tensile correction would be absent on every periodic face while acting
+    /// at full strength one kernel-width inside the box.
+    double *fabMonaghanGhosts;
+#endif
+    /// @param gp when non-null, additionally fills fabMonaghanGhosts for every
+    ///           periodic-image pair (i, nnlGhosts[...]).
+    void computeFabMonaghan(
+#if PERIODIC_BOUNDARIES
+        const Particles *gp = nullptr
+#endif
+    );
 #endif
     void integrateStressTensor(const double &dt);
 #if GIZMO_ELASTIC_FLUX
@@ -156,10 +177,18 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     // added to the pair flux Fout after the isotropic Riemann solve.
     /// @param ii interaction index i->jj, needed by RECON_FACE_DV to read the
     ///           reconstructed face states WijR[ii] (particle i) / WijL[ii] (jj)
+    /// @param gp when non-null, `jj` indexes this ghost container instead of
+    ///           `this`: every j-side quantity (position, sml, rho, m, matId, P,
+    ///           velocity, stress) is then read from the periodic image, and the
+    ///           per-pair face/state arrays switch to their *Ghosts twins. One
+    ///           copy of the flux physics serves both paths.
     void addGizmoElasticStressFlux(int i, int jj, int ii, const double &f, double *Fout
 #if RECON_FACE_TRACTION
                                    // per-side reconstructed face stress {Sxx,Sxy,Syy}
                                    , const double *SfaceI, const double *SfaceJ
+#endif
+#if PERIODIC_BOUNDARIES
+                                   , const Particles *gp = nullptr
 #endif
                                    );
 #endif

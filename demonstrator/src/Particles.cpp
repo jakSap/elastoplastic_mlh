@@ -314,6 +314,12 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     fce = new double[numParticles];
     for (int i=0; i<numParticles; ++i) fce[i] = 1.;
 #endif
+#if SURFACE_VOLCORR || SURFACE_GRAD_BLEND
+    // Raw first moment of the stencil, carried between the in-box and the
+    // periodic-image halves of the kernel sum. Allocated for every Particles
+    // object because compOmega runs on all of them.
+    firstMoment = new double[numParticles][DIM]();
+#endif
 #if SURFACE_GRAD_BLEND
     // First-moment stencil asymmetry, filled by compOmega; the corner-aware half
     // of the SURFACE_GRAD_BLEND detector. Allocated for every Particles object
@@ -428,6 +434,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         psijTildeGrad_xiGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
 #endif
         AijGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
+#if ELASTIC && TENSILE_CORRECTION
+        fabMonaghanGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS]();
+#endif
         WijLGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM+2];
         WijRGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM+2];
         FijGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM+2]; // TODO: this buffer should not be needed
@@ -466,6 +475,9 @@ Particles::~Particles() {
     delete[] omega;
 #if SURFACE_VOLCORR
     delete[] fce;
+#endif
+#if SURFACE_VOLCORR || SURFACE_GRAD_BLEND
+    delete[] firstMoment;
 #endif
 #if SURFACE_GRAD_BLEND
     delete[] xiAsym;
@@ -613,6 +625,9 @@ Particles::~Particles() {
         delete[] psijTildeGrad_xiGhosts;
 #endif
         delete[] AijGhosts;
+#if ELASTIC && TENSILE_CORRECTION
+        delete[] fabMonaghanGhosts;
+#endif
         delete[] WijLGhosts;
         delete[] WijRGhosts;
         delete[] ghostMap;
@@ -632,7 +647,11 @@ Particles::~Particles() {
 
 #if ELASTIC
 #if TENSILE_CORRECTION
-void Particles::computeFabMonaghan(){
+void Particles::computeFabMonaghan(
+#if PERIODIC_BOUNDARIES
+    const Particles *gp
+#endif
+){
     // Get normalized mean particle distance within kernel length
     // Eqivalent to \Delta p in Monaghan paper
 #if VARIABLE_SML
@@ -660,19 +679,30 @@ void Particles::computeFabMonaghan(){
             // Take the kernel, again..
             double kernelQ = Kernel::W(q, 1.);
             // To be consistent with Monaghan, dont apply the power of n here.
-            // fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = kernelQ / kernelDeltaP
-            //                              * fce[i*MAX_NUM_INTERACTIONS+jn]    
-            //                             ;
-            double fceCorr = 1;
-            // fceCorr = 0.5 * (fce[i] + fce[j]);
-            fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = kernelQ / kernelDeltaP;//  / fceCorr;
-            
-            if (i == 11){
-                Logger(DEBUG) << "      FceCorr i = 12: " << fceCorr;
-                Logger(DEBUG) << "      fab i = 12, j = " << j << ": " << kernelQ / kernelDeltaP;
+            fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = kernelQ / kernelDeltaP;
+        }
+    }
+
+#if PERIODIC_BOUNDARIES
+    // Same f_ab for the periodic-image pairs. Skipping these would leave the
+    // tensile correction switched off on exactly the faces that wrap the box,
+    // so a body straddling the boundary would be damped on one side only.
+    if (gp){
+        for(int i = 0; i < N; ++i){
+            for(int jn = 0; jn < noiGhosts[i]; ++jn){
+                const int j = nnlGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn];
+                double r2 = pow(gp->x[j] - x[i], 2) + pow(gp->y[j] - y[i], 2);
+#if DIM == 3
+                r2 += pow(gp->z[j] - z[i], 2);
+#endif
+                const double r = sqrt(r2);
+                const double q = r / std::max(sml[i], gp->sml[j]);
+                fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn]
+                        = Kernel::W(q, 1.) / kernelDeltaP;
             }
         }
     }
+#endif // PERIODIC_BOUNDARIES
 }
 #endif // TENSILE_CORRECTION
 
@@ -684,20 +714,83 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #if RECON_FACE_TRACTION
                                           , const double *SfaceI, const double *SfaceJ
 #endif
+#if PERIODIC_BOUNDARIES
+                                          , const Particles *gp
+#endif
                                           ){
 #if !RECON_FACE_DV
     (void)ii;
 #endif
+    // --- j-side binding ---------------------------------------------------
+    // `jj` indexes `this` for an ordinary pair and the ghost container for a
+    // periodic-image pair. Binding the j-side arrays once here keeps a SINGLE
+    // copy of the flux physics below: the ghost path differs only in where the
+    // partner's fields are read from, never in what is computed.
+    const double *xJ = x, *yJ = y, *smlJ = sml, *rhoJ = rho, *mJ = m,
+                 *PJ = P, *vxJ = vx, *vyJ = vy,
+                 *SxxJ = Sxx, *SxyJ = Sxy, *SyyJ = Syy;
+#if DIM == 3
+    const double *zJ = z, *vzJ = vz, *SxzJ = Sxz, *SyzJ = Syz, *SzzJ = Szz;
+#endif
+#if USE_MATID
+    const int *matIdJ = matId;
+#endif
+#if FRAGMENTATION
+    // Ghosts carry no damage state, so the j-side damage index is the ghost's
+    // parent; pDamage() resolves it for either path.
+    const int jDmg =
+#if PERIODIC_BOUNDARIES
+        gp ? gp->parent[jj] :
+#endif
+        jj;
+#endif
+#if ELASTIC_FACE_MODE == 1
+    // A ghost is a rigid translation of its parent, so by periodicity its
+    // Bonet-Lok correction matrix IS the parent's -- and ghosts never build one,
+    // so the j-side must be looked up by parent index, not by ghost index.
+    const int jElB =
+#if PERIODIC_BOUNDARIES
+        gp ? gp->parent[jj] :
+#endif
+        jj;
+#endif
+#if ELASTIC_FACE_MODE == 2
+    const double (*AijSel)[DIM] = Aij;
+#endif
+#if RECON_FACE_DV
+    const double (*WRSel)[DIM+2] = WijR;
+    const double (*WLSel)[DIM+2] = WijL;
+#endif
+#if PERIODIC_BOUNDARIES
+    if (gp){
+        xJ = gp->x; yJ = gp->y; smlJ = gp->sml; rhoJ = gp->rho; mJ = gp->m;
+        PJ = gp->P; vxJ = gp->vx; vyJ = gp->vy;
+        SxxJ = gp->Sxx; SxyJ = gp->Sxy; SyyJ = gp->Syy;
+#if DIM == 3
+        zJ = gp->z; vzJ = gp->vz; SxzJ = gp->Sxz; SyzJ = gp->Syz; SzzJ = gp->Szz;
+#endif
+#if USE_MATID
+        matIdJ = gp->matId;
+#endif
+#if ELASTIC_FACE_MODE == 2
+        AijSel = AijGhosts;
+#endif
+#if RECON_FACE_DV
+        WRSel = WijRGhosts;
+        WLSel = WijLGhosts;
+#endif
+    }
+#endif // PERIODIC_BOUNDARIES
 #if DIM == 2
-    const double dx = x[i] - x[jj], dy = y[i] - y[jj];
+    const double dx = x[i] - xJ[jj], dy = y[i] - yJ[jj];
     const double r2 = dx*dx + dy*dy;
     if (r2 <= 0.) return;
     const double r = sqrt(r2), rinv = 1./r;
 
     // SPH 'effective area' along the line of centres (chosen to avoid tensile instability)
-    const double dwk = std::fabs(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, sml[jj]));
-    const double rhoi = rho[i], rhoj = rho[jj];
-    const double FNormT = m[i]*m[jj]*dwk / (rhoi*rhoj);
+    const double dwk = std::fabs(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, smlJ[jj]));
+    const double rhoi = rho[i], rhoj = rhoJ[jj];
+    const double FNormT = m[i]*mJ[jj]*dwk / (rhoi*rhoj);
 #if ELASTIC_FACE_MODE == 0
     const double FVec[2] = { FNormT*dx*rinv, FNormT*dy*rinv };
 #elif ELASTIC_FACE_MODE == 1
@@ -708,10 +801,10 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     // feeds wt_r/wt_t as a scalar, so the longitudinal channel stays radial and
     // therefore torque-free.
     const double FRaw[2] = { FNormT*dx*rinv, FNormT*dy*rinv };
-    const double b0 = 0.5*(elasticB[i][0] + elasticB[jj][0]);
-    const double b1 = 0.5*(elasticB[i][1] + elasticB[jj][1]);
-    const double b2 = 0.5*(elasticB[i][2] + elasticB[jj][2]);
-    const double b3 = 0.5*(elasticB[i][3] + elasticB[jj][3]);
+    const double b0 = 0.5*(elasticB[i][0] + elasticB[jElB][0]);
+    const double b1 = 0.5*(elasticB[i][1] + elasticB[jElB][1]);
+    const double b2 = 0.5*(elasticB[i][2] + elasticB[jElB][2]);
+    const double b3 = 0.5*(elasticB[i][3] + elasticB[jElB][3]);
     const double FVec[2] = { b0*FRaw[0] + b1*FRaw[1],
                              b2*FRaw[0] + b3*FRaw[1] };
 #else // ELASTIC_FACE_MODE == 2
@@ -725,23 +818,23 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     // by t~0.9). T1 cannot catch this: it tests the torque, which is invariant
     // under a global sign flip, and the earlier 288-particle check ran
     // pre-contact where S ~ 0.
-    const double FVec[2] = { -Aij[ii][0], -Aij[ii][1] };
+    const double FVec[2] = { -AijSel[ii][0], -AijSel[ii][1] };
 #endif
 
     // mean-velocity interface (the -0.5 carries GIZMO's required sign)
-    const double v_int[2] = { -0.5*(vx[i]+vx[jj]), -0.5*(vy[i]+vy[jj]) };
-    const double dv[2] = { vx[i]-vx[jj], vy[i]-vy[jj] };
+    const double v_int[2] = { -0.5*(vx[i]+vxJ[jj]), -0.5*(vy[i]+vyJ[jj]) };
+    const double dv[2] = { vx[i]-vxJ[jj], vy[i]-vyJ[jj] };
     const double vdotr = dv[0]*dx + dv[1]*dy;
 
     // longitudinal (P-wave) and transverse (S-wave) acoustic impedances for HLL diffusion
 #if EOS == 1 || EOS == 2
     const double Ki = MeshlessEOS->EOSBulkModulus(matId[i], rhoi, P[i]);
-    const double Kj = MeshlessEOS->EOSBulkModulus(matId[jj], rhoj, P[jj]);
+    const double Kj = MeshlessEOS->EOSBulkModulus(matIdJ[jj], rhoj, PJ[jj]);
     const double mui = MeshlessEOS->EOSShearModulus(matId[i]);
-    const double muj = MeshlessEOS->EOSShearModulus(matId[jj]);
+    const double muj = MeshlessEOS->EOSShearModulus(matIdJ[jj]);
 #else
     const double Ki = MeshlessEOS->EOSBulkModulus(rhoi, P[i]);
-    const double Kj = MeshlessEOS->EOSBulkModulus(rhoj, P[jj]);
+    const double Kj = MeshlessEOS->EOSBulkModulus(rhoj, PJ[jj]);
     const double mui = 0., muj = 0.;
 #endif
     const double ci  = sqrt((Ki + 4./3.*mui)/rhoi), cj  = sqrt((Kj + 4./3.*muj)/rhoj);
@@ -769,18 +862,23 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     double cmag[2] = {0., 0.};
     for (int side = 0; side < 2; ++side){
         const int p = (side == 0) ? i : jj;
+        // Side-0 reads `this`, side-1 the j-side binding (== `this` unless the
+        // partner is a periodic image), so `p` indexes the right container.
+        const double *SxxP = (side == 0) ? Sxx : SxxJ;
+        const double *SxyP = (side == 0) ? Sxy : SxyJ;
+        const double *SyyP = (side == 0) ? Syy : SyyJ;
 #if RECON_FACE_TRACTION
         // per-side reconstructed face stress (i-side = SfaceI, j-side = SfaceJ)
         const double *Sf = (side == 0) ? SfaceI : SfaceJ;
         double a = Sf[0], b = Sf[1], c = Sf[2];
-        (void)p;   // p only needed for the raw-stress / damage lookups below
+        (void)p; (void)SxxP; (void)SxyP; (void)SyyP;
 #else
-        double a = Sxx[p], b = Sxy[p], c = Syy[p];
+        double a = SxxP[p], b = SxyP[p], c = SyyP[p];
 #endif
 #if FRAGMENTATION && DAMAGE_ACTS_ON_S
         // Grady-Kipp: damaged material carries less deviatoric stress (matches the
         // solid-HLLC path in Riemann.cpp). Pressure damage flows through the solver.
-        const double dmg = 1.0 - damageTotal[p];
+        const double dmg = 1.0 - damageTotal[(side == 0) ? i : jDmg];
         a *= dmg; b *= dmg; c *= dmg;
 #endif
         const double mean = 0.5*(a + c);
@@ -809,8 +907,8 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
     // HLL-type dissipation of velocity differences (longitudinal + transverse shear wave)
 #if RECON_FACE_DV
-    // Reconstructed face jump: WijR[ii] is particle i extrapolated to the shared
-    // face point xij, WijL[ii] is particle jj extrapolated to the same point.
+    // Reconstructed face jump: the R row is particle i extrapolated to the shared
+    // face point xij, the L row is particle jj extrapolated to the same point.
     // Both carry the same vFrame, so it cancels in the difference. For any linear
     // velocity field (rigid rotation included) the two agree exactly -> zero jump
     // -> zero dissipation, which is what kills the spurious rotational braking.
@@ -818,8 +916,8 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     // (algebraically identical to the wt_rt form below when both use the same dv),
     // so the two channels can be sourced independently.
     {
-        const double dvF[2] = { WijR[ii][2] - WijL[ii][2],
-                                WijR[ii][3] - WijL[ii][3] };
+        const double dvF[2] = { WRSel[ii][2] - WLSel[ii][2],
+                                WRSel[ii][3] - WLSel[ii][3] };
         const double projF = (dvF[0]*dx + dvF[1]*dy) * rinv * rinv;
 #if RECON_FACE_DV == 2
         const double projR = projF;                 // longitudinal on the jump too
@@ -842,8 +940,8 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     {
         double cWtR[2], cWtT[2];
 #if RECON_FACE_DV
-        const double dvFd[2] = { WijR[ii][2] - WijL[ii][2],
-                                 WijR[ii][3] - WijL[ii][3] };
+        const double dvFd[2] = { WRSel[ii][2] - WLSel[ii][2],
+                                 WRSel[ii][3] - WLSel[ii][3] };
         const double projFd = (dvFd[0]*dx + dvFd[1]*dy) * rinv * rinv;
 #if RECON_FACE_DV == 2
         const double projRd = projFd;
@@ -871,10 +969,17 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         // Half of each pair's torque goes to each partner, exactly as in
         // collectFluxes, so the per-particle field is origin-independent and
         // sums to the true total.
+        // On the periodic path jj indexes a ghost, which owns no torque slot;
+        // its share belongs to the real particle it mirrors.
+#if PERIODIC_BOUNDARIES
+        const int jTq = gp ? gp->parent[jj] : jj;
+#else
+        const int jTq = jj;
+#endif
         auto tqdAccum = [&](double *arr, const double *c){
             const double tqPair = -(dx*c[1] - dy*c[0]);
-            arr[i]  += 0.5*tqPair;
-            arr[jj] += 0.5*tqPair;
+            arr[i]   += 0.5*tqPair;
+            arr[jTq] += 0.5*tqPair;
         };
         tqdAccum(tqDev, cDev);
         tqdAccum(tqWtT, cWtT);
@@ -889,31 +994,31 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     Fout[3] -= cmag[1];
 
 #elif DIM == 3
-    const double dx = x[i] - x[jj], dy = y[i] - y[jj], dz = z[i] - z[jj];
+    const double dx = x[i] - xJ[jj], dy = y[i] - yJ[jj], dz = z[i] - zJ[jj];
     const double r2 = dx*dx + dy*dy + dz*dz;
     if (r2 <= 0.) return;
     const double r = sqrt(r2), rinv = 1./r;
 
     // SPH 'effective area' along the line of centres (chosen to avoid tensile instability)
-    const double dwk = std::fabs(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, sml[jj]));
-    const double rhoi = rho[i], rhoj = rho[jj];
-    const double FNormT = m[i]*m[jj]*dwk / (rhoi*rhoj);
+    const double dwk = std::fabs(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, smlJ[jj]));
+    const double rhoi = rho[i], rhoj = rhoJ[jj];
+    const double FNormT = m[i]*mJ[jj]*dwk / (rhoi*rhoj);
     const double FVec[3] = { FNormT*dx*rinv, FNormT*dy*rinv, FNormT*dz*rinv };
 
     // mean-velocity interface (the -0.5 carries GIZMO's required sign)
-    const double v_int[3] = { -0.5*(vx[i]+vx[jj]), -0.5*(vy[i]+vy[jj]), -0.5*(vz[i]+vz[jj]) };
-    const double dv[3] = { vx[i]-vx[jj], vy[i]-vy[jj], vz[i]-vz[jj] };
+    const double v_int[3] = { -0.5*(vx[i]+vxJ[jj]), -0.5*(vy[i]+vyJ[jj]), -0.5*(vz[i]+vzJ[jj]) };
+    const double dv[3] = { vx[i]-vxJ[jj], vy[i]-vyJ[jj], vz[i]-vzJ[jj] };
     const double vdotr = dv[0]*dx + dv[1]*dy + dv[2]*dz;
 
     // longitudinal (P-wave) and transverse (S-wave) acoustic impedances for HLL diffusion
 #if EOS == 1 || EOS == 2
     const double Ki = MeshlessEOS->EOSBulkModulus(matId[i], rhoi, P[i]);
-    const double Kj = MeshlessEOS->EOSBulkModulus(matId[jj], rhoj, P[jj]);
+    const double Kj = MeshlessEOS->EOSBulkModulus(matIdJ[jj], rhoj, PJ[jj]);
     const double mui = MeshlessEOS->EOSShearModulus(matId[i]);
-    const double muj = MeshlessEOS->EOSShearModulus(matId[jj]);
+    const double muj = MeshlessEOS->EOSShearModulus(matIdJ[jj]);
 #else
     const double Ki = MeshlessEOS->EOSBulkModulus(rhoi, P[i]);
-    const double Kj = MeshlessEOS->EOSBulkModulus(rhoj, P[jj]);
+    const double Kj = MeshlessEOS->EOSBulkModulus(rhoj, PJ[jj]);
     const double mui = 0., muj = 0.;
 #endif
     const double ci  = sqrt((Ki + 4./3.*mui)/rhoi), cj  = sqrt((Kj + 4./3.*muj)/rhoj);
@@ -934,14 +1039,21 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     double cmag[3] = {0., 0., 0.};
     for (int side = 0; side < 2; ++side){
         const int p = (side == 0) ? i : jj;
+        // See the DIM==2 branch: side 1 may live in the ghost container.
+        const double *SxxP = (side == 0) ? Sxx : SxxJ;
+        const double *SxyP = (side == 0) ? Sxy : SxyJ;
+        const double *SyyP = (side == 0) ? Syy : SyyJ;
+        const double *SxzP = (side == 0) ? Sxz : SxzJ;
+        const double *SyzP = (side == 0) ? Syz : SyzJ;
+        const double *SzzP = (side == 0) ? Szz : SzzJ;
         double S[DIM*DIM];
-        S[0]=Sxx[p]; S[1]=Sxy[p]; S[2]=Sxz[p];
-        S[3]=Sxy[p]; S[4]=Syy[p]; S[5]=Syz[p];
-        S[6]=Sxz[p]; S[7]=Syz[p]; S[8]=Szz[p];
+        S[0]=SxxP[p]; S[1]=SxyP[p]; S[2]=SxzP[p];
+        S[3]=SxyP[p]; S[4]=SyyP[p]; S[5]=SyzP[p];
+        S[6]=SxzP[p]; S[7]=SyzP[p]; S[8]=SzzP[p];
 #if FRAGMENTATION && DAMAGE_ACTS_ON_S
         // Grady-Kipp: damaged material carries less deviatoric stress (matches the
         // solid-HLLC path in Riemann.cpp). Pressure damage flows through the solver.
-        const double dmg = 1.0 - damageTotal[p];
+        const double dmg = 1.0 - damageTotal[(side == 0) ? i : jDmg];
         for (int a = 0; a < DIM*DIM; ++a) S[a] *= dmg;
 #endif
         double eval[DIM], evec[DIM*DIM];
@@ -960,9 +1072,9 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #if RECON_FACE_DV
     // see the DIM == 2 branch for the rationale (reconstructed face jump)
     {
-        const double dvF[3] = { WijR[ii][2] - WijL[ii][2],
-                                WijR[ii][3] - WijL[ii][3],
-                                WijR[ii][4] - WijL[ii][4] };
+        const double dvF[3] = { WRSel[ii][2] - WLSel[ii][2],
+                                WRSel[ii][3] - WLSel[ii][3],
+                                WRSel[ii][4] - WLSel[ii][4] };
         const double projF = (dvF[0]*dx + dvF[1]*dy + dvF[2]*dz) * rinv * rinv;
 #if RECON_FACE_DV == 2
         const double projR = projF;                 // longitudinal on the jump too
@@ -2687,8 +2799,12 @@ void Particles::compOmega(int i){
     }
 #if SURFACE_VOLCORR || SURFACE_GRAD_BLEND
     // Self-contribution to S_i is zero (r_ii = 0), so no diagonal term.
+    // Stashed so the periodic pass can continue the same sum over the images.
+    firstMoment[i][0] = sx;
+    firstMoment[i][1] = sy;
     double S2 = sx*sx + sy*sy;
 #if DIM == 3
+    firstMoment[i][2] = sz;
     S2 += sz*sz;
 #endif
     double xi_asym = sqrt(S2) / (hi * omega[i]);
@@ -4706,6 +4822,21 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 double fSyzL = ghostParticles.Syz[jj] + Helper::dotProduct(ghostParticles.SyzGrad[jj], xijxj_loc);
                 double fSzzL = ghostParticles.Szz[jj] + Helper::dotProduct(ghostParticles.SzzGrad[jj], xijxj_loc);
 #endif
+#if GIZMO_ELASTIC_FLUX
+#if RECON_FACE_TRACTION
+                // Mirrors the real-particle site: keep the reconstructed face
+                // stress for the separate deviatoric flux, then zero it here.
+                const double SfaceI_g[3] = { fSxxR, fSxyR, fSyyR };
+                const double SfaceJ_g[3] = { fSxxL, fSxyL, fSyyL };
+#endif
+                // GIZMO keeps the Riemann problem isotropic; the deviatoric stress
+                // is added as a separate SPH flux after the solve. The ghost path
+                // must do this too, or the periodic faces carry the stress twice.
+                fSxxR = fSxyR = fSyyR = fSxxL = fSxyL = fSyyL = 0.;
+#if DIM == 3
+                fSxzR = fSyzR = fSzzR = fSxzL = fSyzL = fSzzL = 0.;
+#endif
+#endif // GIZMO_ELASTIC_FLUX
 #endif
 #if USE_MATID
                 int matIdR_g = matId[i];
@@ -4714,22 +4845,48 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 int matIdR_g = 0;
                 int matIdL_g = 0;
 #endif
+                // Slot order must match the real-particle call site exactly:
+                // the ctor's R slots take the *j*-side (the state passed first,
+                // WijLGhosts) and the L slots the i-side. Passing the stress the
+                // other way round -- as this call site used to -- silently hands
+                // the solver each side's neighbour stress.
                 Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i,
                                matIdL_g, matIdR_g, *MeshlessEOS
 #if ELASTIC
-                               , fSxxR, fSxyR, fSyyR
+#if TENSILE_CORRECTION
+                               , fabMonaghanGhosts[ii]
+#endif
                                , fSxxL, fSxyL, fSyyL
+                               , fSxxR, fSxyR, fSyyR
 #if DIM == 3
-                               , fSxzR, fSyzR, fSzzR
                                , fSxzL, fSyzL, fSzzL
+                               , fSxzR, fSyzR, fSzzR
 #endif
 #if FRAGMENTATION
-                               // R-slot = i-side here; ghost-side damage is not tracked.
-                               , damageTotal[i], 0.0
+                               // R-slot = j-side (ghost, damage untracked), L-slot = i-side
+                               , 0.0, damageTotal[i]
 #endif
 #endif
                 };
                 solver.HLLCFlux(FijGhosts[ii]);
+#if GIZMO_ELASTIC_FLUX
+                // Deviatoric traction across the periodic face. Without this the
+                // wrapped neighbours would exchange pressure only, so a body
+                // straddling the boundary would shear freely across it.
+                {
+                    double fTCg = 0.;
+#if TENSILE_CORRECTION && AM_SELFTEST != 1
+                    fTCg = TENSILE_CORRECTION_PREFAC
+                         * pow(fabMonaghanGhosts[ii], TENSILE_CORRECTION_POWER);
+#endif
+                    addGizmoElasticStressFlux(i, jj, ii, fTCg, FijGhosts[ii]
+#if RECON_FACE_TRACTION
+                                              , SfaceI_g, SfaceJ_g
+#endif
+                                              , &ghostParticles
+                                              );
+                }
+#endif
 #else
 #if USE_MATID
                 int matIdR_g = matId[i];
@@ -5267,6 +5424,11 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
             // max(h_i,h_j) neighbour criterion would read stale, mis-indexed
             // smoothing lengths and produce non-reciprocal ghost neighbour lists.
             ghostParticles.sml[iGhost] = sml[i];
+            // Mass is constant, so it is set here rather than in
+            // updateGhostState. GIZMO_ELASTIC_FLUX needs it: its SPH face
+            // area FNormT = m_i m_j |dW| / (rho_i rho_j) silently vanishes
+            // on every periodic pair if the ghost mass is left at zero.
+            ghostParticles.m[iGhost] = m[i];
             //Logger(DEBUG) << "particle@" << i << " = [" << x[i] << ", " << y[i] << "] makes "
             //          << "ghost@" << iGhost << " = [" << ghostParticles.x[iGhost] << ", "
             //          << ghostParticles.y[iGhost] << "]";
@@ -5285,6 +5447,11 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
             ghostMap[i*(DIM+1)+1] = iGhost;
             ghostParticles.parent[iGhost] = i;
             ghostParticles.sml[iGhost] = sml[i];
+            // Mass is constant, so it is set here rather than in
+            // updateGhostState. GIZMO_ELASTIC_FLUX needs it: its SPH face
+            // area FNormT = m_i m_j |dW| / (rho_i rho_j) silently vanishes
+            // on every periodic pair if the ghost mass is left at zero.
+            ghostParticles.m[iGhost] = m[i];
             //Logger(DEBUG) << "particle@" << i << " = [" << x[i] << ", " << y[i] << "] makes "
             //              <<"ghost@" << iGhost << " = [" << ghostParticles.x[iGhost] << ", "
             //              << ghostParticles.y[iGhost] << "]";
@@ -5298,6 +5465,11 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
             ghostMap[i*(DIM+1)+2] = iGhost;
             ghostParticles.parent[iGhost] = i;
             ghostParticles.sml[iGhost] = sml[i];
+            // Mass is constant, so it is set here rather than in
+            // updateGhostState. GIZMO_ELASTIC_FLUX needs it: its SPH face
+            // area FNormT = m_i m_j |dW| / (rho_i rho_j) silently vanishes
+            // on every periodic pair if the ghost mass is left at zero.
+            ghostParticles.m[iGhost] = m[i];
             //Logger(DEBUG) << "particle@" << i << " = [" << x[i] << ", " << y[i] << "] makes "
             //              << "ghost@" << iGhost << " = [" << ghostParticles.x[iGhost] << ", "
             //              << ghostParticles.y[iGhost] << "]";
@@ -5424,7 +5596,14 @@ void Particles::ghostNNS(Domain &domain, const Particles &ghostParticles, const 
 void Particles::compDensity(const Particles &ghostParticles){
     for(int i=0; i<N; ++i){
         compOmega(i, ghostParticles);
+#if SURFACE_VOLCORR
+        // Must mirror the non-periodic compDensity(): this pass RECOMPUTES rho
+        // from the ghost-augmented omega, so dropping the closure correction
+        // here would silently discard it on the periodic path.
+        rho[i] = m[i]*omega[i] / fce[i];
+#else
         rho[i] = m[i]*omega[i];
+#endif
         if(rho[i] <= 0.){
             Logger(WARN) << "Zero or negative density @" << i;
         }
@@ -5434,20 +5613,62 @@ void Particles::compDensity(const Particles &ghostParticles){
 void Particles::compOmega(int i, const Particles &ghostParticles){
     const double hi = sml[i];
     double omg = omega[i];
-    for (int j=0; j<noiGhosts[i]; ++j){
-        double dSqr = pow(x[i] - ghostParticles.x[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]], 2)
-                      + pow(y[i] - ghostParticles.y[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]], 2);
+#if SURFACE_VOLCORR || SURFACE_GRAD_BLEND
+    // Continue the first-moment sum S_i = sum_j W_ij (x_i - x_j) that
+    // compOmega(i) started over the in-box neighbours. The periodic images must
+    // be counted too: without them every particle within a kernel width of a box
+    // face looks one-sided and is misread as a free surface.
+    double sx = firstMoment[i][0];
+    double sy = firstMoment[i][1];
 #if DIM == 3
-        dSqr += pow(z[i] - ghostParticles.z[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]], 2);
+    double sz = firstMoment[i][2];
+#endif
+#endif
+    for (int j=0; j<noiGhosts[i]; ++j){
+        const int jg = nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS];
+        const double dx = x[i] - ghostParticles.x[jg];
+        const double dy = y[i] - ghostParticles.y[jg];
+        double dSqr = dx*dx + dy*dy;
+#if DIM == 3
+        const double dz = z[i] - ghostParticles.z[jg];
+        dSqr += dz*dz;
 #endif
         double r = sqrt(dSqr);
-        omg += kernel(r, hi);
+        const double wij = kernel(r, hi);
+        omg += wij;
+#if SURFACE_VOLCORR || SURFACE_GRAD_BLEND
+        sx += wij * dx;
+        sy += wij * dy;
+#if DIM == 3
+        sz += wij * dz;
+#endif
+#endif
 
         //Logger(DEBUG) << "x[" << i << "] = [" << x[i] << ", " <<  y[i] << "], x["
         //              << nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS] << "] = [" << ghostParticles.x[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]] << ", "
         //              << ghostParticles.y[nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS]] << "]";
     }
     omega[i] = omg;
+#if SURFACE_VOLCORR || SURFACE_GRAD_BLEND
+    // Re-derive the closure diagnostics from the now-complete stencil.
+    firstMoment[i][0] = sx;
+    firstMoment[i][1] = sy;
+    double S2 = sx*sx + sy*sy;
+#if DIM == 3
+    firstMoment[i][2] = sz;
+    S2 += sz*sz;
+#endif
+    const double xi_asym = sqrt(S2) / (hi * omega[i]);
+#if SURFACE_GRAD_BLEND
+    xiAsym[i] = xi_asym;
+#endif
+#if SURFACE_VOLCORR
+    double fce_raw = SURFACE_VOLCORR_A - SURFACE_VOLCORR_B * xi_asym;
+    if (fce_raw > 1.0) fce_raw = 1.0;
+    if (fce_raw < SURFACE_VOLCORR_FLOOR) fce_raw = SURFACE_VOLCORR_FLOOR;
+    fce[i] = fce_raw;
+#endif
+#endif
     //Logger(DEBUG) << "V[" << i << "] = " << 1./omega[i] << ", noiTot = " << noi[i] + noiGhosts[i]
     //          << " noiGhosts = " << noiGhosts[i];
 }
@@ -5871,13 +6092,20 @@ void Particles::compEffectiveFace(const Particles &ghostParticles){
             //          << "], psijTilde_xiGhost[ji] = [" << psijTilde_xiGhosts[ij+ghostParticles.parent[ji]*MAX_NUM_GHOST_INTERACTIONS][0]
             //          << ", " << psijTilde_xiGhosts[ij+ghostParticles.parent[ji]*MAX_NUM_GHOST_INTERACTIONS][1] << "]";
 
+            // V = m/rho, matching the non-periodic compEffectiveFace(). The old
+            // 1/omega form is only equivalent when rho == m*omega, which is false
+            // under SURFACE_VOLCORR (rho = m*omega/fce) and false under
+            // EXPLICIT_VOL_INTEGRATION (rho = rhoExplicit). Leaving it here gave
+            // the periodic faces a different volume from the interior ones, i.e.
+            // exactly the spurious net outward flux the real path was fixed for.
+            const double Vi  = m[i] / rho[i];
+            const double Vji = ghostParticles.m[ji] / ghostParticles.rho[ji];
             for (int alpha=0; alpha<DIM; ++alpha){
                 // Drop the reverse term if p has no ghost of i (non-reciprocal):
                 // indexing a stale slot would corrupt the face.
                 const double rev = (ij < 0) ? 0.
-                    : 1./ghostParticles.omega[ji]
-                      * psijTilde_xiGhosts[ij+p*MAX_NUM_GHOST_INTERACTIONS][alpha];
-                AijGhosts[ii][alpha] = 1./omega[i]*psijTilde_xiGhosts[ii][alpha] - rev;
+                    : Vji * psijTilde_xiGhosts[ij+p*MAX_NUM_GHOST_INTERACTIONS][alpha];
+                AijGhosts[ii][alpha] = Vi*psijTilde_xiGhosts[ii][alpha] - rev;
             }
         }
     }
