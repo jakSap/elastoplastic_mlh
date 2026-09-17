@@ -84,6 +84,10 @@ Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
     // Monaghan tensile-correction factor, only computed when TENSILE_CORRECTION is set
     tensileCorrectionFactor = TENSILE_CORRECTION_PREFAC
                     * pow(fabMonaghan, TENSILE_CORRECTION_POWER);
+#if TENSILE_CORRECTION_LOCAL
+    if (tensileCorrectionFactor > TENSILE_CORRECTION_FMAX)
+        tensileCorrectionFactor = TENSILE_CORRECTION_FMAX;
+#endif
 #endif
     // compute norm of effective face
     AijNorm = sqrt(Helper::dotProduct(Aij, Aij));

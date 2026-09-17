@@ -652,6 +652,15 @@ void Particles::computeFabMonaghan(
     const Particles *gp
 #endif
 ){
+#if TENSILE_CORRECTION_LOCAL
+    // Scale-free variant: the reference spacing is MEASURED per particle from
+    // the volume the scheme itself carries, dp_i = (m_i/rho_i)^(1/DIM), instead
+    // of assumed from the target neighbour count. Under SURFACE_VOLCORR rho
+    // already carries the 1/FCE lift, so dp_i stays correct at a free surface
+    // (verified against a dump: 0.3% error at the surface, 4.5% in a stretched
+    // interior, where the lattice genuinely HAS expanded).
+    const double invDim = 1. / (double)DIM;
+#else
     // Get normalized mean particle distance within kernel length
     // Eqivalent to \Delta p in Monaghan paper
 #if VARIABLE_SML
@@ -661,6 +670,7 @@ void Particles::computeFabMonaghan(
 #endif
     // And take the Kernel (follows KERNEL_FUNCTION, as GIZMO's kernel_main does)
     double kernelDeltaP = Kernel::W(deltaP, 1.);
+#endif
 
     // Now loop through the interaction pairs:
     for(int i = 0; i < N; ++i){
@@ -674,12 +684,22 @@ void Particles::computeFabMonaghan(
             r2 += pow(z[j] - z[i], 2);
 #endif
             double r = sqrt(r2);
+#if TENSILE_CORRECTION_LOCAL
+            // s_ab = 1 on any uniform lattice, whatever its spacing, so the
+            // stored value -- and hence f -- is exactly 0 there. It is also 1
+            // under uniform stretching, because r and dp_i grow together.
+            const double dpA = pow(m[i] / rho[i], invDim);
+            const double dpB = pow(m[j] / rho[j], invDim);
+            const double sAB = r / (0.5 * (dpA + dpB));
+            fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = (sAB < 1.) ? (1. - sAB) : 0.;
+#else
             // q = r_ab / max(h_a, h_b) following Monaghan and GIZMO
             double q = r / std::max(sml[i], sml[j]);
             // Take the kernel, again..
             double kernelQ = Kernel::W(q, 1.);
             // To be consistent with Monaghan, dont apply the power of n here.
             fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = kernelQ / kernelDeltaP;
+#endif
         }
     }
 
@@ -696,9 +716,20 @@ void Particles::computeFabMonaghan(
                 r2 += pow(gp->z[j] - z[i], 2);
 #endif
                 const double r = sqrt(r2);
+#if TENSILE_CORRECTION_LOCAL
+                // Ghosts are rigid translations of their parents and carry m
+                // and rho copied out by updateGhostState, so the same measured
+                // spacing applies unchanged across the seam.
+                const double dpA = pow(m[i] / rho[i], invDim);
+                const double dpB = pow(gp->m[j] / gp->rho[j], invDim);
+                const double sAB = r / (0.5 * (dpA + dpB));
+                fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn]
+                        = (sAB < 1.) ? (1. - sAB) : 0.;
+#else
                 const double q = r / std::max(sml[i], gp->sml[j]);
                 fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn]
                         = Kernel::W(q, 1.) / kernelDeltaP;
+#endif
             }
         }
     }
@@ -839,7 +870,16 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
     const double ci  = sqrt((Ki + 4./3.*mui)/rhoi), cj  = sqrt((Kj + 4./3.*muj)/rhoj);
     const double cTi = sqrt(mui/rhoi),               cTj = sqrt(muj/rhoj);
-    const double wt_r = rhoi*ci*rhoj*cj / (rhoi*ci + rhoj*cj) * FNormT;
+    double wt_r = rhoi*ci*rhoj*cj / (rhoi*ci + rhoj*cj) * FNormT;
+#if TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL
+    // Anti-clumping approach damping: boost the radial dissipation for pairs
+    // that are closer than the local spacing (f > 0) AND closing (vdotr < 0).
+    // Scaling a dissipation coefficient cannot inject energy and cannot break
+    // the pair antisymmetry, so conservation is untouched at any strength.
+    if (TENSILE_CORRECTION_DAMP > 0. && f > 0. && vdotr < 0.){
+        wt_r *= (1. + TENSILE_CORRECTION_DAMP * f);
+    }
+#endif
     const double denT = rhoi*cTi + rhoj*cTj;
 #if AM_NO_TDISS
     // Drop the transverse shear-wave dissipation: the combined HLL term
@@ -4666,6 +4706,9 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 double fTC = 0.;
 #if TENSILE_CORRECTION && AM_SELFTEST != 1
                 fTC = TENSILE_CORRECTION_PREFAC * pow(fabMonaghan[ii], TENSILE_CORRECTION_POWER);
+#if TENSILE_CORRECTION_LOCAL
+                if (fTC > TENSILE_CORRECTION_FMAX) fTC = TENSILE_CORRECTION_FMAX;
+#endif
 #elif TENSILE_CORRECTION
                 // T1 only: the tensile correction damps POSITIVE stress
                 // eigenvalues by (1-f), which makes the effective per-pair stress
@@ -4878,6 +4921,9 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #if TENSILE_CORRECTION && AM_SELFTEST != 1
                     fTCg = TENSILE_CORRECTION_PREFAC
                          * pow(fabMonaghanGhosts[ii], TENSILE_CORRECTION_POWER);
+#if TENSILE_CORRECTION_LOCAL
+                    if (fTCg > TENSILE_CORRECTION_FMAX) fTCg = TENSILE_CORRECTION_FMAX;
+#endif
 #endif
                     addGizmoElasticStressFlux(i, jj, ii, fTCg, FijGhosts[ii]
 #if RECON_FACE_TRACTION

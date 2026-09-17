@@ -314,9 +314,57 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // Damp only tensile (positive) principal components of the deviatoric stress by
 // (1 - f), GIZMO's default eigenvalue branch in solids/elastic_stress_tensor_force.h.
 #define TENSILE_CORRECTION_3 0
+// Scale-free tensile correction (TENSILE_CORRECTION_LOCAL 1).
+//
+// Monaghan's f_ab = W(q)/W(dp_ref) has three dependencies it should not have:
+// the reference spacing dp_ref = sqrt(pi/N_NN) is the ASSUMED spacing of an
+// undisturbed lattice rather than the measured local one, the profile across
+// the stencil IS the kernel shape, and the whole thing is feedforward -- on a
+// perfect lattice it still applies f ~ 0.33..0.56 of damping (kernel-dependent),
+// which is why the prefactor has to stay small and the correction is then too
+// weak when it is actually needed.
+//
+// This variant replaces the ratio by
+//     s_ab = r_ab / (0.5*(dp_a + dp_b)),   dp_i = (m_i/rho_i)^(1/DIM)
+// and stores max(0, 1 - s_ab), so the consumers' PREFAC*pow(fab, POWER) yields
+//     f = PREFAC * max(0, 1 - s_ab)^POWER
+// s_ab is 1 on ANY uniform lattice regardless of kernel, N_NN or resolution, so
+// f vanishes identically there (measured: 0.00000 for every configuration in
+// the 27-run baseline, against 0.33-0.56 for the Monaghan form). It also stays
+// 1 under uniform stretching -- r and dp_i grow together -- so the correction
+// no longer fires on mere expansion, only on genuine pair collapse.
+#define TENSILE_CORRECTION_LOCAL 1
+
+// Upper clamp on the correction factor (TENSILE_CORRECTION_LOCAL only).
+// Without it the (1 - s) profile keeps growing as a pair collapses and turns
+// into an impulsive kick on an already-collapsed pair -- measured as negative
+// internal energy at vmax = 0.60. Physically: never convert more than this
+// fraction of the tensile traction into repulsion.
+#define TENSILE_CORRECTION_FMAX 0.5
+
+// Approach damping (TENSILE_CORRECTION_LOCAL only). 0 disables it.
+//
+// The repulsion above can push a collapsed pair apart, but it does no work
+// during the APPROACH, so a fast pair arrives already collapsed and the
+// repulsion then acts as an impulsive kick -- observed as negative internal
+// energy at vmax = 0.60, and as a correction whose authority stops scaling
+// with the drive once the FMAX clamp saturates.
+//
+// This boosts the EXISTING radial HLL dissipation by (1 + DAMP*f) for pairs
+// that are both closer than the local spacing (f > 0) and approaching
+// (dv.r < 0). Because it only scales a dissipation coefficient it inherits
+// that channel's properties exactly: the force stays central and pairwise
+// antisymmetric, so linear and angular momentum remain conserved to machine
+// precision at any strength, and it can only REMOVE kinetic energy -- it can
+// never inject any, whatever DAMP is set to.
+#define TENSILE_CORRECTION_DAMP 8.0
+
 // Two Parameters for the tensile correction facor, as in Monaghan, 2000
-#define TENSILE_CORRECTION_PREFAC 0.2
-#define TENSILE_CORRECTION_POWER 4.
+// (TENSILE_CORRECTION_LOCAL reuses both: PREFAC scales f, POWER sharpens the
+// (1 - s) profile. Because f == 0 on a good lattice, PREFAC may be raised well
+// above Monaghan's 0.2 without paying a permanent tax.)
+#define TENSILE_CORRECTION_PREFAC 4.0
+#define TENSILE_CORRECTION_POWER 1.
 // Output per-particle average f_ab to h5 dump (requires TENSILE_CORRECTION)
 #if TENSILE_CORRECTION
 #define OUTPUT_FAB 0
