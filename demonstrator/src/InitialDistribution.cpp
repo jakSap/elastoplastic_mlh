@@ -31,6 +31,36 @@ InitialDistribution::InitialDistribution(const std::string &file){
         smlSet.read(sml);
         hasSml = true;
     }
+#if ELASTIC
+    // optional initial deviatoric stress (all components or none)
+    {
+        const std::vector<std::string> names = {"/Sxx", "/Sxy", "/Syy"
+#if DIM == 3
+                                                , "/Sxz", "/Syz", "/Szz"
+#endif
+        };
+        int nFound = 0;
+        for (const auto &name : names) if (h5file.exist(name)) ++nFound;
+        if (nFound > 0 && nFound < (int)names.size()) {
+            throw std::runtime_error("IC file carries only some of the deviatoric stress "
+                                     "datasets; give all of " + [&]{
+                                         std::string s;
+                                         for (const auto &n : names) s += n + " ";
+                                         return s; }() + "or none.");
+        }
+        if (nFound > 0) {
+            h5file.getDataSet("/Sxx").read(Sxx);
+            h5file.getDataSet("/Sxy").read(Sxy);
+            h5file.getDataSet("/Syy").read(Syy);
+#if DIM == 3
+            h5file.getDataSet("/Sxz").read(Sxz);
+            h5file.getDataSet("/Syz").read(Syz);
+            h5file.getDataSet("/Szz").read(Szz);
+#endif
+            hasStress = true;
+        }
+    }
+#endif
 #if FRAGMENTATION
     // Grady-Kipp Weibull flaws (required when FRAGMENTATION is on).
     if (h5file.exist("/flaws") && h5file.exist("/numFlaws")) {
@@ -58,6 +88,20 @@ void InitialDistribution::getAllParticles(Particles &particles, double defaultSm
     if (hasSml && (int)sml.size() != numberOfParticles){
         throw std::length_error("Length of /sml dataset does not match number of particles.");
     }
+#if ELASTIC
+    if (hasStress && ((int)Sxx.size() != numberOfParticles
+                   || (int)Sxy.size() != numberOfParticles
+                   || (int)Syy.size() != numberOfParticles
+#if DIM == 3
+                   || (int)Sxz.size() != numberOfParticles
+                   || (int)Syz.size() != numberOfParticles
+                   || (int)Szz.size() != numberOfParticles
+#endif
+    )){
+        throw std::length_error("Length of the deviatoric stress datasets does not match "
+                                "number of particles.");
+    }
+#endif
 #if FRAGMENTATION
     if (!hasFlaws || (int)flaws.size() != numberOfParticles
                   || (int)numFlaws.size() != numberOfParticles){
@@ -84,6 +128,18 @@ void InitialDistribution::getAllParticles(Particles &particles, double defaultSm
         particles.vy[pCounter] = (*vit)[1];
 #if USE_MATID
         particles.matId[pCounter] = *matIdIt;
+#endif
+#if ELASTIC
+        if (hasStress){
+            particles.Sxx[pCounter] = Sxx[pCounter];
+            particles.Sxy[pCounter] = Sxy[pCounter];
+            particles.Syy[pCounter] = Syy[pCounter];
+#if DIM == 3
+            particles.Sxz[pCounter] = Sxz[pCounter];
+            particles.Syz[pCounter] = Syz[pCounter];
+            particles.Szz[pCounter] = Szz[pCounter];
+#endif
+        }
 #endif
 #if FRAGMENTATION
         {

@@ -25,6 +25,18 @@ private:
     std::vector<std::vector<double>> x {}, v {};
     std::vector<int> matId {};
     bool hasSml { false };
+#if ELASTIC
+    // Optional initial deviatoric stress, same dataset names as the snapshot
+    // output (/Sxx, /Sxy, /Syy [, /Sxz, /Syz, /Szz]), so a snapshot can be fed
+    // back in as an IC. All-or-nothing: absent -> S = 0, which is the right
+    // start only for a state that is stress-free at t = 0. An elastic
+    // travelling wave is not (S_xx = -4/3 mu ln(rho/rho0)), hence this hook.
+    std::vector<double> Sxx {}, Sxy {}, Syy {};
+#if DIM == 3
+    std::vector<double> Sxz {}, Syz {}, Szz {};
+#endif
+    bool hasStress { false };
+#endif
 #if FRAGMENTATION
     // Per-particle Weibull activation strains (ragged, padded to MAX_NUM_FLAWS
     // on copy) and how many slots are populated per particle.
