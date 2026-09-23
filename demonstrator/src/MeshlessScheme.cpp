@@ -212,6 +212,60 @@ void MeshlessScheme::run(){
         timeStep = config.timeStep;
 #endif // ADAPTIVE_TIMESTEP
 
+        // Dump BEFORE anything in this step touches the state. Everything here
+        // -- x, v, rho (finalised from rhoExplicit by kick B last step), P, S --
+        // belongs to t^n, so a snapshot is internally consistent.
+        //
+        // This block used to sit after 'stress integration 1 / 2', i.e. in the
+        // middle of the Strang splitting, which wrote S at t^n + dt/2 next to an
+        // x, v, rho at t^n. That staggering showed up as a first-order-in-dt
+        // violation of S_xx = -4/3 mu ln(rho/rho0): measured phi_S - phi_rho was
+        // k c_l dt/2 to 0.2% at two different CFL numbers. It was an output
+        // artifact, not a splitting error -- the scheme is second order.
+#if ADAPTIVE_TIMESTEP
+        if (dump){
+            dump = false;
+
+#else // ADAPTIVE_TIMESTEP
+        if (step % config.h5DumpInterval == 0) {
+#endif // ADAPTIVE_TIMESTEP
+
+            std::stringstream stepss;
+            Logger(INFO) << "   > Dump particle distribution";
+
+            stepss << std::setw(6) << std::setfill('0')
+#if ADAPTIVE_TIMESTEP
+            << dumpStep;
+#else
+            << step;
+#endif // ADAPTIVE_TIMESTEP
+
+            Logger(INFO) << "      > Dump particles to file";
+            particles->dump2file(config.outDir + "/" + stepss.str() + std::string(".h5"), t);
+// ???
+#if ADAPTIVE_TIMESTEP
+            ++dumpStep;
+#else
+            ++ step;
+#endif // ADAPTIVE_TIMESTEP
+
+#if DEBUG_LVL > 1
+#if PERIODIC_BOUNDARIES
+            Logger(INFO) << "      > Dump ghosts to file";
+            ghostParticles.dump2file(config.outDir + "/" + stepss.str() + std::string("Ghosts.h5"), t);
+            Logger(INFO) << "      > Dump NNL to file";
+            particles->dumpNNL(config.outDir + "/" + stepss.str() + std::string("NNL.h5"), ghostParticles);
+#else
+            Logger(INFO) << "      > Dump NNL to file";
+            particles->dumpNNL(config.outDir + "/" + stepss.str() + std::string("NNL.h5"));
+#endif // PERIODIC_BOUNDARIES
+#endif // DEBUG_LVL
+        }
+        if (t>=config.timeEnd){
+            Logger(INFO) << "    > t = " << t << " -> FINISHED!";
+            break;
+        }
+
         Logger(INFO) << "    > Computing gradients";
 #if PERIODIC_BOUNDARIES
         particles->updateGhostState(ghostParticles);
@@ -404,49 +458,6 @@ void MeshlessScheme::run(){
 
 #endif// PERIODIC_BOUNDARIES
 
-#if ADAPTIVE_TIMESTEP
-        if (dump){
-            dump = false;
-
-#else // ADAPTIVE_TIMESTEP
-        if (step % config.h5DumpInterval == 0) {
-#endif // ADAPTIVE_TIMESTEP
-
-            std::stringstream stepss;
-            Logger(INFO) << "   > Dump particle distribution";
-
-            stepss << std::setw(6) << std::setfill('0')
-#if ADAPTIVE_TIMESTEP
-            << dumpStep;
-#else
-            << step;
-#endif // ADAPTIVE_TIMESTEP
-
-            Logger(INFO) << "      > Dump particles to file";
-            particles->dump2file(config.outDir + "/" + stepss.str() + std::string(".h5"), t);
-// ???
-#if ADAPTIVE_TIMESTEP
-            ++dumpStep;
-#else
-            ++ step;
-#endif // ADAPTIVE_TIMESTEP
-
-#if DEBUG_LVL > 1
-#if PERIODIC_BOUNDARIES
-            Logger(INFO) << "      > Dump ghosts to file";
-            ghostParticles.dump2file(config.outDir + "/" + stepss.str() + std::string("Ghosts.h5"), t);
-            Logger(INFO) << "      > Dump NNL to file";
-            particles->dumpNNL(config.outDir + "/" + stepss.str() + std::string("NNL.h5"), ghostParticles);
-#else
-            Logger(INFO) << "      > Dump NNL to file";
-            particles->dumpNNL(config.outDir + "/" + stepss.str() + std::string("NNL.h5"));
-#endif // PERIODIC_BOUNDARIES
-#endif // DEBUG_LVL
-        }
-        if (t>=config.timeEnd){
-            Logger(INFO) << "    > t = " << t << " -> FINISHED!";
-            break;
-        }
 
 
         Logger(INFO) << "    > Solving Riemann problems";
