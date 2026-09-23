@@ -185,7 +185,17 @@ void MeshlessScheme::run(){
 
 #if ADAPTIVE_TIMESTEP
         Logger(INFO) << "    > Selecting global timestep ... ";
+#if ELASTIC
+        // Elastic longitudinal speed sqrt((K + 4/3 mu)/rho) (eq. 92). With mu > 0
+        // this is the fastest signal in the solid, while compGlobalTimestep's
+        // EOSSoundSpeed returns the BULK speed only -- for the 2D elastic wave
+        // (K = 1, mu = 6/13) c_l = 1.271 against c_bulk = 1, so the nominal CFL
+        // was 27% optimistic. Identical to compGlobalTimestep when mu = 0:
+        // K/rho == c^2 for all three EOS, and the vSig/sml/CFL formula is the same.
+        timeStep = particles->compElasticTimestep();
+#else
         timeStep = particles->compGlobalTimestep();
+#endif
         //Logger(INFO) << "Time  > dt = " << timeStep << " selected.";
         if(dumpStep >= numDumpTimes){
             Logger(ERROR) << "Simulation did not abort after reaching timeEnd. Exiting.";
