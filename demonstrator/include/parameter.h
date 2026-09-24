@@ -771,6 +771,36 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   0 = no time centring (deliberately first order)
 #define RECON_TIME_PRED 1
 
+/// Centre the kick interval on the flux evaluation (drift-kick-drift).
+///
+/// The loop builds geometry, states and faces at t^n and then kicks over
+/// [t^n, t^n + dt].  t^n is the START of that interval, not its middle, so the
+/// kick is off-centre by dt/2 -- an O(dt) error in the velocity even once the
+/// drift itself is Verlet-correct (DRIFT_KDK).  That is the observed split after
+/// the 2026-09-24 wave-1 sweep: with DRIFT_KDK the density amplitude is
+/// dt-independent to 0.8 % over a factor 85 in dt, while the PHASE error stays
+/// first order.  On the harmonic oscillator the same scheme gives exactly
+/// velocity-Verlet for x and plain explicit Euler for v.
+///
+/// GIZMO has no such off-centring and needs no predictor for it: it drifts to t,
+/// builds everything there, and applies +-dt/2 kicks around it
+/// (DO_HALFSTEP_FOR_MESHLESS_METHODS is NOT enabled by default,
+/// Template_Config.sh:530).  TIME_DKD does the same here -- drift dt/2, rebuild
+/// the neighbour state, evaluate, kick the full dt, drift dt/2 -- so the states
+/// are AT the midpoint rather than extrapolated to it and RECON_TIME_PRED
+/// becomes unnecessary.
+///
+/// Cost: a second neighbour + density pass per step (~1.6x).  The VARIABLE_SML
+/// retry loop is not repeated in the rebuild; nnsRadius was sized for this step
+/// and half a drift does not move h_max appreciably in a smooth flow.
+///
+/// Combine with DRIFT_KDK 0: the two half drifts already sum to the Verlet
+/// position update, and DRIFT_KDK would average the velocities a second time.
+///
+///   0 = baseline (evaluate at t^n, kick forward a full dt)
+///   1 = drift dt/2, evaluate, kick dt, drift dt/2
+#define TIME_DKD 0
+
 /// |S_M|/c_s above which the face is treated as doing shock work and the
 /// Godunov energy flux is kept unchanged. GIZMO: epsilon_entropic_eos_big,
 /// "can be anything from (small number = more diffusive, less accurate entropy
@@ -812,6 +842,10 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // GIZMO_ELASTIC_FLUX consistency guards (USE_HLLC/ELASTIC are now defined)
 #if GIZMO_ELASTIC_FLUX && !(USE_HLLC && ELASTIC)
 #error "GIZMO_ELASTIC_FLUX requires USE_HLLC == 1 and ELASTIC == 1."
+#endif
+
+#if TIME_DKD && DRIFT_KDK
+#error "TIME_DKD already yields the Verlet position update through its two half drifts: set DRIFT_KDK 0."
 #endif
 
 // ADIABATIC_FACE_CORRECTION consistency guards (same reason: needs USE_HLLC)

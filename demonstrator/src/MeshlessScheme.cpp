@@ -266,6 +266,47 @@ void MeshlessScheme::run(){
             break;
         }
 
+#if TIME_DKD
+        // ---- DKD: drift to the MIDDLE of the kick interval -----------------
+        // The kick below spans [t^n, t^n + dt] but everything feeding it --
+        // geometry (A_ij, psiTilde), states, face frame -- was built at t^n,
+        // i.e. at the START of that interval, not its middle.  That off-centring
+        // is O(dt) in the velocity even when the drift is Verlet-correct.
+        // GIZMO avoids it by construction: it drifts to t, evaluates there, and
+        // kicks +-dt/2 around it.  Here the same thing is had by drifting half a
+        // step and rebuilding the neighbour state before the flux pass -- it
+        // costs a second neighbour/density pass and makes RECON_TIME_PRED
+        // unnecessary (the states are AT the midpoint, not extrapolated to it).
+        // The dump above is untouched: it still sees the state at t^n.
+        Logger(INFO) << "    > DKD half drift + rebuild at t + dt/2";
+        particles->moveParticles(timeStep/2., domain);
+        particles->assignParticlesAndCells(domain);
+#if PERIODIC_BOUNDARIES
+        particles->createGhostParticles(domain, ghostParticles, nnsRadius);
+#endif
+        particles->gridNNS(domain, nnsRadius);
+#if PERIODIC_BOUNDARIES
+        particles->ghostNNS(domain, ghostParticles, nnsRadius);
+#endif
+#if VARIABLE_SML
+        // Single pass, no retry loop: nnsRadius was sized for this step above and
+        // half a drift does not move h_max appreciably in a smooth flow.
+#if PERIODIC_BOUNDARIES
+        particles->updateAllSmoothingLengths(ghostParticles);
+#else
+        particles->updateAllSmoothingLengths();
+#endif
+#endif // VARIABLE_SML
+        particles->compDensity();
+#if PERIODIC_BOUNDARIES
+        particles->compDensity(ghostParticles);
+#endif
+#if EXPLICIT_VOL_INTEGRATION
+        particles->applyExplicitVolumeOverride();
+#endif
+        particles->compPressure();
+#endif // TIME_DKD
+
         Logger(INFO) << "    > Computing gradients";
 #if PERIODIC_BOUNDARIES
         particles->updateGhostState(ghostParticles);
@@ -572,9 +613,14 @@ void MeshlessScheme::run(){
         particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/true);
 #endif
 
-        //Logger(INFO) << "    > Moving particles";
         Logger(INFO) << "    > Moving particles";
+#if TIME_DKD
+        // second half of the drift, with v^{n+1}: the two halves together are
+        // x^{n+1} = x^n + dt (v^n + v^{n+1})/2, i.e. Verlet, same as DRIFT_KDK.
+        particles->moveParticles(timeStep/2., domain);
+#else
         particles->moveParticles(timeStep, domain);
+#endif
 #endif // !ELASTIC
 
         t += timeStep;
