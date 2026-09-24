@@ -801,6 +801,43 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   1 = drift dt/2, evaluate, kick dt, drift dt/2
 #define TIME_DKD 0
 
+/// Move the face frame velocity to the half step along with the states.
+///
+/// compRiemannStatesLR boosts the reconstructed states into the face frame
+/// (W := v - vFrame) and THEN predicts them half a step forward, but never moves
+/// vFrame itself -- the frame stays at t^n while the states are at t^n + dt/2.
+/// The code has carried the TODO for this since the predictor was written:
+/// "center vL and vR and update vFrame (compare to GIZMO code
+/// hydro_core_meshless.h:178ff)".
+///
+/// GIZMO's answer (hydro_core_meshless.h:163-177, DO_HALFSTEP_FOR_MESHLESS_METHODS)
+/// splits the predicted velocity change dv_k in two: the ANTIsymmetric half
+/// (dv_i - dv_j)/2 stays on the states, the SYMMETRIC half (dv_i + dv_j)/2 moves
+/// into v_frame.  Since our states are boosted before the prediction, that is the
+/// same as subtracting (dv_i + dv_j)/2 from both and adding it to vFrame -- which
+/// is what the implementation does, so the lab-frame prediction is unchanged and
+/// only the frame moves.  Only the acceleration part of dv enters: the advective
+/// terms transport the state, they do not move the frame.
+///
+/// Motivation: with DRIFT_KDK the O(dt) DISSIPATION is gone (2026-09-24 sweep,
+/// a: 5.885 -> -0.198) but the residual O(dt) error is DISPERSIVE -- the phase
+/// error at the coarsest rung grows 2.40e-3 -> 5.87e-3.  A face that moves at the
+/// t^n velocity while the particles move at the centred one is an O(dt) advection
+/// error, i.e. exactly a phase error.
+///
+/// Note GIZMO does NOT enable its half-step by default (Template_Config.sh:530
+/// lists DO_HALFSTEP_FOR_MESHLESS_METHODS commented out, and calls the effect
+/// "very, very weak") -- so GIZMO's second-order-in-time behaviour comes from the
+/// leapfrog, not from the reconstruction.  RECON_TIME_PRED 0 together with
+/// DRIFT_KDK 1 is that configuration.
+///
+/// The DIM == 3 branch takes the pressure acceleration only; the demonstrator's
+/// own 3D velocity prediction is incomplete there ("TODO: update below for 3D").
+///
+///   0 = baseline (frame at t^n)
+///   1 = frame advanced to t^n + dt/2
+#define FRAME_HALFSTEP 0
+
 /// |S_M|/c_s above which the face is treated as doing shock work and the
 /// Godunov energy flux is kept unchanged. GIZMO: epsilon_entropic_eos_big,
 /// "can be anything from (small number = more diffusive, less accurate entropy

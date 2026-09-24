@@ -4412,6 +4412,47 @@ void Particles::compRiemannStatesLR(const double &dt){
 #endif // ELASTIC
 #endif // DIM == 3
 
+#if FRAME_HALFSTEP
+            // GIZMO hydro_core_meshless.h:163-177 (DO_HALFSTEP_FOR_MESHLESS_METHODS).
+            // The states above were predicted to t^n + dt/2, but vFrame is still
+            // the t^n face velocity -- the inconsistency the TODO above names.
+            // GIZMO splits the predicted velocity change dv_k: the ANTIsymmetric
+            // half stays on the reconstructed states, the SYMMETRIC half moves
+            // into the face velocity.  Since the states here are already boosted
+            // (W := v - vFrame, above), subtracting (dv_i + dv_j)/2 from both and
+            // adding it to vFrame reproduces GIZMO's lines exactly:
+            //   boosted R = (v_i - f) + dv_i - (dv_i+dv_j)/2 = (v_i - f) + (dv_i-dv_j)/2
+            // Only the ACCELERATION part of dv enters: the advective terms above
+            // transport the state, they do not move the frame.
+            {
+                double dvi[DIM], dvj[DIM];
+                dvi[0] = -dt/2. * PGrad[i][0]/rho[i];
+                dvi[1] = -dt/2. * PGrad[i][1]/rho[i];
+                dvj[0] = -dt/2. * PGrad[j][0]/rho[j];
+                dvj[1] = -dt/2. * PGrad[j][1]/rho[j];
+#if ELASTIC
+                dvi[0] += dt/2. * (SxxGrad[i][0] + SxyGrad[i][1]) / rho[i];
+                dvi[1] += dt/2. * (SxyGrad[i][0] + SyyGrad[i][1]) / rho[i];
+                dvj[0] += dt/2. * (SxxGrad[j][0] + SxyGrad[j][1]) / rho[j];
+                dvj[1] += dt/2. * (SxyGrad[j][0] + SyyGrad[j][1]) / rho[j];
+#endif
+#if DIM == 3
+                dvi[2] = -dt/2. * PGrad[i][2]/rho[i];
+                dvj[2] = -dt/2. * PGrad[j][2]/rho[j];
+#if ELASTIC
+                dvi[2] += dt/2. * (SxzGrad[i][0] + SyzGrad[i][1] + SzzGrad[i][2]) / rho[i];
+                dvj[2] += dt/2. * (SxzGrad[j][0] + SyzGrad[j][1] + SzzGrad[j][2]) / rho[j];
+#endif
+#endif
+                for (int kd = 0; kd < DIM; ++kd){
+                    const double half = .5*(dvi[kd] + dvj[kd]);
+                    WijR[iW][2+kd] -= half;
+                    WijL[iW][2+kd] -= half;
+                    vFrame[iW][kd]   += half;
+                }
+            }
+#endif // FRAME_HALFSTEP
+
             // Free-surface diagnostic: dump the per-stage breakdown whenever
             // the final reconstructed rho falls below DENSITY_FLOOR or a
             // reconstructed velocity magnitude exceeds EXTREME_V. Rate-limited
@@ -6513,6 +6554,47 @@ void Particles::compRiemannStatesLR(const double &dt,
             WijLGhosts[iW][4] += dt/2. * (ghostParticles.SxzGrad[j][0] + ghostParticles.SyzGrad[j][1] + ghostParticles.SzzGrad[j][2]) / ghostParticles.rho[j];
 #endif // ELASTIC
 #endif // DIM == 3
+
+#if FRAME_HALFSTEP
+            // GIZMO hydro_core_meshless.h:163-177 (DO_HALFSTEP_FOR_MESHLESS_METHODS).
+            // The states above were predicted to t^n + dt/2, but vFrame is still
+            // the t^n face velocity -- the inconsistency the TODO above names.
+            // GIZMO splits the predicted velocity change dv_k: the ANTIsymmetric
+            // half stays on the reconstructed states, the SYMMETRIC half moves
+            // into the face velocity.  Since the states here are already boosted
+            // (W := v - vFrame, above), subtracting (dv_i + dv_j)/2 from both and
+            // adding it to vFrame reproduces GIZMO's lines exactly:
+            //   boosted R = (v_i - f) + dv_i - (dv_i+dv_j)/2 = (v_i - f) + (dv_i-dv_j)/2
+            // Only the ACCELERATION part of dv enters: the advective terms above
+            // transport the state, they do not move the frame.
+            {
+                double dvi[DIM], dvj[DIM];
+                dvi[0] = -dt/2. * PGrad[i][0]/rho[i];
+                dvi[1] = -dt/2. * PGrad[i][1]/rho[i];
+                dvj[0] = -dt/2. * ghostParticles.PGrad[j][0]/ghostParticles.rho[j];
+                dvj[1] = -dt/2. * ghostParticles.PGrad[j][1]/ghostParticles.rho[j];
+#if ELASTIC
+                dvi[0] += dt/2. * (SxxGrad[i][0] + SxyGrad[i][1]) / rho[i];
+                dvi[1] += dt/2. * (SxyGrad[i][0] + SyyGrad[i][1]) / rho[i];
+                dvj[0] += dt/2. * (ghostParticles.SxxGrad[j][0] + ghostParticles.SxyGrad[j][1]) / ghostParticles.rho[j];
+                dvj[1] += dt/2. * (ghostParticles.SxyGrad[j][0] + ghostParticles.SyyGrad[j][1]) / ghostParticles.rho[j];
+#endif
+#if DIM == 3
+                dvi[2] = -dt/2. * PGrad[i][2]/rho[i];
+                dvj[2] = -dt/2. * ghostParticles.PGrad[j][2]/ghostParticles.rho[j];
+#if ELASTIC
+                dvi[2] += dt/2. * (SxzGrad[i][0] + SyzGrad[i][1] + SzzGrad[i][2]) / rho[i];
+                dvj[2] += dt/2. * (ghostParticles.SxzGrad[j][0] + ghostParticles.SyzGrad[j][1] + ghostParticles.SzzGrad[j][2]) / ghostParticles.rho[j];
+#endif
+#endif
+                for (int kd = 0; kd < DIM; ++kd){
+                    const double half = .5*(dvi[kd] + dvj[kd]);
+                    WijRGhosts[iW][2+kd] -= half;
+                    WijLGhosts[iW][2+kd] -= half;
+                    vFrameGhosts[iW][kd]   += half;
+                }
+            }
+#endif // FRAME_HALFSTEP
 
             if (DENSITY_FLOOR > 0.){
                 if (WijRGhosts[iW][0] < DENSITY_FLOOR) WijRGhosts[iW][0] = DENSITY_FLOOR;
