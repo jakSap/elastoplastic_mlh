@@ -64,7 +64,21 @@ public:
     void HLLCFlux(double *Fij);
 #endif
 
+#if ADIABATIC_FACE_CORRECTION
+    /// Face pressure P_M and contact speed S_M of the last HLLCFlux() solve,
+    /// both in the rotated (x-split) face frame. In MFM the face-frame normal
+    /// momentum flux IS P_M -- no advective part survives -- so P_M is read
+    /// straight off the solver output rather than re-derived per solver.
+    /// Consumed by the adiabatic face correction (see parameter.h).
+    double faceP_M() const { return PM_; }
+    double faceS_M() const { return SM_; }
+#endif
+
 private:
+#if ADIABATIC_FACE_CORRECTION
+    double PM_ = 0.;
+    double SM_ = 0.;
+#endif
 #if USE_HLLC
     double *nUnit;
 #endif

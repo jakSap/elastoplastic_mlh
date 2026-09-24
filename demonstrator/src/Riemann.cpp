@@ -374,6 +374,16 @@ WL[1] += pDummy;
 #endif
 // #endif
 #endif // ELASTIC_HLLC_EP
+
+#if ADIABATIC_FACE_CORRECTION
+    // Still in the x-split face frame, and after the dummy pressure has been
+    // taken back out: Fij[2] is the normal momentum flux, which under MFM is
+    // exactly the face traction P_M (mu = 0 is required, so the deviatoric part
+    // is zero and the traction is a pressure). Capture before back-rotation.
+    PM_ = Fij[2];
+    SM_ = Sstar;
+#endif
+
     // Back-rotate momentum fluxes to lab frame (Lambda^{-1} = Lambda^T)
 #if DIM == 2
     double FijBuf[DIM] = { Fij[2], Fij[3] };

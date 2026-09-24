@@ -4516,6 +4516,136 @@ double Particles::pairwiseLimiter(double phi0, double phi_i, double phi_j, doubl
     return phi_;
 }
 
+#if ADIABATIC_FACE_CORRECTION
+#if ADIABATIC_FACE_DIAG
+namespace {
+    long   afcFacesTotal = 0;   ///< faces reaching the switch this step
+    long   afcFacesFired = 0;   ///< faces where the entropic form was used
+    double afcRatioSum   = 0.;  ///< sum of duNew/duOld over fired faces
+    long   afcRatioCount = 0;
+    double afcAbsOldSum  = 0.;  ///< sum |duOld| over fired faces
+    double afcAbsGapSum  = 0.;  ///< sum |duNew - duOld| over fired faces
+}
+#endif
+
+/// Adiabatic ("entropic") face correction for MFM, after Hopkins (2015),
+/// MNRAS 450, 53; ported from GIZMO hydro/hydro_core_meshless.h:335-375.
+/// See parameter.h for the equations, the thresholds, the paper-vs-code note
+/// and the list of deviations from the reference implementation.
+///
+/// Replaces the Godunov energy flux through face ij with the thermodynamic PdV
+/// work wherever the face is NOT doing shock work (|S_M| small against the
+/// sound speed). Both forms are antisymmetric under i <-> j, so swapping them
+/// leaves total energy conserved to machine precision; only the split between
+/// internal and kinetic energy -- i.e. the spurious entropy generation --
+/// changes. Mirrored faces copy -Fij from their partner, so applying this on
+/// the computed side alone keeps the pair antisymmetric.
+///
+/// SIGN CONVENTIONS. This code differs from GIZMO on BOTH counts:
+///   * Fij[1] > 0 means energy LEAVES i;  GIZMO's Fluxes.p > 0 means i GAINS.
+///   * Aij points from i TOWARDS j;       GIZMO's n_unit points j -> i.
+/// The two flips cancel on the mean-face-velocity term (which therefore keeps
+/// GIZMO's plus sign) and do not cancel on the PdV term (which therefore
+/// enters with a minus). Every GIZMO expression reused below -- including the
+/// intermediate-band guard -- is its original with duOld, duNew and the face
+/// velocities all negated.
+void Particles::applyAdiabaticFaceCorrection(int i, int j, int ii,
+                                             double P_M, double S_M, double *Fij){
+    const double AijNorm = sqrt(Helper::dotProduct(Aij[ii], Aij[ii]));
+    if (!(AijNorm > 0.) || !(P_M > 0.)) return;
+
+    // Effective sound speed: GIZMO uses the smaller of the two (more
+    // conservative, i.e. the switch fires on fewer faces).
+    const double cI = MeshlessEOS->EOSAdiabaticSoundSpeed(rho[i], P[i]);
+    const double cJ = MeshlessEOS->EOSAdiabaticSoundSpeed(rho[j], P[j]);
+    const double cEff = cI < cJ ? cI : cJ;
+    if (!(cEff > 0.)) return;
+
+    const double SMoverC = std::fabs(S_M) / cEff;
+#if ADIABATIC_FACE_DIAG
+    ++afcFacesTotal;
+#endif
+    if (SMoverC >= ADIABATIC_FACE_EPS_BIG) return;  // shock work: keep Godunov
+
+    // unit face normal, i -> j
+    double nHat[DIM];
+    for (int d = 0; d < DIM; ++d) nHat[d] = Aij[ii][d] / AijNorm;
+
+    double dp[DIM], dv[DIM];
+    dp[0] = x[i]-x[j];  dv[0] = vx[i]-vx[j];
+    dp[1] = y[i]-y[j];  dv[1] = vy[i]-vy[j];
+#if DIM == 3
+    dp[2] = z[i]-z[j];  dv[2] = vz[i]-vz[j];
+#endif
+    const double r = sqrt(Helper::dotProduct(dp, dp));
+    if (!(r > 0.)) return;
+    const double vdotr = Helper::dotProduct(dp, dv) / r;
+
+    // SPH estimate of the cell-volume change rate, times P_M. Cancels
+    // identically when h_i == h_j: it corrects only the asymmetry of the
+    // volume partition between unequally-resolved partners. The symmetric
+    // part of the compression work does not travel through the energy flux at
+    // all -- it appears as the momentum flux decelerating both partners at
+    // fixed total energy.
+    const double Vi = m[i]/rho[i], Vj = m[j]/rho[j];
+    const double PdVi = Kernel::dWdr(r, sml[i]) * Vi*Vi * P_M * vdotr;
+    const double PdVj = Kernel::dWdr(r, sml[j]) * Vj*Vj * P_M * vdotr;
+
+    double faceVelI = 0., faceVelJ = 0.;
+    faceVelI += vx[i]*nHat[0] + vy[i]*nHat[1];
+    faceVelJ += vx[j]*nHat[0] + vy[j]*nHat[1];
+#if DIM == 3
+    faceVelI += vz[i]*nHat[2];
+    faceVelJ += vz[j]*nHat[2];
+#endif
+
+    const double faceNormPM = P_M * AijNorm;
+    const double duOld = Fij[1];
+    const double duNew = 0.5*(faceNormPM*(faceVelI + faceVelJ) - (PdVi - PdVj));
+
+    // Intermediate band: keep the entropic form only where it does not push
+    // energy the wrong way across the face relative to the entropic ordering
+    // P/rho. Below EPS_SMALL it is used unconditionally; at a dangerous
+    // condition number it is forced on.
+    bool useEntropic = true;
+#if OUTPUT_CONDITION_NUMBER
+    const double cond2 = conditionNumber[i]*conditionNumber[i]
+                       + conditionNumber[j]*conditionNumber[j];
+#else
+    const double cond2 = 0.;
+#endif
+    const double condDanger2 = ADIABATIC_FACE_COND_DANGER*ADIABATIC_FACE_COND_DANGER;
+    if (SMoverC > ADIABATIC_FACE_EPS_SMALL && cond2 < condDanger2){
+        const double sI = P[i]/rho[i], sJ = P[j]/rho[j];
+        if (sI != sJ){
+            if (sI > sJ){
+                const double dtoj = duOld - faceNormPM*faceVelJ;
+                if (dtoj > 0.) { useEntropic = false; }
+                else if (dtoj < 0. && dtoj > duNew - faceNormPM*faceVelJ) { useEntropic = false; }
+            } else {
+                const double dtoi = -duOld + faceNormPM*faceVelI;
+                if (dtoi > 0.) { useEntropic = false; }
+                else if (dtoi < 0. && dtoi > -duNew + faceNormPM*faceVelI) { useEntropic = false; }
+            }
+        }
+    }
+    if (cond2 >= condDanger2) useEntropic = true;
+    if (!useEntropic) return;
+
+#if ADIABATIC_FACE_DIAG
+    ++afcFacesFired;
+    afcAbsOldSum += std::fabs(duOld);
+    afcAbsGapSum += std::fabs(duNew - duOld);
+    if (std::fabs(duOld) > 0.){
+        afcRatioSum += duNew/duOld;
+        ++afcRatioCount;
+    }
+#endif
+
+    Fij[1] += duNew - duOld;
+}
+#endif // ADIABATIC_FACE_CORRECTION
+
 void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #if USE_HLLC
     double n_unit[DIM];
@@ -4687,6 +4817,9 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #endif
                 };
                 solver.HLLCFlux(Fij[ii]);
+#if ADIABATIC_FACE_CORRECTION
+                applyAdiabaticFaceCorrection(i, jj, ii, solver.faceP_M(), solver.faceS_M(), Fij[ii]);
+#endif
 #if TORQUE_DIAG
                 // Pressure/Riemann channel: snapshot the torque of the pure HLLC
                 // momentum flux BEFORE the elastic flux is added on top. Same
@@ -4959,6 +5092,25 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 }
 
 void Particles::collectFluxes(Helper &helper){
+#if ADIABATIC_FACE_CORRECTION && ADIABATIC_FACE_DIAG
+    // Runs once per step, right after every face has been solved. In smooth
+    // flow the entropic and Godunov forms estimate the same physical work, so
+    // the mean ratio must sit near +1 (near -1 would mean a sign convention is
+    // inverted) and the L1 gap must shrink under resolution. The gap is
+    // aggregated as sum|duNew-duOld| / sum|duOld| rather than per face: a
+    // travelling wave has many faces with duOld ~ 0, whose individual ratios
+    // are meaningless.
+    if (afcFacesTotal > 0){
+        Logger(INFO) << "[AFC] fired " << afcFacesFired << "/" << afcFacesTotal
+                     << " faces (" << (100.*afcFacesFired)/(double)afcFacesTotal << "%)"
+                     << ", mean duNew/duOld = "
+                     << (afcRatioCount > 0 ? afcRatioSum/(double)afcRatioCount : 0.)
+                     << ", L1 gap = "
+                     << (afcAbsOldSum > 0. ? afcAbsGapSum/afcAbsOldSum : 0.);
+    }
+    afcFacesTotal = afcFacesFired = afcRatioCount = 0;
+    afcRatioSum = afcAbsOldSum = afcAbsGapSum = 0.;
+#endif
 #if DIAG_COND_ENABLE
     static int diagStepCounter = 0;
     static int diagActivatedAt = -1;

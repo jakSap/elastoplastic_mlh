@@ -401,6 +401,15 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
 
     void solveRiemannProblems(const Particles &ghostParticles);
 
+#if ADIABATIC_FACE_CORRECTION
+    /// Swap the Godunov energy flux through face ij for the adiabatic PdV work
+    /// on faces that are not doing shock work (Hopkins 2015; see parameter.h).
+    /// Called on the computed side of each pair only; mirrored faces inherit
+    /// the corrected flux by antisymmetry.
+    void applyAdiabaticFaceCorrection(int i, int j, int ii,
+                                      double P_M, double S_M, double *Fij);
+#endif
+
     void collectFluxes(Helper &helper);
 
     void updateStateAndPosition(const double &dt, const Domain &domain);

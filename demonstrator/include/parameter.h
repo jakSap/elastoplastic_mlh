@@ -640,6 +640,103 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// meshless finite mass method instead of meshless finite volume
 #define MESHLESS_FINITE_MASS 1
 
+// --- Adiabatic (entropic) face correction for MFM -------------------------
+//
+// Hopkins (2015), MNRAS 450, 53 -- "GIZMO: a new class of accurate, mesh-free
+// hydrodynamic simulation methods". Port of the MFM "face correction for
+// adiabatic flows", GIZMO master, hydro/hydro_core_meshless.h:335-375.
+//
+// WHAT IT DOES. In MFM there is no mass flux, so the whole energy exchange
+// across a face is the pressure work. The Godunov form takes it from the
+// Riemann contact wave,
+//
+//     du_old = A_ij * P_M * (S_M + v_frame . nhat)                        (1)
+//
+// which is correct at a shock but is NOT entropy-conserving in smooth flow:
+// S_M carries the solver's dissipation, so every face leaks a little entropy
+// even where the flow is perfectly adiabatic. The alternative is the
+// thermodynamic PdV work, evaluated from the actual rate of change of the
+// cell volume (an SPH-style estimator), which is adiabatic by construction:
+//
+//     du_new = 1/2 * ( PdV_i - PdV_j + A_ij * P_M * (v_i.nhat + v_j.nhat) ) (2)
+//     PdV_k  = (dW/dr)(r, h_k) * V_k^2 * P_M * (dx . dv)/r
+//
+// The correction swaps (1) for (2) -- `Fij[1] += du_new - du_old` -- but only
+// where the face is not doing shock work, i.e. where the contact speed is
+// small compared to the sound speed:
+//
+//     |S_M| / min(c_i, c_j) < ADIABATIC_FACE_EPS_BIG
+//
+// Both (1) and (2) are antisymmetric under i <-> j, so total energy stays
+// conserved to machine precision whichever is used; only the entropy
+// (i.e. the split between internal and kinetic) changes.
+//
+// INTERMEDIATE BAND. Between ADIABATIC_FACE_EPS_SMALL and ..._EPS_BIG, GIZMO
+// keeps the entropic form only if it does not move energy the "wrong way"
+// across the face relative to the entropic ordering P_i/rho_i vs P_j/rho_j
+// (hydro_core_meshless.h:354-370); below EPS_SMALL it is used unconditionally.
+// That guard is reproduced here.
+//
+// NOTE -- PAPER vs CODE. This correction is NOT in the Hopkins (2015) paper.
+// The paper's Appendix D describes a *different*, energy-ratio-based
+// energy-entropy switch for extremely high Mach numbers (the Bryan et al. 1995
+// dual-energy formalism, with alpha_kin / alpha_grav ~ 1e-3), which in GIZMO is
+// the separate, OFF-by-default ENERGY_ENTROPY_SWITCH_IS_ACTIVE. The correction
+// implemented here is switched on |S_M|/c_s, is ON by default in GIZMO's
+// MFM/MFV, and is documented only in the code and in the GIZMO user guide
+// (under FORCE_ENTROPIC_EOS_BELOW, which retunes ..._EPS_SMALL).
+//
+// DEVIATIONS FROM GIZMO, all recorded because they matter for interpreting a
+// convergence test:
+//   * GIZMO weights PdV_k by the grad-h factor DhsmlNgbFactor; the demonstrator
+//     has no such array (its smoothing length solve carries no Omega_grad-h
+//     correction), so it is taken as 1. It is O(1) and -> 1 for a smooth,
+//     well-sampled field, which is the regime this correction targets.
+//   * GIZMO's literal PdV_k carries no m_j/m_i ratio, which makes (2) exact
+//     only for equal particle masses. The wave tests here are equal-mass.
+//   * GIZMO additionally disables the correction on a bad face-closure error
+//     (leak_vs_tol) and forces it on at a dangerous condition number; the
+//     demonstrator's condition-number gate is applied, the closure gate is not.
+//
+// GIZMO restricts this to ideal gases -- "below is defined for adiabatic ideal
+// fluids, don't use for materials" -- and compiles it out for EOS_TILLOTSON and
+// EOS_ELASTIC. The same restriction is enforced below: the correction refuses to
+// build with a material EOS or with live solid dynamics.
+//
+//   0 = off (baseline, bit-identical to pre-correction code)
+//   1 = on
+#define ADIABATIC_FACE_CORRECTION 0
+
+/// |S_M|/c_s above which the face is treated as doing shock work and the
+/// Godunov energy flux is kept unchanged. GIZMO: epsilon_entropic_eos_big,
+/// "can be anything from (small number = more diffusive, less accurate entropy
+/// conservation) to ~1.1-1.3 (least diffusive, most noisy)".
+#define ADIABATIC_FACE_EPS_BIG 0.5
+
+/// |S_M|/c_s below which the entropic form is used unconditionally. GIZMO:
+/// epsilon_entropic_eos_small; should be << ADIABATIC_FACE_EPS_BIG.
+#define ADIABATIC_FACE_EPS_SMALL 1.e-3
+
+/// Condition number above which the entropic form is forced on regardless of
+/// the intermediate-band guard. GIZMO: CONDITION_NUMBER_DANGER.
+#define ADIABATIC_FACE_COND_DANGER 1.0e3
+
+/// Report, once per step, the fraction of faces the correction fired on and the
+/// largest relative gap |du_new - du_old| / |du_old| among them. In smooth flow
+/// the two forms estimate the same physical work, so the gap must be small and
+/// must shrink under resolution; a gap of order 2 means the sign convention of
+/// (2) is inverted relative to this code's "flux leaves i" convention. Used to
+/// validate the port. 0 = off.
+#define ADIABATIC_FACE_DIAG 0
+
+// Consistency guards live further down, once USE_HLLC is defined.
+//
+// ELASTIC is deliberately NOT forbidden: the ideal-gas soundwave build runs the
+// ELASTIC branch with shear modulus mu = 0 and S = 0 (see the testcase's
+// makeBuilds.sh), which is pure hydro. With a non-zero mu the deviatoric
+// traction carries work that Eq. (2) does not model, so the correction must not
+// be used there -- there is no compile-time check for that, since mu lives in
+// the runtime material table.
 
 #define USE_MATID 1
 #if EOS == 1 && !USE_MATID
@@ -651,6 +748,21 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // GIZMO_ELASTIC_FLUX consistency guards (USE_HLLC/ELASTIC are now defined)
 #if GIZMO_ELASTIC_FLUX && !(USE_HLLC && ELASTIC)
 #error "GIZMO_ELASTIC_FLUX requires USE_HLLC == 1 and ELASTIC == 1."
+#endif
+
+// ADIABATIC_FACE_CORRECTION consistency guards (same reason: needs USE_HLLC)
+#if ADIABATIC_FACE_CORRECTION && !MESHLESS_FINITE_MASS
+#error "ADIABATIC_FACE_CORRECTION is an MFM correction: it needs MESHLESS_FINITE_MASS == 1."
+#endif
+#if ADIABATIC_FACE_CORRECTION && EOS != 0
+#error "ADIABATIC_FACE_CORRECTION is for ideal gases only (GIZMO excludes EOS_TILLOTSON/EOS_ELASTIC): set EOS 0."
+#endif
+#if ADIABATIC_FACE_CORRECTION && !(USE_HLLC && ELASTIC)
+// P_M and S_M are read off Riemann::HLLCFlux's x-split solver output, which only
+// exists on the ELASTIC HLLC branch. That is the branch the ideal-gas soundwave
+// builds actually use (ELASTIC 1, mu = 0); the plain solveHLLC1 path would need
+// its own S_M hand-back and is deliberately not wired up rather than guessed at.
+#error "ADIABATIC_FACE_CORRECTION needs USE_HLLC == 1 && ELASTIC == 1 (x-split HLLC path)."
 #endif
 #if RECON_FACE_DV && !GIZMO_ELASTIC_FLUX
 #error "RECON_FACE_DV only affects the GIZMO elastic stress flux; enable GIZMO_ELASTIC_FLUX."
