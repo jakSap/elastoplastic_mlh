@@ -759,6 +759,18 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   1 = trapezoidal drift, x += dt (v^n + v^{n+1})/2
 #define DRIFT_KDK 0
 
+/// MUSCL half-step (time) predictor in the face reconstruction.
+///
+/// Diagnostic only: 0 passes dt = 0 into compRiemannStatesLR, which is the single
+/// place dt enters the reconstruction, so the states are reconstructed in space
+/// but not centred in time.  That must be first order in dt.  It is here to
+/// bracket the ladder: if the baseline coefficient a is unchanged with the
+/// predictor off, the predictor is not what sets the O(dt) term.
+///
+///   1 = baseline (predict to t^n + dt/2)
+///   0 = no time centring (deliberately first order)
+#define RECON_TIME_PRED 1
+
 /// |S_M|/c_s above which the face is treated as doing shock work and the
 /// Godunov energy flux is kept unchanged. GIZMO: epsilon_entropic_eos_big,
 /// "can be anything from (small number = more diffusive, less accurate entropy

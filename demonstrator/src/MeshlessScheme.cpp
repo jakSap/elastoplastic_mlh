@@ -445,14 +445,23 @@ void MeshlessScheme::run(){
         // time-centering; without this the measured face jump is dominated by
         // that half-step and says nothing about the limiter.
         particles->compRiemannStatesLR(0.);
+#elif !RECON_TIME_PRED
+        // Diagnostic bracket: dt is the only way time enters the reconstruction,
+        // so dt = 0 removes the MUSCL half-step centring. See RECON_TIME_PRED.
+        particles->compRiemannStatesLR(0.);
 #else
         particles->compRiemannStatesLR(timeStep);
 #endif
 
 #if PERIODIC_BOUNDARIES
         Logger(DEBUG) << "      > Computing ghost fluxes";
+#if RECON_TIME_PRED
         particles->compRiemannStatesLR(timeStep,
                                      ghostParticles);
+#else
+        particles->compRiemannStatesLR(0.,
+                                     ghostParticles);
+#endif
         //Logger(DEBUG) << "Aborting for debugging.";
         //exit(6);
 
