@@ -707,6 +707,33 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //   1 = on
 #define ADIABATIC_FACE_CORRECTION 0
 
+// ---------------------------------------------------------------------------
+// Time-order study 2026-09-24: three single-purpose switches, all default 0/1 =
+// baseline, added to find the O(dt) term that survives ADIABATIC_FACE_CORRECTION
+// (2026-09-24-fixed-dt-leiter-adiabatische-korrektur: p stays 1.0 over six
+// configurations, only the prefactor drops 5.9 -> 2.1).
+// ---------------------------------------------------------------------------
+
+/// Drop the advective energy remainder from the MFM star-state energy flux.
+///
+/// xSplitElasticHLLC builds the MFM flux by zeroing BOTH advective pieces of the
+/// mass line -- rho_K v_K (never written) and rho_K S_K (starfac - 1) -- but the
+/// energy line drops only rho_K v_K e_K and keeps rho_K S_K (starfac - 1) e_K,
+/// because that statement sits behind #endif // MESHLESS_FINITE_MASS.  Mass, and
+/// the three momentum components, each got an MFM variant; the energy line alone
+/// did not.
+///
+/// The remainder is  rho_K S_K (S* - v~_K)/(S_K - S*) e_K, which vanishes exactly
+/// under the zero-mass-flux condition S* = v~_K.  Decisive check: set S* = 0.
+/// The face energy flux must then be analytically 0 (star state,
+/// operator_splitting.tex Sec. 4.4); the code gives -rho_K v_K e_K, and with the
+/// term removed it is exactly 0.  GIZMO has no such term at all: in the MFM frame
+/// it sets Fluxes.p = P_M * S_M outright (reimann.h:411-412).
+///
+///   0 = baseline (remainder kept, as of 2026-09-24)
+///   1 = remainder dropped under MESHLESS_FINITE_MASS
+#define MFM_ENERGY_STARFIX 0
+
 /// |S_M|/c_s above which the face is treated as doing shock work and the
 /// Godunov energy flux is kept unchanged. GIZMO: epsilon_entropic_eos_big,
 /// "can be anything from (small number = more diffusive, less accurate entropy

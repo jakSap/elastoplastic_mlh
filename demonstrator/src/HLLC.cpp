@@ -951,8 +951,17 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
 #endif // MESHLESS_FINITE_MASS
             // Energy: F*K^(5) = FK^(5) + SK*(ρ*K*ε*K - ρK*εK) (eq. 98)
             // with ε*K = εK + (S* - vK) * [S* + tK/(ρK*(SK-vK))] (eq. 73)
+#if MESHLESS_FINITE_MASS && MFM_ENERGY_STARFIX
+            // MFM: rhoLSLstarfac * eL is the energy advected by the star-state
+            // MASS flux -- and that mass flux is zero here (mass line above).
+            // The one MFM variant the energy line never got: this statement sits
+            // behind #endif // MESHLESS_FINITE_MASS.  See MFM_ENERGY_STARFIX.
+            (void) rhoLSLstarfac; (void) eL;
+            totflux[1] += rhoLSLSstarmvL * (Sstar + tL / (WL[0] * SLmvL));
+#else
             totflux[1] += rhoLSLstarfac * eL
                         + rhoLSLSstarmvL * (Sstar + tL / (WL[0] * SLmvL));
+#endif // MFM_ENERGY_STARFIX
         }
     } else {
         // Right state sampled
@@ -1023,8 +1032,13 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
             totflux[4] += rhoRSRstarfac * WR[4];
 #endif
 #endif // MESHLESS_FINITE_MASS
+#if MESHLESS_FINITE_MASS && MFM_ENERGY_STARFIX
+            (void) rhoRSRstarfac; (void) eR;
+            totflux[1] += rhoRSRSstarmvR * (Sstar + tR / (WR[0] * SRmvR));
+#else
             totflux[1] += rhoRSRstarfac * eR
                         + rhoRSRSstarmvR * (Sstar + tR / (WR[0] * SRmvR));
+#endif // MFM_ENERGY_STARFIX
         }
     }
 
