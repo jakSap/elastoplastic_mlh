@@ -31,6 +31,14 @@ public:
 #endif
     int *cell; // cell in which particle at index resides
     double *m, *u, *x, *y, *vx, *vy, *rho, *P;
+#if DRIFT_KDK
+    /// velocities at t^n, saved by updateState()/updateStateAndPosition() before
+    /// the kick so moveParticles() can drift with (v^n + v^{n+1})/2.
+    double *vxPrev, *vyPrev;
+#if DIM == 3
+    double *vzPrev;
+#endif
+#endif // DRIFT_KDK
 #if !RUNSPH && DIM == 3
     // z-coordinate and z-velocity for the 3D MFM path. RUNSPH declares its own z/vz in the
     // SPH block below; the DIM==3 allocation (Particles.cpp) and free are shared by both paths.

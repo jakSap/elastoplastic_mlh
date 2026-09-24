@@ -241,6 +241,13 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     y = new double[numParticles];
     vx = new double[numParticles];
     vy = new double[numParticles];
+#if DRIFT_KDK
+    vxPrev = new double[numParticles]();
+    vyPrev = new double[numParticles]();
+#if DIM == 3
+    vzPrev = new double[numParticles]();
+#endif
+#endif // DRIFT_KDK
     rhoGrad = new double[numParticles][DIM];
     vxGrad = new double[numParticles][DIM];
     vyGrad = new double[numParticles][DIM];
@@ -468,6 +475,13 @@ Particles::~Particles() {
     delete[] y;
     delete[] vx;
     delete[] vy;
+#if DRIFT_KDK
+    delete[] vxPrev;
+    delete[] vyPrev;
+#if DIM == 3
+    delete[] vzPrev;
+#endif
+#endif // DRIFT_KDK
     delete[] rhoGrad;
     delete[] vxGrad;
     delete[] vyGrad;
@@ -5381,6 +5395,13 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
         //x[i] += .5*(vx[i]+vxi)*dt;
         //y[i] += .5*(vy[i]+vyi)*dt;
         // stay consistent with choice of effective frame
+#if DRIFT_KDK
+        x[i] += .5*(vx[i]+vxi)*dt;
+        y[i] += .5*(vy[i]+vyi)*dt;
+#if DIM==3
+        z[i] += .5*(vz[i]+vzi)*dt;
+#endif
+#else
         x[i] += vxi*dt;
         y[i] += vyi*dt;
 
@@ -5388,6 +5409,7 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
         //z[i] += .5*(vz[i]+vzi)*dt;
         z[i] += vzi*dt;
 #endif
+#endif // DRIFT_KDK
 #if PERIODIC_BOUNDARIES
         if (x[i] < domain.bounds.minX) {
             x[i] = domain.bounds.maxX - (domain.bounds.minX - x[i]);
@@ -5414,6 +5436,14 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
 void Particles::updateState(const double &dt){
     for(int i=0; i<N; ++i){
         double vxi = vx[i], vyi = vy[i];
+#if DRIFT_KDK
+        // v^n, for the trapezoidal drift in moveParticles(). See DRIFT_KDK.
+        vxPrev[i] = vxi;
+        vyPrev[i] = vyi;
+#if DIM == 3
+        vzPrev[i] = vz[i];
+#endif
+#endif // DRIFT_KDK
 #if DIM==3
         double vzi = vz[i];
 #endif
@@ -5551,11 +5581,21 @@ void Particles::updateState(const double &dt){
 void Particles::moveParticles(const double &dt, const Domain &domain){
 #if MOVE_PARTICLES
     for(int i=0; i<N; ++i){
+#if DRIFT_KDK
+        // x^{n+1} = x^n + dt (v^n + v^{n+1})/2 -- velocity-Verlet to O(dt^3),
+        // against the first-order single-endpoint drift below. See DRIFT_KDK.
+        x[i] += .5*(vxPrev[i] + vx[i])*dt;
+        y[i] += .5*(vyPrev[i] + vy[i])*dt;
+#if DIM==3
+        z[i] += .5*(vzPrev[i] + vz[i])*dt;
+#endif
+#else
         x[i] += vx[i]*dt;
         y[i] += vy[i]*dt;
 #if DIM==3
         z[i] += vz[i]*dt;
 #endif
+#endif // DRIFT_KDK
 #if PERIODIC_BOUNDARIES
         if (x[i] < domain.bounds.minX) {
             x[i] = domain.bounds.maxX - (domain.bounds.minX - x[i]);

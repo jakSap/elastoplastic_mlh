@@ -734,6 +734,31 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   1 = remainder dropped under MESHLESS_FINITE_MASS
 #define MFM_ENERGY_STARFIX 0
 
+/// Second-order (trapezoidal) drift of the particle positions.
+///
+/// The step is kick-then-drift: updateState() applies the full-dt kick from
+/// fluxes that ARE time-centred (the dt/2 MUSCL predictor in
+/// compRiemannStatesLR), so v^{n+1} is second order -- but the drift then uses a
+/// single endpoint velocity, x^{n+1} = x^n + dt v^{n+1} in moveParticles() (the
+/// ELASTIC path) and x^{n+1} = x^n + dt v^n in updateStateAndPosition() (the
+/// non-ELASTIC path).  Either way the position is first order: the local error
+/// dt (v^{n+1} - v^{n+1/2}) = dt^2 a / 2 accumulates over T/dt steps to O(dt).
+///
+/// In a Lagrangian scheme the positions ARE the mesh, so an O(dt) position error
+/// is an O(dt) volume -- hence density -- error, while v and u stay second order.
+/// That asymmetry is the measured signature: L_1(v_x) fits p = 1.995 while the
+/// density damping 1 - a_rho fits p = 1.0, and the coefficient is independent of
+/// both the limiter and the resolution.
+///
+/// With x^{n+1} = x^n + dt (v^n + v^{n+1})/2 the update is velocity-Verlet to
+/// O(dt^3).  The trapezoidal form is already in updateStateAndPosition(), commented
+/// out with "stay consistent with choice of effective frame" -- see
+/// DRIFT_KDK_FRAME for that consistency question, which this flag leaves alone.
+///
+///   0 = baseline (single-endpoint drift)
+///   1 = trapezoidal drift, x += dt (v^n + v^{n+1})/2
+#define DRIFT_KDK 0
+
 /// |S_M|/c_s above which the face is treated as doing shock work and the
 /// Godunov energy flux is kept unchanged. GIZMO: epsilon_entropic_eos_big,
 /// "can be anything from (small number = more diffusive, less accurate entropy
