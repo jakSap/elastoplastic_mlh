@@ -1,0 +1,13 @@
+# tag	MFM_ENERGY_STARFIX	DRIFT_KDK	ADIABATIC_FACE_CORRECTION	RECON_TIME_PRED	SLOPE_LIMITING
+# Time-order sweep 2026-09-24.  Ideal gas only (EOS 0), everything else exactly
+# build_ideal from testcases/soundwave_2d/makeBuilds.sh.
+base	0	0	0	1	1
+fix1	1	0	0	1	1
+kdk	0	1	0	1	1
+fix1kdk	1	1	0	1	1
+fix1afc	1	0	1	1	1
+kdkafc	0	1	1	1	1
+all	1	1	1	1	1
+nopred	0	0	0	0	1
+kdkLimN	0	1	0	1	0
+allLimN	1	1	1	1	0
