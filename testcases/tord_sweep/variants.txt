@@ -1,13 +1,13 @@
-# Wave 2, 2026-09-24.  Wave 1 showed DRIFT_KDK removes the O(dt) DISSIPATION but
-# leaves an O(dt) DISPERSION: the drift is Verlet but the KICK is off-centre --
-# geometry, states and faces are built at t^n while the kick spans [t^n, t^n+dt].
-# TIME_DKD centres it the way GIZMO does (drift dt/2, evaluate, kick, drift dt/2),
-# which also makes the reconstruction predictor unnecessary.
-# tag	STARFIX	KDK	AFC	PRED	LIM	FRAME	DKD
-w2kdk	0	1	0	1	1	0	0
-w2dkd	0	0	0	0	1	0	1
-w2dkdpred	0	0	0	1	1	0	1
-w2nopred	0	1	0	0	1	0	0
-w2frame	0	1	0	1	1	1	0
-w2dkdfull	1	0	1	0	1	0	1
-w2dkdLimN	0	0	0	0	0	0	1
+# Wave 3, 2026-09-25.  LOCALISE, don't guess.  Sweep 2 excluded six mechanisms and
+# left one statement: the numerical sound speed carries an O(dt) error (the dt-part
+# of c_num-1 fits p = 0.85..1.23 in every variant, while its dt->0 floor is +3.83e-3
+# identically across all of them).  The wave speeds S_L, S_R, S_* are the only thing
+# in the scheme that sets a propagation speed, so swap the solver and see whether the
+# dt-term moves at all.  HLLC_general_EOS is a no-op for EOS 0 (EOSGeneralGamma
+# returns hydro_gamma, so 0.5*(g+g) = g) but must be 0 for the exact path to run;
+# w3hllc therefore carries it too and must reproduce `base` exactly.
+# tag	STARFIX	KDK	AFC	PRED	LIM	FRAME	DKD	HLLC	gEOS
+w3hllc	0	0	0	1	1	0	0	1	0
+w3exact	0	0	0	1	1	0	0	0	0
+w3hllckdk	0	1	0	1	1	0	0	1	0
+w3exactkdk	0	1	0	1	1	0	0	0	0

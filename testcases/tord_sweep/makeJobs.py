@@ -22,22 +22,22 @@ END_FAC = 1.15
 
 LAD_N64 = [192, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 12288, 16384]
 LAD_N128 = [384, 768, 1536, 3072, 6144, 12288, 24576]
+LAD_N256 = [768, 1536, 3072, 6144, 12288]
 
 # tier, variant tag, base config, n, ladder, cost weight per step
 CASES = [
-    # tier 0 -- is the off-centred kick the remaining O(dt)?
-    (0, "w2dkd",      "config_ideal_N64.info",  64, LAD_N64, 1.6),
-    (0, "w2kdk",      "config_ideal_N64.info",  64, LAD_N64, 1.0),
-    (0, "w2dkdpred",  "config_ideal_N64.info",  64, LAD_N64, 1.6),
-    # tier 1 -- the two cheaper answers to the same question, plus best-of
-    (1, "w2nopred",   "config_ideal_N64.info",  64, LAD_N64, 1.0),
-    (1, "w2frame",    "config_ideal_N64.info",  64, LAD_N64, 1.0),
-    (1, "w2dkdfull",  "config_ideal_N64.info",  64, LAD_N64, 1.6),
-    (1, "w2dkdLimN",  "config_ideal_N64.info",  64, LAD_N64, 1.6),
-    # tier 2 -- n = 128 for the three that decide it
-    (2, "w2dkd",      "config_ideal_N128.info", 128, LAD_N128, 6.4),
-    (2, "w2dkdpred",  "config_ideal_N128.info", 128, LAD_N128, 6.4),
-    (2, "w2kdk",      "config_ideal_N128.info", 128, LAD_N128, 4.0),
+    # tier 0 -- solver swap: does the O(dt) part of c_num care which Riemann
+    # solver produced the face state?  w3hllc must reproduce `base` exactly.
+    (0, "w3exact",    "config_ideal_N64.info",  64, LAD_N64, 1.0),
+    (0, "w3hllc",     "config_ideal_N64.info",  64, LAD_N64, 1.0),
+    (0, "w3exactkdk", "config_ideal_N64.info",  64, LAD_N64, 1.0),
+    (0, "w3hllckdk",  "config_ideal_N64.info",  64, LAD_N64, 1.0),
+    # tier 1 -- the h axis: a third resolution turns c_num(dt, h) into a surface
+    # fit instead of two points.  Reuses the wave-1 builds.
+    (1, "base",       "config_ideal_N256.info", 256, LAD_N256, 16.0),
+    (1, "kdk",        "config_ideal_N256.info", 256, LAD_N256, 16.0),
+    # tier 2 -- resolution control for the solver result
+    (2, "w3exact",    "config_ideal_N128.info", 128, LAD_N128, 4.0),
 ]
 
 
@@ -72,7 +72,8 @@ for tier, tag, basecfg, n, ladder, w in CASES:
         name = "%s_N%d_M%d" % (tag, n, M)
         cfg = os.path.join(SW, "config_tord_%s.info" % name)
         out = "output_tord_%s" % name
-        d = max(k for k in range(1, M // 20 + 1) if M % k == 0)
+        ndump = 20 if n <= 128 else 4
+        d = max(k for k in range(1, M // ndump + 1) if M % k == 0)
         rewrite(base, cfg, 1.0 / M, END_FAC * 1.0, d + 1, out, M)
         os.makedirs(os.path.join(SW, out), exist_ok=True)
         jobs.append((tier, M * w, SW, build, os.path.basename(cfg), out, name))

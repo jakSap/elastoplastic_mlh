@@ -17,12 +17,12 @@ echo "### smoke test $(date)"
 # One cheap run of `base` must land a snapshot on t = 1.0.  If the dump interval
 # rule is wrong, every one of the ~170 jobs is wasted, so check it first.
 SW="$ROOT/testcases/soundwave_2d"
-( cd "$SW" && ./build_t_w2dkd/bin/mlh -c config_tord_w2dkd_N64_M192.info > output_tord_w2dkd_N64_M192/run.log 2>&1 )
+( cd "$SW" && ./build_t_w3exact/bin/mlh -c config_tord_w3exact_N64_M192.info > output_tord_w3exact_N64_M192/run.log 2>&1 )
 python3 - <<'PY'
 import glob, os, sys, h5py
 import numpy as np
 sw = os.path.expanduser(os.environ["ROOT"]) + "/testcases/soundwave_2d"
-d = sw + "/output_tord_w2dkd_N64_M192"
+d = sw + "/output_tord_w3exact_N64_M192"
 ts = []
 for f in sorted(glob.glob(d + "/*.h5")):
     with h5py.File(f, "r") as h:

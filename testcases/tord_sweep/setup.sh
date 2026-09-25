@@ -28,8 +28,8 @@ grep -nE '^#define (ADAPTIVE_TIMESTEP|MFM_ENERGY_STARFIX|DRIFT_KDK|RECON_TIME_PR
 
 echo "=== 2. builds ==="
 # Column order in variants.txt after the tag.
-FLAGS=(MFM_ENERGY_STARFIX DRIFT_KDK ADIABATIC_FACE_CORRECTION RECON_TIME_PRED SLOPE_LIMITING FRAME_HALFSTEP TIME_DKD)
-while IFS=$'\t' read -r tag v0 v1 v2 v3 v4 v5 v6; do
+FLAGS=(MFM_ENERGY_STARFIX DRIFT_KDK ADIABATIC_FACE_CORRECTION RECON_TIME_PRED SLOPE_LIMITING FRAME_HALFSTEP TIME_DKD USE_HLLC HLLC_general_EOS)
+while IFS=$'\t' read -r tag v0 v1 v2 v3 v4 v5 v6 v7 v8; do
     case "$tag" in ''|\#*) continue ;; esac
     B="$SW/build_t_${tag}"
     echo "--- build_t_${tag} ---"
@@ -45,13 +45,13 @@ while IFS=$'\t' read -r tag v0 v1 v2 v3 v4 v5 v6; do
               "ADAPTIVE_TIMESTEP 0"; do
         set_flag "$P" "${kv% *}" "${kv#* }"
     done
-    vals=("$v0" "$v1" "$v2" "$v3" "$v4" "${v5:-0}" "${v6:-0}")
-    for k in 0 1 2 3 4 5 6; do set_flag "$P" "${FLAGS[$k]}" "${vals[$k]}"; done
+    vals=("$v0" "$v1" "$v2" "$v3" "$v4" "${v5:-0}" "${v6:-0}" "${v7:-1}" "${v8:-1}")
+    for k in 0 1 2 3 4 5 6 7 8; do set_flag "$P" "${FLAGS[$k]}" "${vals[$k]}"; done
     # PAIRWISE_LIMITER follows SLOPE_LIMITING (the limNone twin of the old sweep
     # turned both off together).
     [ "$v4" = "0" ] && set_flag "$P" PAIRWISE_LIMITER 0
     { echo "variant ${tag}  $(date '+%Y-%m-%d %H:%M')"
-      for k in 0 1 2 3 4 5 6; do echo "  ${FLAGS[$k]} = ${vals[$k]}"; done
+      for k in 0 1 2 3 4 5 6 7 8; do echo "  ${FLAGS[$k]} = ${vals[$k]}"; done
       echo; echo "parameter.h diff vs build_t_base:"; } > "$B/SNAPSHOT.txt"
     [ -f "$SW/build_t_base/include/parameter.h" ] && \
         diff "$SW/build_t_base/include/parameter.h" "$P" >> "$B/SNAPSHOT.txt" || true

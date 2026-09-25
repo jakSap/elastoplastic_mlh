@@ -1,0 +1,13 @@
+# Wave 2, 2026-09-24.  Wave 1 showed DRIFT_KDK removes the O(dt) DISSIPATION but
+# leaves an O(dt) DISPERSION: the drift is Verlet but the KICK is off-centre --
+# geometry, states and faces are built at t^n while the kick spans [t^n, t^n+dt].
+# TIME_DKD centres it the way GIZMO does (drift dt/2, evaluate, kick, drift dt/2),
+# which also makes the reconstruction predictor unnecessary.
+# tag	STARFIX	KDK	AFC	PRED	LIM	FRAME	DKD
+w2kdk	0	1	0	1	1	0	0
+w2dkd	0	0	0	0	1	0	1
+w2dkdpred	0	0	0	1	1	0	1
+w2nopred	0	1	0	0	1	0	0
+w2frame	0	1	0	1	1	1	0
+w2dkdfull	1	0	1	0	1	0	1
+w2dkdLimN	0	0	0	0	0	0	1
