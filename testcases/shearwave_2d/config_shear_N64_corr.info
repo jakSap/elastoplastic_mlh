@@ -1,0 +1,74 @@
+; 2D linear travelling SHEAR wave, Tillotson EOS with mu > 0, 64 x 16 particles
+; (n = 64 per wavelength), N_NN = 32.
+;
+; MASSES CORRECTED for the kernel-sum density offset at N_NN = 32
+; (+4.23793427e-03, IC shearwave_N64_corr.h5): <rho> = rho_bar = 1, so P_bar = 0.
+;
+; The IC carries /Sxy = -rho c_s v_y: a travelling shear wave is only an eigenmode with that
+; stress (S = 0 would give a standing wave). rho is uniform -- a shear wave perturbs the
+; density only at O(A^2) -- so EOS, kernel-density offset and tensile correction drop out of
+; the restoring force, which is 100 % deviatoric. See generateIC.py.
+;
+; Build: build_shear/ -- EOS 2, ELASTIC 1 + GIZMO_ELASTIC_FLUX 0 (xSplitElasticHLLC),
+;        mu = 0.461538462 (Poisson 0.3 at K = 1), TENSILE_CORRECTION 1 + _LOCAL 1,
+;        SURFACE_VOLCORR 0, EXPLICIT_VOL_INTEGRATION 1, PERIODIC_BOUNDARIES 1,
+;        Wendland C2. See makeBuilds.sh.
+; Run from this directory:  build_shear/bin/mlh -c config_shear_N64_corr.info   (or ./runAll.sh)
+
+initFile shearwave_N64_corr.h5
+outDir   output_shear_N64_corr
+
+; Shear wave speed c_s = sqrt(mu/rho0) = 0.679366220, so one passing takes lambda/c_s =
+; 1.471960144. 3 passings, 50 snapshots each. Because of the dump-index
+; off-by-one in MeshlessScheme.cpp:193 (file k > 0 is written at t = (k+1)*dt), the period
+; boundaries are files 49, 99 and 149; timeEnd runs 3 dump intervals past
+; 3 T so the last one is actually written.
+timeStep 0.0294392028878
+timeEnd  4.50419804183
+h5DumpInterval 1
+
+periodicBoxLimits {
+    lowerX 0.0
+    lowerY 0.0
+    lowerZ 0.0
+    upperX 1.0
+    upperY 0.25
+    upperZ 0.0
+}
+
+; ~ kernel support for N_NN = 32 on the lattice: sqrt(N_NN/pi) * dx, dx = 1/64
+kernelSize 0.0498678
+
+sml {
+    NNNTarget 32
+    tol       1e-3
+    maxIter   200
+    maxFactor 1.2
+    hMinFactor 0.1
+    hMaxFactor 3.0
+    warnFraction  0.05
+    panicFraction 0.25
+}
+
+; read only for EOS 0, kept for config-parser compatibility
+hydro_gamma 1.6666666666666667
+
+; Hopkins-canonical Tillotson: a = b = B = 0, alpha = beta = 0 -> P = A (rho/rho0 - 1),
+; K = A/rho0 = 1. IC u = 0.01 > 0 (u <= 0 logs an ERROR every step), below u_iv so the cold
+; branch is used. With uniform rho and corrected masses P = 0 everywhere at t = 0.
+materials {
+    mat0 {
+        matId 0
+        rho0  1.0
+        A     1.0
+        B     0.0
+        u0    1.0
+        a     0.0
+        b     0.0
+        alpha 0.0
+        beta  0.0
+        u_iv  0.05
+        u_cv  0.18
+        mu    0.46153846153846156
+    }
+}
