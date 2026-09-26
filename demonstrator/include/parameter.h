@@ -755,9 +755,17 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// out with "stay consistent with choice of effective frame" -- see
 /// DRIFT_KDK_FRAME for that consistency question, which this flag leaves alone.
 ///
-///   0 = baseline (single-endpoint drift)
+/// DEFAULT ON since 2026-09-25 (MA-Obsidian/2026-09-25-erste-ordnung-drift.md):
+/// the endpoint drift is the demonstrator's O(dt) soundwave error.  Faces use
+/// V = m/rho_explicit with position-based psi-tilde weights, so the background
+/// pressure P0*sum_j A_ij couples the kernel density (the positions) into the
+/// momentum equation; an off-centred drift then damps the wave at the rate
+/// (P0/rho0) k^2 dt / 4.  GIZMO drifts KDK with v^{n+1/2}.  With 1 the ideal-gas
+/// soundwave converges at p ~ 2 (dt ∝ h).  Absent for P0 = 0 (solid ICs).
+///
+///   0 = single-endpoint drift (pre-2026-09-25 behaviour, first order)
 ///   1 = trapezoidal drift, x += dt (v^n + v^{n+1})/2
-#define DRIFT_KDK 0
+#define DRIFT_KDK 1
 
 /// MUSCL half-step (time) predictor in the face reconstruction.
 ///
