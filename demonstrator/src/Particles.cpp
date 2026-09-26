@@ -866,8 +866,14 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     const double FVec[2] = { -AijSel[ii][0], -AijSel[ii][1] };
 #endif
 
-    // mean-velocity interface (the -0.5 carries GIZMO's required sign)
-    const double v_int[2] = { -0.5*(vx[i]+vxJ[jj]), -0.5*(vy[i]+vyJ[jj]) };
+    // Face velocity for the work term: energy flux = +vbar . momentum flux, the
+    // same sign as the HLLC de-boost (Riemann.cpp, +v.F_p). The earlier -vbar
+    // (inherited from GIZMO's elastic_stress_tensor_force.h) still conserved
+    // total energy but split it as du_i = -(vbar + v_i).cmag instead of
+    // -dv/2 . cmag: u became frame-dependent and dissipation could cool a
+    // particle (negative u at disc/block surfaces; boosted disc u differed by
+    // 0.46, with +vbar by 3e-12 -- testplan_20260926/build_ref_vint).
+    const double v_int[2] = { 0.5*(vx[i]+vxJ[jj]), 0.5*(vy[i]+vyJ[jj]) };
     const double dv[2] = { vx[i]-vxJ[jj], vy[i]-vyJ[jj] };
     const double vdotr = dv[0]*dx + dv[1]*dy;
 
@@ -1059,8 +1065,8 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     const double FNormT = m[i]*mJ[jj]*dwk / (rhoi*rhoj);
     const double FVec[3] = { FNormT*dx*rinv, FNormT*dy*rinv, FNormT*dz*rinv };
 
-    // mean-velocity interface (the -0.5 carries GIZMO's required sign)
-    const double v_int[3] = { -0.5*(vx[i]+vxJ[jj]), -0.5*(vy[i]+vyJ[jj]), -0.5*(vz[i]+vzJ[jj]) };
+    // Face velocity for the work term: +vbar, see the 2D branch.
+    const double v_int[3] = { 0.5*(vx[i]+vxJ[jj]), 0.5*(vy[i]+vyJ[jj]), 0.5*(vz[i]+vzJ[jj]) };
     const double dv[3] = { vx[i]-vxJ[jj], vy[i]-vyJ[jj], vz[i]-vzJ[jj] };
     const double vdotr = dv[0]*dx + dv[1]*dy + dv[2]*dz;
 
