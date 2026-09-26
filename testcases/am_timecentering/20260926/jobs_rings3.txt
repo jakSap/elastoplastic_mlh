@@ -1,0 +1,5 @@
+dkd_sp_fm3_dv2_mmr_tq discR_d0.0179_w0.2.h5 L_Rdkd_sp_fm3_dv2_mmr_d0.0179 31.416 0.5
+dkd_sp_fm3_dv2_mmr_tq discR_d0.025_w0.2.h5 L_Rdkd_sp_fm3_dv2_mmr_d0.025 31.416 0.5
+dkd_sp_fm3_dv2_mmr_tq discR_d0.0357_w0.2.h5 L_Rdkd_sp_fm3_dv2_mmr_d0.0357 31.416 0.5
+dkd_sp_fm3_dv2_mmr_tq discR_d0.05_w0.2.h5 L_Rdkd_sp_fm3_dv2_mmr_d0.05 31.416 0.5
+dkd_sp_fm3_dv2_mmr_tq discR_d0.0714_w0.2.h5 L_Rdkd_sp_fm3_dv2_mmr_d0.0714 31.416 0.5

@@ -1,0 +1,12 @@
+gkdk_fm2_tq disc_d0.0177_w0.2.h5 L_gkdk_fm2_d0.0177 31.416 0.5
+gkdk_fm2_dv2_tq disc_d0.0177_w0.2.h5 L_gkdk_fm2_dv2_d0.0177 31.416 0.5
+gkdk_fm2_tq disc_d0.025_w0.2.h5 L_gkdk_fm2_d0.025 31.416 0.5
+gkdk_fm2_dv2_tq disc_d0.025_w0.2.h5 L_gkdk_fm2_dv2_d0.025 31.416 0.5
+gkdk_fm2_tq disc_d0.035_w0.2.h5 L_gkdk_fm2_d0.035 31.416 0.5
+gkdk_fm2_dv2_tq disc_d0.035_w0.2.h5 L_gkdk_fm2_dv2_d0.035 31.416 0.5
+gkdk_fm2_tq disc_d0.05_w0.2.h5 L_gkdk_fm2_d0.05 31.416 0.5
+gkdk_fm2_dv2_tq disc_d0.05_w0.2.h5 L_gkdk_fm2_dv2_d0.05 31.416 0.5
+gkdk_fm2_tq disc_d0.07_w0.2.h5 L_gkdk_fm2_d0.07 31.416 0.5
+gkdk_fm2_dv2_tq disc_d0.07_w0.2.h5 L_gkdk_fm2_dv2_d0.07 31.416 0.5
+gkdk_fm2_tq disc_d0.1_w0.2.h5 L_gkdk_fm2_d0.1 31.416 0.5
+gkdk_fm2_dv2_tq disc_d0.1_w0.2.h5 L_gkdk_fm2_dv2_d0.1 31.416 0.5

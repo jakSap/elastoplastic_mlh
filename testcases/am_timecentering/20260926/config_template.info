@@ -1,0 +1,42 @@
+; test plan 2026-09-26, A1_disc / ref_d0.025_w0.2  (build_ref) 
+initFile ics/disc_d0.025_w0.2.h5
+outDir runs/A1_disc/ref_d0.025_w0.2/output
+timeStep 2.0
+timeEnd 100.531
+h5DumpInterval 1
+periodicBoxLimits {
+    lowerX -3.0
+    lowerY -3.0
+    lowerZ 0.0
+    upperX 3.0
+    upperY 3.0
+    upperZ 0.0
+}
+kernelSize 0.07978845608028655
+sml {
+    NNNTarget 32
+    tol       1e-3
+    maxIter   200
+    maxFactor 1.2
+    hMinFactor 0.1
+    hMaxFactor 3.0
+    warnFraction  0.05
+    panicFraction 0.25
+}
+hydro_gamma 1.6666666666666667
+materials {
+    mat0 {
+        matId 0
+        rho0  1.0
+        A     1.0
+        B     0.0
+        u0    1.0
+        a     0.0
+        b     0.0
+        alpha 0.0
+        beta  0.0
+        u_iv  0.05
+        u_cv  0.18
+        mu    0.22
+    }
+}

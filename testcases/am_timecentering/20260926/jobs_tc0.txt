@@ -1,0 +1,8 @@
+dkd_sp_tc0_tq disc_d0.05_w0.2.h5 L_dkd_sp_tc0_d0.05 31.416 0.5
+gkdk_tc0_tq disc_d0.05_w0.2.h5 L_gkdk_tc0_d0.05 31.416 0.5
+dkd_sp_tc0_tq disc_d0.035_w0.2.h5 L_dkd_sp_tc0_d0.035 31.416 0.5
+gkdk_tc0_tq disc_d0.035_w0.2.h5 L_gkdk_tc0_d0.035 31.416 0.5
+dkd_sp_tc0_tq disc_d0.025_w0.2.h5 L_dkd_sp_tc0_d0.025 31.416 0.5
+gkdk_tc0_tq disc_d0.025_w0.2.h5 L_gkdk_tc0_d0.025 31.416 0.5
+dkd_sp_tc0_tq disc_d0.07_w0.2.h5 L_dkd_sp_tc0_d0.07 31.416 0.5
+gkdk_tc0_tq disc_d0.07_w0.2.h5 L_gkdk_tc0_d0.07 31.416 0.5
