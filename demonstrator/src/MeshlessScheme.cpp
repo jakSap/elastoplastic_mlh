@@ -54,6 +54,55 @@ void MeshlessScheme::run(){
 #endif // ADAPTIVE_TIMESTEP
 
 
+    // Snapshot writer. Called at the top of the step (baseline, the state there
+    // is the solution at t^n) or after the closing half kick (TIME_KDK, where the
+    // state at the top is only a prediction).
+    auto writeDumpIfDue = [&](){
+#if ADAPTIVE_TIMESTEP
+        if (dump){
+            dump = false;
+
+#else // ADAPTIVE_TIMESTEP
+        if (step % config.h5DumpInterval == 0) {
+#endif // ADAPTIVE_TIMESTEP
+
+            std::stringstream stepss;
+            Logger(INFO) << "   > Dump particle distribution";
+
+            stepss << std::setw(6) << std::setfill('0')
+#if ADAPTIVE_TIMESTEP
+            << dumpStep;
+#else
+            << step;
+#endif // ADAPTIVE_TIMESTEP
+
+            Logger(INFO) << "      > Dump particles to file";
+            particles->dump2file(config.outDir + "/" + stepss.str() + std::string(".h5"), t);
+// ???
+#if ADAPTIVE_TIMESTEP
+            ++dumpStep;
+#else
+            ++ step;
+#endif // ADAPTIVE_TIMESTEP
+
+#if DEBUG_LVL > 1
+#if PERIODIC_BOUNDARIES
+            Logger(INFO) << "      > Dump ghosts to file";
+            ghostParticles.dump2file(config.outDir + "/" + stepss.str() + std::string("Ghosts.h5"), t);
+            Logger(INFO) << "      > Dump NNL to file";
+            particles->dumpNNL(config.outDir + "/" + stepss.str() + std::string("NNL.h5"), ghostParticles);
+#else
+            Logger(INFO) << "      > Dump NNL to file";
+            particles->dumpNNL(config.outDir + "/" + stepss.str() + std::string("NNL.h5"));
+#endif // PERIODIC_BOUNDARIES
+#endif // DEBUG_LVL
+        }
+    };
+#if TIME_KDK
+    bool kdkHaveHalf = false;   // half-step store holds a state (false before step 0's opening kick)
+    double kdkDtPrev = 0.;      // dt of the step the next closing half kick belongs to
+#endif
+
     do {
         Logger(INFO) << "  > TIME: " << t << ", STEP: " << step;
 
@@ -222,49 +271,13 @@ void MeshlessScheme::run(){
         // violation of S_xx = -4/3 mu ln(rho/rho0): measured phi_S - phi_rho was
         // k c_l dt/2 to 0.2% at two different CFL numbers. It was an output
         // artifact, not a splitting error -- the scheme is second order.
-#if ADAPTIVE_TIMESTEP
-        if (dump){
-            dump = false;
-
-#else // ADAPTIVE_TIMESTEP
-        if (step % config.h5DumpInterval == 0) {
-#endif // ADAPTIVE_TIMESTEP
-
-            std::stringstream stepss;
-            Logger(INFO) << "   > Dump particle distribution";
-
-            stepss << std::setw(6) << std::setfill('0')
-#if ADAPTIVE_TIMESTEP
-            << dumpStep;
-#else
-            << step;
-#endif // ADAPTIVE_TIMESTEP
-
-            Logger(INFO) << "      > Dump particles to file";
-            particles->dump2file(config.outDir + "/" + stepss.str() + std::string(".h5"), t);
-// ???
-#if ADAPTIVE_TIMESTEP
-            ++dumpStep;
-#else
-            ++ step;
-#endif // ADAPTIVE_TIMESTEP
-
-#if DEBUG_LVL > 1
-#if PERIODIC_BOUNDARIES
-            Logger(INFO) << "      > Dump ghosts to file";
-            ghostParticles.dump2file(config.outDir + "/" + stepss.str() + std::string("Ghosts.h5"), t);
-            Logger(INFO) << "      > Dump NNL to file";
-            particles->dumpNNL(config.outDir + "/" + stepss.str() + std::string("NNL.h5"), ghostParticles);
-#else
-            Logger(INFO) << "      > Dump NNL to file";
-            particles->dumpNNL(config.outDir + "/" + stepss.str() + std::string("NNL.h5"));
-#endif // PERIODIC_BOUNDARIES
-#endif // DEBUG_LVL
-        }
+#if !TIME_KDK
+        writeDumpIfDue();
         if (t>=config.timeEnd){
             Logger(INFO) << "    > t = " << t << " -> FINISHED!";
             break;
         }
+#endif // !TIME_KDK
 
 #if TIME_DKD
         // ---- DKD: drift to the MIDDLE of the kick interval -----------------
@@ -422,6 +435,7 @@ void MeshlessScheme::run(){
         particles->compPolyCoefficients();
 #endif
 #endif
+#if !TIME_KDK
 #if ELASTIC
 	Logger(INFO) << "    > Performing stress integration 1 / 2";
         particles->integrateStressTensor(timeStep / 2.0);
@@ -440,6 +454,7 @@ void MeshlessScheme::run(){
         Logger(DEBUG) << "      > Explicit-volume half-step kick A";
         particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/false);
 #endif
+#endif // !TIME_KDK (the KDK half kicks follow the flux pass)
 // #ifdef FIRST_ORDER_DEBUG
 //         // zero all gradients -> first-order (no spatial reconstruction, no half-step)
 //         for (int _z=0; _z<particles->N; ++_z) for (int _d=0; _d<DIM; ++_d) {
@@ -544,7 +559,48 @@ void MeshlessScheme::run(){
         // before the state update so the reported rate belongs to this step.
         particles->torqueDiagReport(timeStep, t);
 #endif
-#if !ELASTIC
+#if TIME_KDK
+        // ---- TIME_KDK: close step n-1, write the sync state, open step n ------
+        // Every rate used below -- the fluxes vF/eF and grad v for S and
+        // rhoExplicit -- was built in this pass at the geometry x^n from the
+        // predicted state, so both half kicks around t^n use the same rates.
+        if (kdkHaveHalf){
+            Logger(INFO) << "    > KDK closing half kick (dt = " << kdkDtPrev << ")";
+            particles->loadKickState();
+            particles->updateState(kdkDtPrev/2.);
+            particles->integrateStressTensor(kdkDtPrev/2.);
+#if EXPLICIT_VOL_INTEGRATION
+            // skipped once, right after the seed: rhoExplicit is then already the
+            // sync value (see Particles::rhoExplicitHValid)
+            if (particles->rhoExplicitHValid)
+                particles->integrateExplicitVolumeHalfStep(kdkDtPrev/2., /*finalize=*/true);
+#endif
+        }
+        writeDumpIfDue();   // synchronised x, v, u, S, rhoExplicit at t^n
+        if (t>=config.timeEnd){
+            Logger(INFO) << "    > t = " << t << " -> FINISHED!";
+            break;
+        }
+        Logger(INFO) << "    > KDK opening half kick";
+        particles->updateState(timeStep/2.);
+        particles->integrateStressTensor(timeStep/2.);
+#if EXPLICIT_VOL_INTEGRATION
+        particles->integrateExplicitVolumeHalfStep(timeStep/2., /*finalize=*/true);
+#endif
+        particles->saveKickState();
+        kdkHaveHalf = true;
+        kdkDtPrev = timeStep;
+        Logger(INFO) << "    > Moving particles with v^{n+1/2}";
+        particles->moveParticles(timeStep, domain);
+        // Predict the sync state at t^{n+1} with this step's rates (GIZMO's
+        // VelPred): the next flux pass is built from it, and the next closing
+        // half kick replaces it by the solution.
+        particles->updateState(timeStep/2.);
+        particles->integrateStressTensor(timeStep/2.);
+#if EXPLICIT_VOL_INTEGRATION
+        particles->integrateExplicitVolumeHalfStep(timeStep/2., /*finalize=*/true);
+#endif
+#elif !ELASTIC
 	Logger(INFO) << "    > Updating state and position";
         particles->updateStateAndPosition(timeStep, domain);
 #else // !ELASTIC

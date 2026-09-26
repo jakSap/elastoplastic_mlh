@@ -486,6 +486,43 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       bearing for stability. Kept only to document the negative result.
 #define RECON_FACE_DV 1
 
+// Take the RECON_FACE_DV jump from the SPATIAL reconstruction only, i.e. the
+// limited face states before the MUSCL half-step predictor adds dt/2 * dW/dt.
+//
+// Why: the predictor advances each side with its own Taylor step,
+//     v_f,i(t + dt/2) = v_i + (x_f - x_i).grad v_i + dt/2 [a_i - (v_i - v_F).grad v_i],
+// which drops the mixed term dt/2 (x_f - x_i) . d_t grad v. For a linear field
+// v = G(t) x the two sides then differ by dt/2 * dG/dt * x_ij instead of by zero,
+// so a body whose rotation rate or strain rate changes (a spinning disc that
+// breathes) feels a spurious transverse dissipation of order dt*h, and its
+// antisymmetric part (the spin acceleration) is a torque. Measured 2026-09-26
+// (testcases/am_timecentering/20260926): rotating disc d0.05 omega 0.2, the
+// transverse channel carries 86 % of the residual L_z torque and halves with dt
+// (3.2e-4 -> 1.7e-4 of L_z at t = 10, CFL 0.2 -> 0.1).
+// The jump only has to vanish for linear fields at every instant; it does not
+// have to be time-centred, since it is itself O(h^2) on smooth fields.
+//
+//   0 = jump carries the half-step predictor (behaviour before 2026-09-26)
+//   1 = spatial-only jump (the predicted states still feed the HLLC solve)
+#define RECON_FACE_DV_SPATIAL 0
+
+// Minmod-limit the RADIAL part of the RECON_FACE_DV jump against the raw
+// difference v_i - v_j: same sign -> the smaller of the two, opposite sign -> 0.
+// (The transverse part is not limited: against the one-signed raw difference of a
+// rotating body a minmod brakes the spin, -2.5e-3 of L_z per rotation measured.)
+//
+// Why: the HLL term of a pair changes the kinetic energy at the rate
+// -wt (dv_F . dv), which is a loss only while the reconstructed jump dv_F points
+// the same way as the raw one. Where the two sides' extrapolations overshoot each
+// other the term pumps kinetic energy out of u (the work term books it there), u
+// goes negative and the body heats its own motion. Measured 2026-09-26: TIME_KDK +
+// RECON_FACE_DV 2 disrupts the rotating disc at t ~ 10 on d0.025 and d0.0177
+// (u -> -96, 4.3e6 negative-u lines). Rigid rotation keeps dv_F = 0; on smooth
+// fields the limited jump stays O(h^2) (or 0), so the order is not affected.
+//
+//   0 = off, 1 = minmod against the raw difference (2D only)
+#define RECON_FACE_DV_MINMOD 0
+
 // Feed the deviatoric TRACTION in the GIZMO elastic stress flux with the
 // spatially reconstructed face stress (Sij extrapolated to the shared face
 // point xij, per side) instead of the raw cell-centered Sij[p]. Companion to
@@ -565,6 +602,20 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //   2 = use the MFM face A_ij itself. Isotropy is then exact rather than
 //       approximate. Riskier: GIZMO chose the radial area specifically to avoid
 //       the tensile instability, so the ring is the regression gate.
+//
+//   3 = split MFM half faces: each side's stress on its OWN half face,
+//           F_ij = S_i a_ij - S_j a_ji,   a_ij = V_i psiTilde_j(x_i),
+//       where A_ij = a_ij - a_ji. Mode 2 takes 0.5 (S_i + S_j) A_ij, and its
+//       torque is exact only for a UNIFORM stress: expanding the pair sum, the
+//       S_i a_ij part cancels through sum_j a_ij (x) x_ij = -V_i I (linear
+//       consistency of psiTilde, B = E^-1), but the cross term
+//       0.5 sum x_ij x S_j a_ij leaves a residual wherever S varies -- measured
+//       2026-09-26 as the whole L_z residual of the rotating disc once the time
+//       errors are gone (surface band, not convergent in d). The split form is
+//       still pairwise antisymmetric (momentum exact) and its total torque is
+//       sum_i eps : (S_i sum_j a_ij (x) x_ij) = -sum_i V_i eps : S_i = 0 for every
+//       symmetric S_i. The tensile correction's per-pair (1 - f) and the
+//       dissipation terms are the only non-central parts left.
 #define ELASTIC_FACE_MODE 0
 // Reject the correction and fall back to B_i = I when G_i is this badly
 // conditioned (one-sided surface stencils). Counted and reported.
@@ -763,6 +814,15 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// (P0/rho0) k^2 dt / 4.  GIZMO drifts KDK with v^{n+1/2}.  With 1 the ideal-gas
 /// soundwave converges at p ~ 2 (dt ∝ h).  Absent for P0 = 0 (solid ICs).
 ///
+/// CAVEAT (2026-09-26, MA-Obsidian/2026-09-26-am-zeitzentrierung.md): this
+/// centres the DRIFT but not the KICK, which still uses forces built at x^n.
+/// Then L^{n+1} - L^n = dt sum x^n x F + dt^2/2 sum v^{n+1/2} x F exactly, and the
+/// second term is +omega^2 dt/2 per unit time on a rotating body although every
+/// pair force is central (the endpoint drift conserves L exactly for central
+/// forces). The Strang half steps of S and rhoExplicit after the kick also read
+/// grad v^{n+1} on x^n, so rhoExplicit/rhoKernel drifts by +omega^2 dt per unit
+/// time. For rotation use TIME_DKD (or TIME_KDK); see there.
+///
 ///   0 = single-endpoint drift (pre-2026-09-25 behaviour, first order)
 ///   1 = trapezoidal drift, x += dt (v^n + v^{n+1})/2
 #define DRIFT_KDK 1
@@ -846,6 +906,43 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   1 = frame advanced to t^n + dt/2
 #define FRAME_HALFSTEP 0
 
+/// GIZMO's kick-drift-kick: evaluate everything at the sync time t^n and
+/// apply the result as two half kicks around it.
+///
+/// The baseline evaluates at t^n and kicks over [t^n, t^n + dt]; DRIFT_KDK
+/// centres the drift but not the kick, and the Strang half steps of S and
+/// rhoExplicit that bracket the flux pass read grad v^{n+1} on the geometry
+/// x^n.  Measured 2026-09-26 (testcases/am_timecentering/20260926) on the
+/// rotating disc:
+///   * L_z grows by dt^2/2 sum_i v_i x F_i per step = +omega^2 dt/2 per unit
+///     time (1.37 % measured / 1.42 % predicted, d0.025 omega 0.2, t = 100),
+///     first order in dt although every pair force is central;
+///   * rhoExplicit/rhoKernel drifts by +omega^2 dt per unit time and the disc
+///     inflates (1.68 % / 1.72 % over one rotation, d0.05).
+/// Both vanish when every rate is taken at one geometry and one time level.
+///
+/// Step n under TIME_KDK (one neighbour/flux pass per step, like the baseline):
+///   1. positions x^n; the working arrays hold the drift-PREDICTED sync state
+///      (v, u, S, rhoExplicit advanced from the half-step store by dt/2 with
+///      the previous rates, GIZMO's VelPred).  Density, gradients, faces and
+///      fluxes are built from it; the reconstruction has NO half-step predictor.
+///   2. closing half kick of step n-1 from the half-step store with the NEW
+///      rates -> synchronised state at t^n; the snapshot is written here.
+///   3. opening half kick with the same rates -> half-step store (n + 1/2).
+///   4. drift x^{n+1} = x^n + dt v^{n+1/2}; predict the working arrays to t^{n+1}.
+/// Each half kick sits at one fixed geometry, so a central pair force changes
+/// L_z by exactly zero, and S and rhoExplicit see grad v at the time and place
+/// it was measured.  The dump moves from the top of the step to point 2 (the
+/// state at the top is a prediction, not the solution).
+///
+/// Needs DRIFT_KDK 0, TIME_DKD 0 (both are other answers to the same question)
+/// and RECON_TIME_PRED 0: the flux is centred on t^n by construction, and a
+/// half-step predictor would push it to t^n + dt/2.
+///
+///   0 = baseline (evaluate at t^n, kick forward a full dt)
+///   1 = kick-drift-kick around the sync time
+#define TIME_KDK 0
+
 /// |S_M|/c_s above which the face is treated as doing shock work and the
 /// Godunov energy flux is kept unchanged. GIZMO: epsilon_entropic_eos_big,
 /// "can be anything from (small number = more diffusive, less accurate entropy
@@ -892,6 +989,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #if TIME_DKD && DRIFT_KDK
 #error "TIME_DKD already yields the Verlet position update through its two half drifts: set DRIFT_KDK 0."
 #endif
+#if TIME_KDK && (DRIFT_KDK || TIME_DKD)
+#error "TIME_KDK is its own time-centring scheme: set DRIFT_KDK 0 and TIME_DKD 0."
+#endif
+#if TIME_KDK && RECON_TIME_PRED
+#error "TIME_KDK evaluates the fluxes at the sync time; the half-step predictor would move them to t + dt/2: set RECON_TIME_PRED 0."
+#endif
 
 // ADIABATIC_FACE_CORRECTION consistency guards (same reason: needs USE_HLLC)
 #if ADIABATIC_FACE_CORRECTION && !MESHLESS_FINITE_MASS
@@ -906,6 +1009,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // builds actually use (ELASTIC 1, mu = 0); the plain solveHLLC1 path would need
 // its own S_M hand-back and is deliberately not wired up rather than guessed at.
 #error "ADIABATIC_FACE_CORRECTION needs USE_HLLC == 1 && ELASTIC == 1 (x-split HLLC path)."
+#endif
+#if RECON_FACE_DV_MINMOD && !(RECON_FACE_DV && DIM == 2)
+#error "RECON_FACE_DV_MINMOD limits the RECON_FACE_DV jump and is implemented for DIM == 2."
+#endif
+#if RECON_FACE_DV_SPATIAL && !RECON_FACE_DV
+#error "RECON_FACE_DV_SPATIAL selects the source of the RECON_FACE_DV jump; enable RECON_FACE_DV."
 #endif
 #if RECON_FACE_DV && !GIZMO_ELASTIC_FLUX
 #error "RECON_FACE_DV only affects the GIZMO elastic stress flux; enable GIZMO_ELASTIC_FLUX."
@@ -931,10 +1040,10 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #if ELASTIC_FACE_MODE && DIM != 2
 #error "ELASTIC_FACE_MODE is implemented for DIM == 2 only."
 #endif
-#if ELASTIC_FACE_MODE > 2
-#error "ELASTIC_FACE_MODE must be 0 (raw), 1 (Bonet-Lok) or 2 (MFM face)."
+#if ELASTIC_FACE_MODE > 3
+#error "ELASTIC_FACE_MODE must be 0 (raw), 1 (Bonet-Lok), 2 (MFM face) or 3 (split MFM half faces)."
 #endif
-#if ELASTIC_FACE_MODE == 2 && RECON_FACE_TRACTION
+#if ELASTIC_FACE_MODE >= 2 && RECON_FACE_TRACTION
 #error "ELASTIC_FACE_MODE 2 replaces the area, RECON_FACE_TRACTION the stress; combination untested."
 #endif
 // AM_SELFTEST consistency guards
@@ -1196,5 +1305,13 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // or MIN_NOI_FOR_NEIGHBOR_USE > 0 to re-enable.
 #define COND_MAX_NEIGHBOR_FOR_GRADIENT -1.
 #define MIN_NOI_FOR_NEIGHBOR_USE 0
+
+// TIME_KDK guards that read flags defined late in this file (MOVE_PARTICLES, RUNSPH)
+#if TIME_KDK && !(ELASTIC && MOVE_PARTICLES)
+#error "TIME_KDK is implemented on the ELASTIC updateState/moveParticles path only."
+#endif
+#if TIME_KDK && (FRAGMENTATION || AM_TORQUE_TRACK || RUNSPH)
+#error "TIME_KDK: damage, the AM_METHOD 4-6 repairs and SPH are not wired into the half-kick store."
+#endif
 
 #endif //DEMONSTRATOR_PARAMETER_H

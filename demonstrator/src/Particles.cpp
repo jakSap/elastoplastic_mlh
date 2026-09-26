@@ -248,6 +248,27 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     vzPrev = new double[numParticles]();
 #endif
 #endif // DRIFT_KDK
+#if TIME_KDK
+    vxH = new double[numParticles]();
+    vyH = new double[numParticles]();
+    uH  = new double[numParticles]();
+#if DIM == 3
+    vzH = new double[numParticles]();
+#endif
+#if ELASTIC
+    SxxH = new double[numParticles]();
+    SxyH = new double[numParticles]();
+    SyyH = new double[numParticles]();
+#if DIM == 3
+    SxzH = new double[numParticles]();
+    SyzH = new double[numParticles]();
+    SzzH = new double[numParticles]();
+#endif
+#endif // ELASTIC
+#if EXPLICIT_VOL_INTEGRATION
+    rhoExplicitH = new double[numParticles]();
+#endif
+#endif // TIME_KDK
     rhoGrad = new double[numParticles][DIM];
     vxGrad = new double[numParticles][DIM];
     vyGrad = new double[numParticles][DIM];
@@ -401,10 +422,17 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
 #endif // POLY_RECONSTRUCTION_ACTIVE
 #endif
         Aij = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
+#if ELASTIC_FACE_MODE == 3
+        AhalfI = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
+        AhalfJ = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
+#endif
         WijL = new double[numParticles*MAX_NUM_INTERACTIONS][DIM+2];
         WijR = new double[numParticles*MAX_NUM_INTERACTIONS][DIM+2];
         Fij = new double[numParticles*MAX_NUM_INTERACTIONS][DIM+2]; // TODO: this buffer should not be needed
         vFrame = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
+#if RECON_FACE_DV_SPATIAL
+        dvJumpSp = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
+#endif
 
         mF = new double[numParticles];
         vF = new double[numParticles][DIM];
@@ -441,6 +469,10 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         psijTildeGrad_xiGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
 #endif
         AijGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
+#if ELASTIC_FACE_MODE == 3
+        AhalfIGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM]();
+        AhalfJGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM]();
+#endif
 #if ELASTIC && TENSILE_CORRECTION
         fabMonaghanGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS]();
 #endif
@@ -448,6 +480,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         WijRGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM+2];
         FijGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM+2]; // TODO: this buffer should not be needed
         vFrameGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
+#if RECON_FACE_DV_SPATIAL
+        dvJumpSpGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
+#endif
     } else {
         parent = new int[numParticles]; // store index of original node
 #endif
@@ -482,6 +517,21 @@ Particles::~Particles() {
     delete[] vzPrev;
 #endif
 #endif // DRIFT_KDK
+#if TIME_KDK
+    delete[] vxH; delete[] vyH; delete[] uH;
+#if DIM == 3
+    delete[] vzH;
+#endif
+#if ELASTIC
+    delete[] SxxH; delete[] SxyH; delete[] SyyH;
+#if DIM == 3
+    delete[] SxzH; delete[] SyzH; delete[] SzzH;
+#endif
+#endif // ELASTIC
+#if EXPLICIT_VOL_INTEGRATION
+    delete[] rhoExplicitH;
+#endif
+#endif // TIME_KDK
     delete[] rhoGrad;
     delete[] vxGrad;
     delete[] vyGrad;
@@ -604,6 +654,9 @@ Particles::~Particles() {
         delete[] WijR;
         delete[] Fij;
         delete[] vFrame;
+#if RECON_FACE_DV_SPATIAL
+        delete[] dvJumpSp;
+#endif
         delete[] mF;
         delete[] vF;
         delete[] eF;
@@ -631,6 +684,9 @@ Particles::~Particles() {
         delete[] nnl;
         delete[] noi;
         delete[] Aij;
+#if ELASTIC_FACE_MODE == 3
+        delete[] AhalfI; delete[] AhalfJ;
+#endif
 #if PERIODIC_BOUNDARIES
         delete[] nnlGhosts;
         delete[] noiGhosts;
@@ -639,6 +695,9 @@ Particles::~Particles() {
         delete[] psijTildeGrad_xiGhosts;
 #endif
         delete[] AijGhosts;
+#if ELASTIC_FACE_MODE == 3
+        delete[] AhalfIGhosts; delete[] AhalfJGhosts;
+#endif
 #if ELASTIC && TENSILE_CORRECTION
         delete[] fabMonaghanGhosts;
 #endif
@@ -647,6 +706,9 @@ Particles::~Particles() {
         delete[] ghostMap;
         delete[] FijGhosts;
         delete[] vFrameGhosts;
+#if RECON_FACE_DV_SPATIAL
+        delete[] dvJumpSpGhosts;
+#endif
     } else {
         delete[] parent;
 #endif
@@ -755,6 +817,29 @@ void Particles::computeFabMonaghan(
 // Port of GIZMO solids/elastic_stress_tensor_force.h (eigenvalue branch), in the
 // demonstrator's lab frame. Computed once per pair (i<jj); the flux-symmetry copy
 // negates it for jj, matching GIZMO's antisymmetric +i/-j application.
+#if RECON_FACE_DV_MINMOD
+// RECON_FACE_DV_MINMOD (2D): limit the RADIAL part of the reconstructed jump dvF
+// against the raw particle difference dv (minmod of the radial coefficients). The
+// longitudinal HLL term then removes kinetic energy (F.dv <= 0) whatever the
+// reconstruction does; odd in (i <-> j), so the pair force stays antisymmetric.
+// The transverse part is left alone on purpose: for a rotating body the raw
+// transverse difference omega x r_ij has one sign all round, so a minmod against
+// it keeps only the reconstructed jumps of that sign and brakes the spin
+// (measured: -2.5e-3 of L_z per rotation, d0.025).
+static inline double faceJumpMinmod(double a, double b){
+    return (a*b <= 0.) ? 0. : (std::fabs(a) < std::fabs(b) ? a : b);
+}
+static inline void limitFaceJump2D(double dvF[2], const double dv[2],
+                                   double dx, double dy, double rinv){
+    const double rR = (dv[0]*dx + dv[1]*dy)*rinv*rinv, rF = (dvF[0]*dx + dvF[1]*dy)*rinv*rinv;
+    const double tR = (dv[1]*dx - dv[0]*dy)*rinv,      tF = (dvF[1]*dx - dvF[0]*dy)*rinv;
+    const double rL = faceJumpMinmod(rF, rR), tL = tF;
+    (void)tR;
+    dvF[0] = rL*dx - tL*dy*rinv;
+    dvF[1] = rL*dy + tL*dx*rinv;
+}
+#endif
+
 void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f, double *Fout
 #if RECON_FACE_TRACTION
                                           , const double *SfaceI, const double *SfaceJ
@@ -801,10 +886,16 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
 #if ELASTIC_FACE_MODE == 2
     const double (*AijSel)[DIM] = Aij;
+#elif ELASTIC_FACE_MODE == 3
+    const double (*AhISel)[DIM] = AhalfI;
+    const double (*AhJSel)[DIM] = AhalfJ;
 #endif
 #if RECON_FACE_DV
     const double (*WRSel)[DIM+2] = WijR;
     const double (*WLSel)[DIM+2] = WijL;
+#endif
+#if RECON_FACE_DV_SPATIAL
+    const double (*DJSel)[DIM] = dvJumpSp;
 #endif
 #if PERIODIC_BOUNDARIES
     if (gp){
@@ -819,10 +910,16 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
 #if ELASTIC_FACE_MODE == 2
         AijSel = AijGhosts;
+#elif ELASTIC_FACE_MODE == 3
+        AhISel = AhalfIGhosts;
+        AhJSel = AhalfJGhosts;
 #endif
 #if RECON_FACE_DV
         WRSel = WijRGhosts;
         WLSel = WijLGhosts;
+#endif
+#if RECON_FACE_DV_SPATIAL
+        DJSel = dvJumpSpGhosts;
 #endif
     }
 #endif // PERIODIC_BOUNDARIES
@@ -852,7 +949,7 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     const double b3 = 0.5*(elasticB[i][3] + elasticB[jElB][3]);
     const double FVec[2] = { b0*FRaw[0] + b1*FRaw[1],
                              b2*FRaw[0] + b3*FRaw[1] };
-#else // ELASTIC_FACE_MODE == 2
+#elif ELASTIC_FACE_MODE == 2
     // The MFM face itself: M = -2 V_tot I identically, so isotropy is exact
     // rather than restored by an inverse.
     // SIGN: psijTilde_xi[j](x_i) = B_i (x_j - x_i) psi_j with B = E^-1 SPD
@@ -864,6 +961,13 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     // under a global sign flip, and the earlier 288-particle check ran
     // pre-contact where S ~ 0.
     const double FVec[2] = { -AijSel[ii][0], -AijSel[ii][1] };
+#elif ELASTIC_FACE_MODE == 3
+    // Split half faces (see parameter.h): side 0 carries S_i on a_ij, side 1
+    // S_j on a_ji. The eigen loop applies -0.5 * S_side . FVec_side, so
+    // FVec_0 = -2 a_ij and FVec_1 = +2 a_ji give cmag = S_i a_ij - S_j a_ji,
+    // which reduces to mode 2 when S_i = S_j.
+    const double FVecS[2][2] = { { -2.*AhISel[ii][0], -2.*AhISel[ii][1] },
+                                 {  2.*AhJSel[ii][0],  2.*AhJSel[ii][1] } };
 #endif
 
     // Face velocity for the work term: energy flux = +vbar . momentum flux, the
@@ -955,7 +1059,12 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         const double l[2] = { l1, l2 };
         const double *e[2] = { e1, e2 };
         for (int kk = 0; kk < 2; ++kk){
-            double prefac = -0.5 * l[kk] * (FVec[0]*e[kk][0] + FVec[1]*e[kk][1]);
+#if ELASTIC_FACE_MODE == 3
+            const double *FV = FVecS[side];
+#else
+            const double *FV = FVec;
+#endif
+            double prefac = -0.5 * l[kk] * (FV[0]*e[kk][0] + FV[1]*e[kk][1]);
             if (l[kk] > 0.) prefac *= 1. - f;
             cmag[0] += prefac * e[kk][0];
             cmag[1] += prefac * e[kk][1];
@@ -976,8 +1085,15 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     // (algebraically identical to the wt_rt form below when both use the same dv),
     // so the two channels can be sourced independently.
     {
-        const double dvF[2] = { WRSel[ii][2] - WLSel[ii][2],
-                                WRSel[ii][3] - WLSel[ii][3] };
+#if RECON_FACE_DV_SPATIAL
+        double dvF[2] = { DJSel[ii][0], DJSel[ii][1] };
+#else
+        double dvF[2] = { WRSel[ii][2] - WLSel[ii][2],
+                          WRSel[ii][3] - WLSel[ii][3] };
+#endif
+#if RECON_FACE_DV_MINMOD
+        limitFaceJump2D(dvF, dv, dx, dy, rinv);
+#endif
         const double projF = (dvF[0]*dx + dvF[1]*dy) * rinv * rinv;
 #if RECON_FACE_DV == 2
         const double projR = projF;                 // longitudinal on the jump too
@@ -1000,8 +1116,15 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     {
         double cWtR[2], cWtT[2];
 #if RECON_FACE_DV
-        const double dvFd[2] = { WRSel[ii][2] - WLSel[ii][2],
-                                 WRSel[ii][3] - WLSel[ii][3] };
+#if RECON_FACE_DV_SPATIAL
+        double dvFd[2] = { DJSel[ii][0], DJSel[ii][1] };
+#else
+        double dvFd[2] = { WRSel[ii][2] - WLSel[ii][2],
+                           WRSel[ii][3] - WLSel[ii][3] };
+#endif
+#if RECON_FACE_DV_MINMOD
+        limitFaceJump2D(dvFd, dv, dx, dy, rinv);
+#endif
         const double projFd = (dvFd[0]*dx + dvFd[1]*dy) * rinv * rinv;
 #if RECON_FACE_DV == 2
         const double projRd = projFd;
@@ -1132,9 +1255,13 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #if RECON_FACE_DV
     // see the DIM == 2 branch for the rationale (reconstructed face jump)
     {
+#if RECON_FACE_DV_SPATIAL
+        const double dvF[3] = { DJSel[ii][0], DJSel[ii][1], DJSel[ii][2] };
+#else
         const double dvF[3] = { WRSel[ii][2] - WLSel[ii][2],
                                 WRSel[ii][3] - WLSel[ii][3],
                                 WRSel[ii][4] - WLSel[ii][4] };
+#endif
         const double projF = (dvF[0]*dx + dvF[1]*dy + dvF[2]*dz) * rinv * rinv;
 #if RECON_FACE_DV == 2
         const double projR = projF;                 // longitudinal on the jump too
@@ -3775,6 +3902,10 @@ void Particles::compEffectiveFace(){
             for (int alpha=0; alpha<DIM; ++alpha){
                 Aij[i*MAX_NUM_INTERACTIONS+j][alpha] = Vi*psijTilde_xi[i*MAX_NUM_INTERACTIONS+j][alpha]
                         - Vji*psijTilde_xi[ij+ji*MAX_NUM_INTERACTIONS][alpha];
+#if ELASTIC_FACE_MODE == 3
+                AhalfI[i*MAX_NUM_INTERACTIONS+j][alpha] = Vi*psijTilde_xi[i*MAX_NUM_INTERACTIONS+j][alpha];
+                AhalfJ[i*MAX_NUM_INTERACTIONS+j][alpha] = Vji*psijTilde_xi[ij+ji*MAX_NUM_INTERACTIONS][alpha];
+#endif
             }
 #if AM_RADIAL_FACE
             // Project the effective face onto the line of centers: the HLLC
@@ -4320,6 +4451,11 @@ void Particles::compRiemannStatesLR(const double &dt){
             //                  << ", PL = " << WijL[iW][1] << ", PR = " << WijR[iW][1];
             //}
 
+#if RECON_FACE_DV_SPATIAL
+            // RECON_FACE_DV jump from the limited spatial reconstruction, before
+            // the half-step predictor below touches the states.
+            for (int k = 0; k < DIM; ++k) dvJumpSp[iW][k] = WijR[iW][2+k] - WijL[iW][2+k];
+#endif
             // predict half a timestep
             double viDiv = vxGrad[i][0] + vyGrad[i][1];
             double vjDiv = vxGrad[j][0] + vyGrad[j][1];
@@ -5625,6 +5761,47 @@ void Particles::updateState(const double &dt){
 #endif
 }
 
+#if TIME_KDK
+void Particles::saveKickState(){
+    for (int i=0; i<N; ++i){
+        vxH[i] = vx[i]; vyH[i] = vy[i]; uH[i] = u[i];
+#if DIM == 3
+        vzH[i] = vz[i];
+#endif
+#if ELASTIC
+        SxxH[i] = Sxx[i]; SxyH[i] = Sxy[i]; SyyH[i] = Syy[i];
+#if DIM == 3
+        SxzH[i] = Sxz[i]; SyzH[i] = Syz[i]; SzzH[i] = Szz[i];
+#endif
+#endif // ELASTIC
+#if EXPLICIT_VOL_INTEGRATION
+        rhoExplicitH[i] = rhoExplicit[i];
+#endif
+    }
+#if EXPLICIT_VOL_INTEGRATION
+    rhoExplicitHValid = explicitVolInitialized;
+#endif
+}
+
+void Particles::loadKickState(){
+    for (int i=0; i<N; ++i){
+        vx[i] = vxH[i]; vy[i] = vyH[i]; u[i] = uH[i];
+#if DIM == 3
+        vz[i] = vzH[i];
+#endif
+#if ELASTIC
+        Sxx[i] = SxxH[i]; Sxy[i] = SxyH[i]; Syy[i] = SyyH[i];
+#if DIM == 3
+        Sxz[i] = SxzH[i]; Syz[i] = SyzH[i]; Szz[i] = SzzH[i];
+#endif
+#endif // ELASTIC
+#if EXPLICIT_VOL_INTEGRATION
+        if (rhoExplicitHValid) rhoExplicit[i] = rhoExplicitH[i];
+#endif
+    }
+}
+#endif // TIME_KDK
+
 void Particles::moveParticles(const double &dt, const Domain &domain){
 #if MOVE_PARTICLES
     for(int i=0; i<N; ++i){
@@ -6391,6 +6568,10 @@ void Particles::compEffectiveFace(const Particles &ghostParticles){
                 const double rev = (ij < 0) ? 0.
                     : Vji * psijTilde_xiGhosts[ij+p*MAX_NUM_GHOST_INTERACTIONS][alpha];
                 AijGhosts[ii][alpha] = Vi*psijTilde_xiGhosts[ii][alpha] - rev;
+#if ELASTIC_FACE_MODE == 3
+                AhalfIGhosts[ii][alpha] = Vi*psijTilde_xiGhosts[ii][alpha];
+                AhalfJGhosts[ii][alpha] = rev;
+#endif
             }
         }
     }
@@ -6516,6 +6697,11 @@ void Particles::compRiemannStatesLR(const double &dt,
             //                  << ", PL = " << WijLGhosts[iW][1] << ", PR = " << WijRGhosts[iW][1];
             //}
 
+#if RECON_FACE_DV_SPATIAL
+            // RECON_FACE_DV jump from the limited spatial reconstruction, before
+            // the half-step predictor below touches the states.
+            for (int k = 0; k < DIM; ++k) dvJumpSpGhosts[iW][k] = WijRGhosts[iW][2+k] - WijLGhosts[iW][2+k];
+#endif
             // predict half a timestep
             double viDiv = vxGrad[i][0] + vyGrad[i][1];
             double vjDiv = ghostParticles.vxGrad[j][0] + ghostParticles.vyGrad[j][1];

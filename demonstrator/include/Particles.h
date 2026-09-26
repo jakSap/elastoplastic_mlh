@@ -39,6 +39,32 @@ public:
     double *vzPrev;
 #endif
 #endif // DRIFT_KDK
+#if TIME_KDK
+    /// Half-step store of TIME_KDK: the state after the opening half kick
+    /// (t^{n+1/2}). The working arrays carry the drift-predicted sync state
+    /// through the flux pass; the closing half kick starts from this store.
+    double *vxH, *vyH, *uH;
+#if DIM == 3
+    double *vzH;
+#endif
+#if ELASTIC
+    double *SxxH, *SxyH, *SyyH;
+#if DIM == 3
+    double *SxzH, *SyzH, *SzzH;
+#endif
+#endif // ELASTIC
+#if EXPLICIT_VOL_INTEGRATION
+    double *rhoExplicitH;
+    /// rhoExplicit was already seeded when the store was written. The seed
+    /// (applyExplicitVolumeOverride) happens at a sync time, so a store written
+    /// before it must not overwrite the seeded value.
+    bool rhoExplicitHValid { false };
+#endif
+    /// working state -> half-step store (after the opening half kick)
+    void saveKickState();
+    /// half-step store -> working state (before the closing half kick)
+    void loadKickState();
+#endif // TIME_KDK
 #if !RUNSPH && DIM == 3
     // z-coordinate and z-velocity for the 3D MFM path. RUNSPH declares its own z/vz in the
     // SPH block below; the DIM==3 allocation (Particles.cpp) and free are shared by both paths.
@@ -530,9 +556,16 @@ private:
 #endif // POLY_RECONSTRUCTION_ACTIVE
 #endif
     double (*Aij)[DIM];
+#if ELASTIC_FACE_MODE == 3
+    // split MFM face, A_ij = AhalfI - AhalfJ: AhalfI = V_i psiTilde_j(x_i), AhalfJ = V_j psiTilde_i(x_j)
+    double (*AhalfI)[DIM], (*AhalfJ)[DIM];
+#endif
     double (*WijL)[DIM+2], (*WijR)[DIM+2]; // DIM velocity components, density and pressure
     double (*Fij)[DIM+2];
     double (*vFrame)[DIM];
+#if RECON_FACE_DV_SPATIAL
+    double (*dvJumpSp)[DIM]; // RECON_FACE_DV jump, spatial reconstruction only (i-side minus j-side)
+#endif
 
     double (*kernel)(const double&, const double&){ &Kernel::W };
 
@@ -593,9 +626,15 @@ private:
     double (*psijTildeGrad_xiGhosts)[DIM];
 #endif
     double (*AijGhosts)[DIM];
+#if ELASTIC_FACE_MODE == 3
+    double (*AhalfIGhosts)[DIM], (*AhalfJGhosts)[DIM];
+#endif
     double (*WijLGhosts)[DIM+2], (*WijRGhosts)[DIM+2]; // DIM velocity components, density and pressure
     double (*FijGhosts)[DIM+2];
     double (*vFrameGhosts)[DIM];
+#if RECON_FACE_DV_SPATIAL
+    double (*dvJumpSpGhosts)[DIM];
+#endif
     int *ghostMap;
     int *parent; // if class holds ghost particles the parent node is stored
 #endif
