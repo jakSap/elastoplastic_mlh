@@ -825,7 +825,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///
 ///   0 = baseline (remainder kept, as of 2026-09-24)
 ///   1 = remainder dropped under MESHLESS_FINITE_MASS
-#define MFM_ENERGY_STARFIX 0
+// Default since 2026-09-29 (test plan §1). On the plan's Tillotson (P independent of u) it changes only u;
+// x, v, rho stay bitwise identical (blocks d0.05).
+#define MFM_ENERGY_STARFIX 1
 
 /// "Option B" (2026-09-24 TODO 3, operator_splitting.tex Sec. 4.4): evaluate the
 /// MFM flux in the frame of the contact wave, S*' = 0, instead of zeroing the
