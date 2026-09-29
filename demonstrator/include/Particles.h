@@ -64,6 +64,11 @@ public:
     void saveKickState();
     /// half-step store -> working state (before the closing half kick)
     void loadKickState();
+#if TIME_KDK_FIELD_DRIFT == 2
+    /// vxGrad/vyGrad hold G = grad_{x^n} v^{n+1/2}; replace them by the gradient on
+    /// the drift midpoint, G (I + dt/2 G)^-1. See TIME_KDK_FIELD_DRIFT.
+    void kdkMidpointVelocityGradient(const double &dt);
+#endif
 #endif // TIME_KDK
 #if !RUNSPH && DIM == 3
     // z-coordinate and z-velocity for the 3D MFM path. RUNSPH declares its own z/vz in the
@@ -196,6 +201,12 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     /// tensile correction would be absent on every periodic face while acting
     /// at full strength one kernel-width inside the box.
     double *fabMonaghanGhosts;
+#endif
+#if TENSILE_CORRECTION_PARTICLE
+    /// Per-particle tensile-correction factor (already PREFAC/POWER/FMAX-applied)
+    /// for the deviatoric damping of the GIZMO stress flux; filled at the end of
+    /// computeFabMonaghan from the pair values (normal + periodic pairs).
+    double *fTCpart;
 #endif
     /// @param gp when non-null, additionally fills fabMonaghanGhosts for every
     ///           periodic-image pair (i, nnlGhosts[...]).

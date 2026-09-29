@@ -879,6 +879,29 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
             }
         }
     }
+#if MESHLESS_FINITE_MASS && MFM_CONTACT_FRAME
+    {
+        // Full HLLC star flux evaluated in the contact frame (S*' = 0), moved back
+        // to this frame as the flux through a surface moving with S*; see
+        // MFM_CONTACT_FRAME in parameter.h.
+        (void) rhoLinv; (void) rhoRinv;
+        const bool left = (Sstar >= 0.0);
+        const double tStarC = tL + WL[0] * SLmvL * (Sstar - vL);
+        const double *W = left ? WL : WR;
+        const double Sxy = left ? SxyL : SxyR;
+        totflux[0] = 0.;
+        totflux[2] = tStarC;
+        totflux[3] = -Sxy;
+#if DIM == 3
+        const double Sxz = left ? SxzL : SxzR;
+        totflux[4] = -Sxz;
+        totflux[1] = Sstar * tStarC - W[3] * Sxy - W[4] * Sxz;
+#else
+        totflux[1] = Sstar * tStarC - W[3] * Sxy;
+#endif
+        return;
+    }
+#endif // MFM_CONTACT_FRAME
 
     if (Sstar >= 0.0){
         // Left state sampled

@@ -365,6 +365,32 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // above Monaghan's 0.2 without paying a permanent tax.)
 #define TENSILE_CORRECTION_PREFAC 4.0
 #define TENSILE_CORRECTION_POWER 1.
+
+// Per-PARTICLE instead of per-PAIR damping of the tensile principal stresses in
+// the GIZMO elastic stress flux (GIZMO_ELASTIC_FLUX only).
+//
+// Why: the deviatoric traction of a pair, -0.5 * S . FVec, is not central for
+// any single pair; the total torque vanishes only because each particle applies
+// ONE symmetric S_i on all of its pairs (ELASTIC_FACE_MODE 3: exactly, through
+// sum_j a_ij (x) x_ij = -V_i I). The per-pair (1 - f_ij) on the positive
+// eigenvalues makes the effective stress of particle i differ from pair to pair
+// and breaks that cancellation (disc plateau ~2e-5, 2026-09-26; suspected main
+// source of the A.2 block L_z error, MA-Obsidian/2026-09-28-kontakt-ablation.md).
+// Here each side uses its OWN particle's f_i, so S~_i is again one symmetric
+// tensor per particle and FACE 3 stays torque-free at any strength. The stored S
+// is not modified (reversible, flux-only -- a geometric softening of tension,
+// not plasticity). f_i is built from the same clamped pair values
+// PREFAC*pow(f_ab, POWER) (<= FMAX for _LOCAL 1), over normal and periodic pairs.
+// The approach damping (DAMP) and TENSILE_CORRECTION_1's HLLC repulsion keep the
+// pair value.
+//
+//   0 = per pair (GIZMO default, bit-identical to pre-2026-09-28 code)
+//   1 = per particle, f_i = max_j f_ij
+//   2 = per particle, f_i = mean_j f_ij over all neighbours (zeros included)
+//   3 = ablation: f_i = 0, i.e. NO tensile damping in the stress flux at all
+//       (DAMP and the HLLC repulsion still act); separates what the damping
+//       itself does to clumping from what removing the per-pair form does
+#define TENSILE_CORRECTION_PARTICLE 0
 // Output per-particle average f_ab to h5 dump (requires TENSILE_CORRECTION)
 #if TENSILE_CORRECTION
 #define OUTPUT_FAB 0
@@ -502,8 +528,23 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // The jump only has to vanish for linear fields at every instant; it does not
 // have to be time-centred, since it is itself O(h^2) on smooth fields.
 //
-//   0 = jump carries the half-step predictor (behaviour before 2026-09-26)
-//   1 = spatial-only jump (the predicted states still feed the HLLC solve)
+// FRAME BUG of mode 0 (found 2026-09-26 evening, testcases/am_timecentering/
+// 20260926_kdkdrift): mode 0 reads the jump as WijR - WijL inside the stress
+// flux, i.e. AFTER the Riemann constructor has rotated the face velocities in
+// place into the face frame (Riemann.cpp, "Rotate velocities (xSplitElasticHLLC
+// expects vx = normal velocity)"), but projects it on the LAB-frame r_ij. The
+// jump therefore points the wrong way on every face whose normal is not +x;
+// on faces with normal ~ -x it is sign-flipped (anti-dissipation). Modes 1 and
+// 2 store a lab-frame copy during the reconstruction, before the solve.
+// Evidence: TIME_KDK (whose jump is spatial by construction) converges to a
+// different solution than the baseline/TIME_DKD as dt -> 0 (max|dv| 2.6e-3 at
+// t = 0.02, dt = 1e-4, disc d0.05) with mode 0, and to the same one (2.5e-5)
+// with mode 1; with RECON_FACE_DV 2 mode 0 disrupts the disc at t ~ 1.5 for
+// any CFL. Part of what was attributed to the predictor above is this bug.
+//
+//   0 = jump read from the rotated face states (predictor included; FRAME BUG)
+//   1 = spatial-only jump, lab frame (the predicted states still feed the HLLC solve)
+//   2 = predicted jump, lab frame (mode 0 without the frame bug; diagnostic)
 #define RECON_FACE_DV_SPATIAL 0
 
 // Minmod-limit the RADIAL part of the RECON_FACE_DV jump against the raw
@@ -785,6 +826,29 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   1 = remainder dropped under MESHLESS_FINITE_MASS
 #define MFM_ENERGY_STARFIX 0
 
+/// "Option B" (2026-09-24 TODO 3, operator_splitting.tex Sec. 4.4): evaluate the
+/// MFM flux in the frame of the contact wave, S*' = 0, instead of zeroing the
+/// advective pieces by hand in the solver frame.
+///
+/// In that frame the FULL HLLC star flux (MFV form) is analytically
+///     (mass, energy, v_n, v_t) = (0, -W_t S_xy, t*, -S_xy),
+///     t* = t_K + rho_K (S_K - v_K)(S* - v_K)   (same for K = L, R by the S* formula),
+/// i.e. zero mass flux by construction, and transformed back to the solver frame
+/// (surface moving with S*) it is  (0, S* t* - W_t S_xy, t*, -S_xy)  -- GIZMO's
+/// MFM flux Fluxes.v = P_M, Fluxes.p = P_M S_M (reimann.h:411-412). The caller's
+/// de-boost to the lab is unchanged. The tangential side (W_t, S_xy) is picked by
+/// the sign of S* exactly as in the baseline.
+///
+/// The hand-zeroed baseline branch agrees only at S* = 0: its normal momentum is
+/// t* + rho*_K S* (S* - v_K) and its energy (even with MFM_ENERGY_STARFIX 1) keeps
+/// t_K (S* - v_K) S* / (S_K - S*) -- both second order in the velocity jump, so
+/// invisible in linear waves, O(S*/c) at contacts. With this flag on,
+/// MFM_ENERGY_STARFIX has no effect (the branch it patches is not reached).
+///
+///   0 = baseline (hand-zeroed MFM branch in the solver frame)
+///   1 = exact contact-frame flux
+#define MFM_CONTACT_FRAME 0
+
 /// Second-order (trapezoidal) drift of the particle positions.
 ///
 /// The step is kick-then-drift: updateState() applies the full-dt kick from
@@ -943,6 +1007,43 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   1 = kick-drift-kick around the sync time
 #define TIME_KDK 0
 
+/// Under TIME_KDK, advance S and rhoExplicit in the DRIFT, like the positions,
+/// instead of kicking them like v.
+///
+/// TIME_KDK 1 kicks S and rhoExplicit in half steps with rates taken from the
+/// drift-PREDICTED state (v_pred = v^{n+1/2} + dt/2 a^{n-1}). Written in the
+/// half-step variables that is Adams-Bashforth 2 for the v-S pair:
+///   v^{n+1/2} = v^{n-1/2} + dt F((3 S^{n-1/2} - S^{n-3/2})/2),
+///   S^{n+1/2} = S^{n-1/2} + dt G((3 v^{n-1/2} - v^{n-3/2})/2),
+/// and AB2 amplifies every undamped oscillation by ~1 + (w dt)^4/4 per step
+/// (toy oscillator: 1.00043 per step at w dt = 0.2, 1.027 at 0.5). Resolved waves
+/// (w dt ~ 0.03) never notice; grid-scale modes (w dt ~ 0.5-1) are held only
+/// by the HLL dissipation, which is weak at a free surface and O(h^2) with
+/// RECON_FACE_DV 2. Measured 2026-09-26 on the concentric-ring disc d0.025:
+/// the outer ring roughens (r scatter 3e-5 -> 6e-4 by t = 10, u 0.78..1.08),
+/// the HLLC channel torques the disc up, and without the radial minmod
+/// RECON_FACE_DV 2 disrupts it.
+///
+/// Here S and rhoExplicit are position-like: after the opening half kick the
+/// velocity gradient of v^{n+1/2} is rebuilt on the flux-pass geometry x^n and
+/// both are advanced by the full dt with it, before the particles drift with the
+/// same v^{n+1/2}. v and u keep the KDK half kicks. The v-S pair is then a
+/// leapfrog (stable for w dt < 2), S^n and rhoExplicit^n at the flux pass are
+/// the solution, not a prediction, and the half-step store holds v and u only.
+///
+/// The gradient is taken on x^n but belongs to the drift x^n -> x^{n+1}.
+/// Mode 2 maps it to the midpoint geometry: with G = grad_{x^n} v^{n+1/2} and
+/// x^{n+1/2} = x^n + dt/2 v^{n+1/2}, grad_{x^{n+1/2}} v^{n+1/2} = G (I + dt/2 G)^-1,
+/// exact for any linear velocity field. For rigid rotation G carries the spurious
+/// divergence -omega^2 dt (the half kick adds the centripetal -omega^2 x/2 dt);
+/// mode 1 keeps it (rhoExplicit drifts by +omega^2 dt per unit time, as in
+/// the baseline), mode 2 cancels it.
+///
+///   0 = S and rhoExplicit kicked with the predicted rates (TIME_KDK 1 as is)
+///   1 = S and rhoExplicit drifted with grad_{x^n} v^{n+1/2}
+///   2 = as 1, gradient mapped to the midpoint geometry
+#define TIME_KDK_FIELD_DRIFT 0
+
 /// |S_M|/c_s above which the face is treated as doing shock work and the
 /// Godunov energy flux is kept unchanged. GIZMO: epsilon_entropic_eos_big,
 /// "can be anything from (small number = more diffusive, less accurate entropy
@@ -995,6 +1096,18 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #if TIME_KDK && RECON_TIME_PRED
 #error "TIME_KDK evaluates the fluxes at the sync time; the half-step predictor would move them to t + dt/2: set RECON_TIME_PRED 0."
 #endif
+#if TIME_KDK_FIELD_DRIFT && !TIME_KDK
+#error "TIME_KDK_FIELD_DRIFT changes how TIME_KDK advances S and rhoExplicit: enable TIME_KDK."
+#endif
+#if TIME_KDK_FIELD_DRIFT > 2
+#error "TIME_KDK_FIELD_DRIFT must be 0 (kicked), 1 (drifted, grad on x^n) or 2 (drifted, midpoint grad)."
+#endif
+#if TENSILE_CORRECTION_PARTICLE && !(TENSILE_CORRECTION && GIZMO_ELASTIC_FLUX)
+#error "TENSILE_CORRECTION_PARTICLE replaces the per-pair damping of the GIZMO stress flux: needs TENSILE_CORRECTION 1 and GIZMO_ELASTIC_FLUX 1."
+#endif
+#if TENSILE_CORRECTION_PARTICLE > 3
+#error "TENSILE_CORRECTION_PARTICLE must be 0 (per pair), 1 (per particle, max), 2 (per particle, mean) or 3 (none)."
+#endif
 
 // ADIABATIC_FACE_CORRECTION consistency guards (same reason: needs USE_HLLC)
 #if ADIABATIC_FACE_CORRECTION && !MESHLESS_FINITE_MASS
@@ -1012,6 +1125,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #endif
 #if RECON_FACE_DV_MINMOD && !(RECON_FACE_DV && DIM == 2)
 #error "RECON_FACE_DV_MINMOD limits the RECON_FACE_DV jump and is implemented for DIM == 2."
+#endif
+#if RECON_FACE_DV_SPATIAL > 2
+#error "RECON_FACE_DV_SPATIAL must be 0 (rotated, legacy), 1 (spatial, lab frame) or 2 (predicted, lab frame)."
 #endif
 #if RECON_FACE_DV_SPATIAL && !RECON_FACE_DV
 #error "RECON_FACE_DV_SPATIAL selects the source of the RECON_FACE_DV jump; enable RECON_FACE_DV."

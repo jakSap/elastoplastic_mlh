@@ -568,6 +568,7 @@ void MeshlessScheme::run(){
             Logger(INFO) << "    > KDK closing half kick (dt = " << kdkDtPrev << ")";
             particles->loadKickState();
             particles->updateState(kdkDtPrev/2.);
+#if !TIME_KDK_FIELD_DRIFT
             particles->integrateStressTensor(kdkDtPrev/2.);
 #if EXPLICIT_VOL_INTEGRATION
             // skipped once, right after the seed: rhoExplicit is then already the
@@ -575,6 +576,7 @@ void MeshlessScheme::run(){
             if (particles->rhoExplicitHValid)
                 particles->integrateExplicitVolumeHalfStep(kdkDtPrev/2., /*finalize=*/true);
 #endif
+#endif // !TIME_KDK_FIELD_DRIFT
         }
         writeDumpIfDue();   // synchronised x, v, u, S, rhoExplicit at t^n
         if (t>=config.timeEnd){
@@ -583,23 +585,59 @@ void MeshlessScheme::run(){
         }
         Logger(INFO) << "    > KDK opening half kick";
         particles->updateState(timeStep/2.);
+#if !TIME_KDK_FIELD_DRIFT
         particles->integrateStressTensor(timeStep/2.);
 #if EXPLICIT_VOL_INTEGRATION
         particles->integrateExplicitVolumeHalfStep(timeStep/2., /*finalize=*/true);
 #endif
+#endif // !TIME_KDK_FIELD_DRIFT
         particles->saveKickState();
         kdkHaveHalf = true;
         kdkDtPrev = timeStep;
+#if TIME_KDK_FIELD_DRIFT
+        // S and rhoExplicit drift with v^{n+1/2}, like the positions (see
+        // TIME_KDK_FIELD_DRIFT): rebuild grad v on the flux-pass geometry x^n --
+        // same recipe as the baseline's post-kick gradient pass -- and advance
+        // both by the full dt before the particles move.
+        Logger(INFO) << "    > KDK field drift: grad v^{n+1/2} on x^n";
+#if PERIODIC_BOUNDARIES
+        particles->updateGhostState(ghostParticles);
+        particles->gradient(particles->vx, particles->vxGrad, ghostParticles.vx, ghostParticles);
+        particles->gradient(particles->vy, particles->vyGrad, ghostParticles.vy, ghostParticles);
+#if DIM == 3
+        particles->gradient(particles->vz, particles->vzGrad, ghostParticles.vz, ghostParticles);
+#endif
+        particles->updateGhostGradients(ghostParticles);
+#else
+        particles->gradient(particles->vx, particles->vxGrad);
+        particles->gradient(particles->vy, particles->vyGrad);
+#if DIM == 3
+        particles->gradient(particles->vz, particles->vzGrad);
+#endif
+#endif // PERIODIC_BOUNDARIES
+#if SURFACE_GRAD_BLEND && SECOND_ORDER_GRADIENTS
+        particles->blendGradientsStressPass();
+#endif
+#if TIME_KDK_FIELD_DRIFT == 2
+        particles->kdkMidpointVelocityGradient(timeStep);
+#endif
+        particles->integrateStressTensor(timeStep);
+#if EXPLICIT_VOL_INTEGRATION
+        particles->integrateExplicitVolumeHalfStep(timeStep, /*finalize=*/true);
+#endif
+#endif // TIME_KDK_FIELD_DRIFT
         Logger(INFO) << "    > Moving particles with v^{n+1/2}";
         particles->moveParticles(timeStep, domain);
         // Predict the sync state at t^{n+1} with this step's rates (GIZMO's
         // VelPred): the next flux pass is built from it, and the next closing
         // half kick replaces it by the solution.
         particles->updateState(timeStep/2.);
+#if !TIME_KDK_FIELD_DRIFT
         particles->integrateStressTensor(timeStep/2.);
 #if EXPLICIT_VOL_INTEGRATION
         particles->integrateExplicitVolumeHalfStep(timeStep/2., /*finalize=*/true);
 #endif
+#endif // !TIME_KDK_FIELD_DRIFT
 #elif !ELASTIC
 	Logger(INFO) << "    > Updating state and position";
         particles->updateStateAndPosition(timeStep, domain);

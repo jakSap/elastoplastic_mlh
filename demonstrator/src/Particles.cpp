@@ -281,6 +281,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
 #if TENSILE_CORRECTION
     fabMonaghan = new double[numParticles*MAX_NUM_INTERACTIONS]();
 #endif
+#if TENSILE_CORRECTION_PARTICLE
+    fTCpart = new double[numParticles]();
+#endif
     Sxx = new double[numParticles]();
     Sxy = new double[numParticles]();
     Syy = new double[numParticles]();
@@ -576,6 +579,9 @@ Particles::~Particles() {
 #if TENSILE_CORRECTION
     delete[] fabMonaghan;
 #endif
+#if TENSILE_CORRECTION_PARTICLE
+    delete[] fTCpart;
+#endif
     delete[] Sxx;
     delete[] Sxy;
     delete[] Syy;
@@ -810,6 +816,41 @@ void Particles::computeFabMonaghan(
         }
     }
 #endif // PERIODIC_BOUNDARIES
+#if TENSILE_CORRECTION_PARTICLE
+    // One factor per particle from its pair values, transformed exactly as the
+    // flux loop transforms them (PREFAC * pow(f_ab, POWER), FMAX clamp for
+    // _LOCAL), so mode 1 equals the strongest pair damping of that particle.
+    auto fPair = [](double fab){
+        double fp = TENSILE_CORRECTION_PREFAC * pow(fab, TENSILE_CORRECTION_POWER);
+#if TENSILE_CORRECTION_LOCAL
+        if (fp > TENSILE_CORRECTION_FMAX) fp = TENSILE_CORRECTION_FMAX;
+#endif
+        return fp;
+    };
+    for(int i = 0; i < N; ++i){
+        double fMax = 0., fSum = 0.; int nn = noi[i];
+        for(int jn = 0; jn < noi[i]; ++jn){
+            const double fp = fPair(fabMonaghan[i*MAX_NUM_INTERACTIONS+jn]);
+            fSum += fp; if (fp > fMax) fMax = fp;
+        }
+#if PERIODIC_BOUNDARIES
+        if (gp){
+            nn += noiGhosts[i];
+            for(int jn = 0; jn < noiGhosts[i]; ++jn){
+                const double fp = fPair(fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn]);
+                fSum += fp; if (fp > fMax) fMax = fp;
+            }
+        }
+#endif
+#if TENSILE_CORRECTION_PARTICLE == 1
+        fTCpart[i] = fMax; (void)fSum; (void)nn;
+#elif TENSILE_CORRECTION_PARTICLE == 3
+        fTCpart[i] = 0.; (void)fMax; (void)fSum; (void)nn;
+#else
+        fTCpart[i] = (nn > 0) ? fSum / nn : 0.; (void)fMax;
+#endif
+    }
+#endif // TENSILE_CORRECTION_PARTICLE
 }
 #endif // TENSILE_CORRECTION
 
@@ -869,6 +910,14 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     // Ghosts carry no damage state, so the j-side damage index is the ghost's
     // parent; pDamage() resolves it for either path.
     const int jDmg =
+#if PERIODIC_BOUNDARIES
+        gp ? gp->parent[jj] :
+#endif
+        jj;
+#endif
+#if TENSILE_CORRECTION_PARTICLE
+    // Ghosts carry no fTCpart; a periodic image uses its parent's factor.
+    const int jTC =
 #if PERIODIC_BOUNDARIES
         gp ? gp->parent[jj] :
 #endif
@@ -1065,7 +1114,12 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
             const double *FV = FVec;
 #endif
             double prefac = -0.5 * l[kk] * (FV[0]*e[kk][0] + FV[1]*e[kk][1]);
+#if TENSILE_CORRECTION_PARTICLE
+            // this side's OWN factor (see parameter.h): one damped S per particle
+            if (l[kk] > 0.) prefac *= 1. - fTCpart[(side == 0) ? i : jTC];
+#else
             if (l[kk] > 0.) prefac *= 1. - f;
+#endif
             cmag[0] += prefac * e[kk][0];
             cmag[1] += prefac * e[kk][1];
         }
@@ -1245,7 +1299,11 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
             // eigenvector kk is column kk of evec: evec[kk*DIM + component]
             const double ek0 = evec[kk*DIM+0], ek1 = evec[kk*DIM+1], ek2 = evec[kk*DIM+2];
             double prefac = -0.5 * eval[kk] * (FVec[0]*ek0 + FVec[1]*ek1 + FVec[2]*ek2);
+#if TENSILE_CORRECTION_PARTICLE
+            if (eval[kk] > 0.) prefac *= 1. - fTCpart[(side == 0) ? i : jTC];
+#else
             if (eval[kk] > 0.) prefac *= 1. - f;
+#endif
             cmag[0] += prefac * ek0;
             cmag[1] += prefac * ek1;
             cmag[2] += prefac * ek2;
@@ -4451,7 +4509,7 @@ void Particles::compRiemannStatesLR(const double &dt){
             //                  << ", PL = " << WijL[iW][1] << ", PR = " << WijR[iW][1];
             //}
 
-#if RECON_FACE_DV_SPATIAL
+#if RECON_FACE_DV_SPATIAL == 1
             // RECON_FACE_DV jump from the limited spatial reconstruction, before
             // the half-step predictor below touches the states.
             for (int k = 0; k < DIM; ++k) dvJumpSp[iW][k] = WijR[iW][2+k] - WijL[iW][2+k];
@@ -4594,6 +4652,12 @@ void Particles::compRiemannStatesLR(const double &dt){
                 }
             }
 #endif // FRAME_HALFSTEP
+#if RECON_FACE_DV_SPATIAL == 2
+            // Lab-frame copy of the PREDICTED jump: the Riemann solver rotates
+            // WijR/WijL into the face frame in place, so the stress flux must not
+            // read them afterwards (see RECON_FACE_DV_SPATIAL).
+            for (int k = 0; k < DIM; ++k) dvJumpSp[iW][k] = WijR[iW][2+k] - WijL[iW][2+k];
+#endif
 
             // Free-surface diagnostic: dump the per-stage breakdown whenever
             // the final reconstructed rho falls below DENSITY_FLOOR or a
@@ -5768,17 +5832,17 @@ void Particles::saveKickState(){
 #if DIM == 3
         vzH[i] = vz[i];
 #endif
-#if ELASTIC
+#if ELASTIC && !TIME_KDK_FIELD_DRIFT
         SxxH[i] = Sxx[i]; SxyH[i] = Sxy[i]; SyyH[i] = Syy[i];
 #if DIM == 3
         SxzH[i] = Sxz[i]; SyzH[i] = Syz[i]; SzzH[i] = Szz[i];
 #endif
-#endif // ELASTIC
-#if EXPLICIT_VOL_INTEGRATION
+#endif // ELASTIC && !TIME_KDK_FIELD_DRIFT
+#if EXPLICIT_VOL_INTEGRATION && !TIME_KDK_FIELD_DRIFT
         rhoExplicitH[i] = rhoExplicit[i];
 #endif
     }
-#if EXPLICIT_VOL_INTEGRATION
+#if EXPLICIT_VOL_INTEGRATION && !TIME_KDK_FIELD_DRIFT
     rhoExplicitHValid = explicitVolInitialized;
 #endif
 }
@@ -5789,17 +5853,63 @@ void Particles::loadKickState(){
 #if DIM == 3
         vz[i] = vzH[i];
 #endif
-#if ELASTIC
+        // Under TIME_KDK_FIELD_DRIFT S and rhoExplicit are not kicked: the working
+        // arrays already hold their t^n values from the drift.
+#if ELASTIC && !TIME_KDK_FIELD_DRIFT
         Sxx[i] = SxxH[i]; Sxy[i] = SxyH[i]; Syy[i] = SyyH[i];
 #if DIM == 3
         Sxz[i] = SxzH[i]; Syz[i] = SyzH[i]; Szz[i] = SzzH[i];
 #endif
-#endif // ELASTIC
-#if EXPLICIT_VOL_INTEGRATION
+#endif // ELASTIC && !TIME_KDK_FIELD_DRIFT
+#if EXPLICIT_VOL_INTEGRATION && !TIME_KDK_FIELD_DRIFT
         if (rhoExplicitHValid) rhoExplicit[i] = rhoExplicitH[i];
 #endif
     }
 }
+
+#if TIME_KDK_FIELD_DRIFT == 2
+void Particles::kdkMidpointVelocityGradient(const double &dt){
+    // v^{n+1/2}(x^n) has gradient G; the drift x -> x + (dt/2) v^{n+1/2} maps
+    // x^n to the midpoint with Jacobian M = I + dt/2 G, so the gradient there is
+    // G M^-1 (G and M commute). Exact for linear fields: rigid rotation gives
+    // G = w J - (dt/2) w^2 I but G M^-1 = w J (1 + O(dt^2)), divergence O(dt^4).
+    for (int i=0; i<N; ++i){
+#if DIM == 2
+        const double g00 = vxGrad[i][0], g01 = vxGrad[i][1];
+        const double g10 = vyGrad[i][0], g11 = vyGrad[i][1];
+        const double h = .5*dt;
+        const double m00 = 1. + h*g00, m01 = h*g01, m10 = h*g10, m11 = 1. + h*g11;
+        const double det = m00*m11 - m01*m10;
+        const double i00 =  m11/det, i01 = -m01/det, i10 = -m10/det, i11 = m00/det;
+        vxGrad[i][0] = g00*i00 + g01*i10;
+        vxGrad[i][1] = g00*i01 + g01*i11;
+        vyGrad[i][0] = g10*i00 + g11*i10;
+        vyGrad[i][1] = g10*i01 + g11*i11;
+#else
+        double G[3][3], M[3][3], Mi[3][3];
+        for (int b=0; b<3; ++b){ G[0][b] = vxGrad[i][b]; G[1][b] = vyGrad[i][b]; G[2][b] = vzGrad[i][b]; }
+        for (int a=0; a<3; ++a) for (int b=0; b<3; ++b) M[a][b] = (a == b ? 1. : 0.) + .5*dt*G[a][b];
+        const double det = M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1])
+                         - M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0])
+                         + M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]);
+        Mi[0][0] =  (M[1][1]*M[2][2]-M[1][2]*M[2][1])/det;
+        Mi[0][1] = -(M[0][1]*M[2][2]-M[0][2]*M[2][1])/det;
+        Mi[0][2] =  (M[0][1]*M[1][2]-M[0][2]*M[1][1])/det;
+        Mi[1][0] = -(M[1][0]*M[2][2]-M[1][2]*M[2][0])/det;
+        Mi[1][1] =  (M[0][0]*M[2][2]-M[0][2]*M[2][0])/det;
+        Mi[1][2] = -(M[0][0]*M[1][2]-M[0][2]*M[1][0])/det;
+        Mi[2][0] =  (M[1][0]*M[2][1]-M[1][1]*M[2][0])/det;
+        Mi[2][1] = -(M[0][0]*M[2][1]-M[0][1]*M[2][0])/det;
+        Mi[2][2] =  (M[0][0]*M[1][1]-M[0][1]*M[1][0])/det;
+        for (int b=0; b<3; ++b){
+            vxGrad[i][b] = G[0][0]*Mi[0][b] + G[0][1]*Mi[1][b] + G[0][2]*Mi[2][b];
+            vyGrad[i][b] = G[1][0]*Mi[0][b] + G[1][1]*Mi[1][b] + G[1][2]*Mi[2][b];
+            vzGrad[i][b] = G[2][0]*Mi[0][b] + G[2][1]*Mi[1][b] + G[2][2]*Mi[2][b];
+        }
+#endif
+    }
+}
+#endif // TIME_KDK_FIELD_DRIFT == 2
 #endif // TIME_KDK
 
 void Particles::moveParticles(const double &dt, const Domain &domain){
@@ -6697,7 +6807,7 @@ void Particles::compRiemannStatesLR(const double &dt,
             //                  << ", PL = " << WijLGhosts[iW][1] << ", PR = " << WijRGhosts[iW][1];
             //}
 
-#if RECON_FACE_DV_SPATIAL
+#if RECON_FACE_DV_SPATIAL == 1
             // RECON_FACE_DV jump from the limited spatial reconstruction, before
             // the half-step predictor below touches the states.
             for (int k = 0; k < DIM; ++k) dvJumpSpGhosts[iW][k] = WijRGhosts[iW][2+k] - WijLGhosts[iW][2+k];
@@ -6787,6 +6897,12 @@ void Particles::compRiemannStatesLR(const double &dt,
                 }
             }
 #endif // FRAME_HALFSTEP
+#if RECON_FACE_DV_SPATIAL == 2
+            // Lab-frame copy of the PREDICTED jump: the Riemann solver rotates
+            // WijR/WijL into the face frame in place, so the stress flux must not
+            // read them afterwards (see RECON_FACE_DV_SPATIAL).
+            for (int k = 0; k < DIM; ++k) dvJumpSpGhosts[iW][k] = WijRGhosts[iW][2+k] - WijLGhosts[iW][2+k];
+#endif
 
             if (DENSITY_FLOOR > 0.){
                 if (WijRGhosts[iW][0] < DENSITY_FLOOR) WijRGhosts[iW][0] = DENSITY_FLOOR;
