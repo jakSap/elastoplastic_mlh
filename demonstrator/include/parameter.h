@@ -340,7 +340,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // into an impulsive kick on an already-collapsed pair -- measured as negative
 // internal energy at vmax = 0.60. Physically: never convert more than this
 // fraction of the tensile traction into repulsion.
-#define TENSILE_CORRECTION_FMAX 0.5
+#define TENSILE_CORRECTION_FMAX 1.0
 
 // Approach damping (TENSILE_CORRECTION_LOCAL only). 0 disables it.
 //
@@ -357,7 +357,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // antisymmetric, so linear and angular momentum remain conserved to machine
 // precision at any strength, and it can only REMOVE kinetic energy -- it can
 // never inject any, whatever DAMP is set to.
-#define TENSILE_CORRECTION_DAMP 8.0
+#define TENSILE_CORRECTION_DAMP 18.0
 
 // Two Parameters for the tensile correction facor, as in Monaghan, 2000
 // (TENSILE_CORRECTION_LOCAL reuses both: PREFAC scales f, POWER sharpens the
@@ -390,7 +390,8 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //   3 = ablation: f_i = 0, i.e. NO tensile damping in the stress flux at all
 //       (DAMP and the HLLC repulsion still act); separates what the damping
 //       itself does to clumping from what removing the per-pair form does
-#define TENSILE_CORRECTION_PARTICLE 0
+// Default since 2026-09-29 (test plan §1): 1 with DAMP 18, FMAX 1.0 (tuning MA-Obsidian/2026-09-29-tc-per-particle-tuning).
+#define TENSILE_CORRECTION_PARTICLE 1
 // Output per-particle average f_ab to h5 dump (requires TENSILE_CORRECTION)
 #if TENSILE_CORRECTION
 #define OUTPUT_FAB 0
@@ -510,7 +511,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       overshoots and reverses (L_z drift -290%, omega goes negative), the disc
 //       degrades to -80% spin-down. The raw-difference P-wave term is load-
 //       bearing for stability. Kept only to document the negative result.
-#define RECON_FACE_DV 1
+#define RECON_FACE_DV 2
 
 // Take the RECON_FACE_DV jump from the SPATIAL reconstruction only, i.e. the
 // limited face states before the MUSCL half-step predictor adds dt/2 * dW/dt.
@@ -545,7 +546,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //   0 = jump read from the rotated face states (predictor included; FRAME BUG)
 //   1 = spatial-only jump, lab frame (the predicted states still feed the HLLC solve)
 //   2 = predicted jump, lab frame (mode 0 without the frame bug; diagnostic)
-#define RECON_FACE_DV_SPATIAL 0
+#define RECON_FACE_DV_SPATIAL 1
 
 // Minmod-limit the RADIAL part of the RECON_FACE_DV jump against the raw
 // difference v_i - v_j: same sign -> the smaller of the two, opposite sign -> 0.
@@ -657,7 +658,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       sum_i eps : (S_i sum_j a_ij (x) x_ij) = -sum_i V_i eps : S_i = 0 for every
 //       symmetric S_i. The tensile correction's per-pair (1 - f) and the
 //       dissipation terms are the only non-central parts left.
-#define ELASTIC_FACE_MODE 0
+#define ELASTIC_FACE_MODE 3
 // Reject the correction and fall back to B_i = I when G_i is this badly
 // conditioned (one-sided surface stencils). Counted and reported.
 #define ELASTIC_FACE_COND_MAX 1.0e3
@@ -889,7 +890,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///
 ///   0 = single-endpoint drift (pre-2026-09-25 behaviour, first order)
 ///   1 = trapezoidal drift, x += dt (v^n + v^{n+1})/2
-#define DRIFT_KDK 1
+#define DRIFT_KDK 0
 
 /// MUSCL half-step (time) predictor in the face reconstruction.
 ///
@@ -901,7 +902,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///
 ///   1 = baseline (predict to t^n + dt/2)
 ///   0 = no time centring (deliberately first order)
-#define RECON_TIME_PRED 1
+#define RECON_TIME_PRED 0
 
 /// Centre the kick interval on the flux evaluation (drift-kick-drift).
 ///
@@ -1005,7 +1006,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///
 ///   0 = baseline (evaluate at t^n, kick forward a full dt)
 ///   1 = kick-drift-kick around the sync time
-#define TIME_KDK 0
+// Default since 2026-09-29 (test plan §1): the TIME_KDK candidate = TIME_KDK 1, TIME_KDK_FIELD_DRIFT 2,
+// DRIFT_KDK 0, RECON_TIME_PRED 0, RECON_FACE_DV 2, RECON_FACE_DV_SPATIAL 1, ELASTIC_FACE_MODE 3.
+#define TIME_KDK 1
 
 /// Under TIME_KDK, advance S and rhoExplicit in the DRIFT, like the positions,
 /// instead of kicking them like v.
@@ -1042,7 +1045,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   0 = S and rhoExplicit kicked with the predicted rates (TIME_KDK 1 as is)
 ///   1 = S and rhoExplicit drifted with grad_{x^n} v^{n+1/2}
 ///   2 = as 1, gradient mapped to the midpoint geometry
-#define TIME_KDK_FIELD_DRIFT 0
+#define TIME_KDK_FIELD_DRIFT 2
 
 /// |S_M|/c_s above which the face is treated as doing shock work and the
 /// Godunov energy flux is kept unchanged. GIZMO: epsilon_entropic_eos_big,
