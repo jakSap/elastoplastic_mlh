@@ -341,6 +341,15 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // internal energy at vmax = 0.60. Physically: never convert more than this
 // fraction of the tensile traction into repulsion.
 #define TENSILE_CORRECTION_FMAX 1.0
+// Separate clamp for the factor inside the Riemann solver (TENSILE_CORRECTION_LOCAL only),
+// i.e. for TENSILE_CORRECTION_1's anti-clumping repulsion: the solve removes only
+// (1 - f) of the dummy pressure, so the net repulsion on a tensile face is f*|p_min|,
+// and f > 1 pushes a collapsing pair apart harder than the tension pulls it together.
+// FMAX above keeps clamping every other consumer (the stress-flux damping (1 - f_i),
+// where f > 1 would flip the sign of the tensile stress, and the approach damping).
+// Under GIZMO_ELASTIC_FLUX 1 the deviator is zeroed before the solve, so this cap
+// touches only the repulsion. Default = FMAX (bit-identical).
+#define TENSILE_CORRECTION_FMAX_HLLC TENSILE_CORRECTION_FMAX
 
 // Approach damping (TENSILE_CORRECTION_LOCAL only). 0 disables it.
 //
