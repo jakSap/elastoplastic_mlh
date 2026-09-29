@@ -355,9 +355,57 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // (dv.r < 0). Because it only scales a dissipation coefficient it inherits
 // that channel's properties exactly: the force stays central and pairwise
 // antisymmetric, so linear and angular momentum remain conserved to machine
-// precision at any strength, and it can only REMOVE kinetic energy -- it can
-// never inject any, whatever DAMP is set to.
+// precision at any strength. Semi-discretely it only REMOVES kinetic energy;
+// the explicit kick does so only below lambda dt ~ 1 (see the limiter below:
+// beyond it the overshoot cools single particles, the "cold streaks").
 #define TENSILE_CORRECTION_DAMP 18.0
+
+// Stability limit for the approach damping above (2D GIZMO stress flux only;
+// the 3D branch has no DAMP boost).
+//
+// Why: the boosted radial dissipation drives the pair's relative normal
+// velocity to zero at the rate lambda_ij = w_r (1 + DAMP f) / mu_ij,
+// mu_ij = m_i m_j / (m_i + m_j). Unboosted, lambda dt is O(CFL) (~0.09 per
+// nearest-neighbour pair); with DAMP 18 and f = FMAX = 1 it is ~1.7. The kick
+// is explicit and, under TIME_KDK, driven by the PREDICTED velocity, whose
+// linear stability limit is lambda dt = 1 (not 2). Beyond it the relative
+// velocity overshoots, and because u = E/m - v^2/2 the overshoot shows up as
+// cooling of single particles: cold streaks along the lattice rows of the
+// offset blocks (MA-Obsidian/2026-09-29-damp-stability-limiter-idea.md).
+// Both limited forms scale only the coefficient, so the force stays central
+// and pairwise antisymmetric (L and p exact); the unboosted w_r is never
+// reduced, so a pair that would not overshoot is untouched.
+// dt is the velocity change one flux pass produces: under TIME_KDK the closing
+// half of the previous step plus the opening half of this one,
+// (dt_prev + dt)/2; otherwise dt.
+// Tested 2026-09-29 (testcases/damp_limit_20260929, MA-Obsidian/2026-09-29-damp-limit):
+// every mode removes the streaks at C <= 0.7 (blocks to d0.00625: 164 -> 0), but
+// the T.1 rings d0.05 then clump at the contact tips -- p1d18f10's ring margin
+// came partly from the overshoot. No C passes both; hence default 0.
+// NOTE lambda ~ 1/h and dt ~ h, so lambda dt is resolution-independent at fixed
+// CFL: an active limiter means DAMP acts as "at most the fraction C of the
+// relative normal velocity per step" -- a numerical, not a physical, strength.
+//
+//   0 = off (bit-identical to 5865de1)
+//   1 = cap:  w = min(w_r (1 + DAMP f), max(w_r, C mu_ij / dt))
+//   2 = exponential: w = max(w_r, mu_ij (1 - exp(-lambda_ij dt)) / dt), the
+//       exact decay of the pair's relative normal velocity over dt;
+//       = w_r (1 + DAMP f) for small lambda dt, never overshoots
+//   3 = per-particle budget: w = max(w_r, w_r (1 + DAMP f) min(s_i, s_j)),
+//       s_i = min(1, C / (dt Lambda_i)), Lambda_i = sum of lambda_ij over i's
+//       boosted pairs (Gershgorin-type). Modes 1/2 bound each pair alone, but a
+//       contact-face particle is hit by several closing partners at once
+//       (measured with OUTPUT_DAMP_DIAG, blocks d0.05: sum lambda dt 1.46 at a
+//       per-pair max of 0.58).
+#define TENSILE_CORRECTION_DAMP_LIMIT 0
+// C of modes 1 and 3 (fraction of the relative normal velocity removed per step at most)
+#define TENSILE_CORRECTION_DAMP_LIMIT_C 0.5
+// Per-particle approach-damping diagnostic in the h5 dump (TENSILE_CORRECTION_LOCAL,
+// 2D): dampLdt = sum over the particle's boosted pairs of lambda_ij dt (UNLIMITED,
+// Gershgorin-type load), dampLdtMax = max over them, dampNb = number of boosted
+// pairs, dampNcap = number of those the limiter reduced (this flux pass), and
+// dampLdtRun = running max of dampLdt over the run. Numerics unchanged.
+#define OUTPUT_DAMP_DIAG 0
 
 // Two Parameters for the tensile correction facor, as in Monaghan, 2000
 // (TENSILE_CORRECTION_LOCAL reuses both: PREFAC scales f, POWER sharpens the
@@ -1127,6 +1175,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // builds actually use (ELASTIC 1, mu = 0); the plain solveHLLC1 path would need
 // its own S_M hand-back and is deliberately not wired up rather than guessed at.
 #error "ADIABATIC_FACE_CORRECTION needs USE_HLLC == 1 && ELASTIC == 1 (x-split HLLC path)."
+#endif
+#if (TENSILE_CORRECTION_DAMP_LIMIT || OUTPUT_DAMP_DIAG) && !(TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL && GIZMO_ELASTIC_FLUX && DIM == 2)
+#error "TENSILE_CORRECTION_DAMP_LIMIT / OUTPUT_DAMP_DIAG act on the approach damping, which exists only in the 2D GIZMO stress flux with TENSILE_CORRECTION_LOCAL."
+#endif
+#if TENSILE_CORRECTION_DAMP_LIMIT > 3
+#error "TENSILE_CORRECTION_DAMP_LIMIT must be 0 (off), 1 (cap), 2 (exponential) or 3 (per-particle budget)."
 #endif
 #if RECON_FACE_DV_MINMOD && !(RECON_FACE_DV && DIM == 2)
 #error "RECON_FACE_DV_MINMOD limits the RECON_FACE_DV jump and is implemented for DIM == 2."

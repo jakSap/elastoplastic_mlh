@@ -284,6 +284,14 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
 #if TENSILE_CORRECTION_PARTICLE
     fTCpart = new double[numParticles]();
 #endif
+#if TENSILE_CORRECTION_DAMP_LIMIT == 3
+    dampScale = new double[numParticles]();
+#endif
+#if OUTPUT_DAMP_DIAG
+    dampLdt = new double[numParticles](); dampLdtMax = new double[numParticles]();
+    dampLdtRun = new double[numParticles]();
+    dampNb = new int[numParticles](); dampNcap = new int[numParticles]();
+#endif
     Sxx = new double[numParticles]();
     Sxy = new double[numParticles]();
     Syy = new double[numParticles]();
@@ -582,6 +590,12 @@ Particles::~Particles() {
 #if TENSILE_CORRECTION_PARTICLE
     delete[] fTCpart;
 #endif
+#if TENSILE_CORRECTION_DAMP_LIMIT == 3
+    delete[] dampScale;
+#endif
+#if OUTPUT_DAMP_DIAG
+    delete[] dampLdt; delete[] dampLdtMax; delete[] dampLdtRun; delete[] dampNb; delete[] dampNcap;
+#endif
     delete[] Sxx;
     delete[] Sxy;
     delete[] Syy;
@@ -854,6 +868,79 @@ void Particles::computeFabMonaghan(
 }
 #endif // TENSILE_CORRECTION
 
+#if TENSILE_CORRECTION_DAMP_LIMIT == 3
+// Per-particle budget of the boosted approach damping (TENSILE_CORRECTION_DAMP_LIMIT 3).
+// Lambda_i = sum over i's boosted pairs of lambda_ij = w_r (1 + DAMP f) / mu_ij bounds
+// (Gershgorin) the rate at which the boosted pairs act on particle i together; the
+// per-pair cap (mode 1) misses that a contact-face particle is hit by several
+// closing partners at once. dampScale_i = min(1, C / (dt Lambda_i)); the flux uses
+// min(dampScale_i, dampScale_j), symmetric, so the pair force stays antisymmetric.
+// Same wt_r, f and closing test as addGizmoElasticStressFlux (2D), on the same
+// state (the flux pass's working arrays). Pairs listed only in the partner's
+// neighbour list are missed -- a bound on a budget, not part of the flux.
+void Particles::computeDampBudget(
+#if PERIODIC_BOUNDARIES
+    const Particles *gp
+#endif
+){
+    auto rateOf = [&](int i, double xj, double yj, double vxj, double vyj, double smlj,
+                      double rhoj, double Pj, double mj, int matj, double fab){
+        double f = TENSILE_CORRECTION_PREFAC * pow(fab, TENSILE_CORRECTION_POWER);
+        if (f > TENSILE_CORRECTION_FMAX) f = TENSILE_CORRECTION_FMAX;
+        const double dx = x[i] - xj, dy = y[i] - yj, r2 = dx*dx + dy*dy;
+        if (!(f > 0.) || r2 <= 0.) return 0.;
+        if ((vx[i] - vxj)*dx + (vy[i] - vyj)*dy >= 0.) return 0.;
+        const double r = sqrt(r2);
+        const double dwk = std::fabs(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, smlj));
+        const double FNormT = m[i]*mj*dwk / (rho[i]*rhoj);
+#if EOS == 1 || EOS == 2
+        const double Ki = MeshlessEOS->EOSBulkModulus(matId[i], rho[i], P[i]);
+        const double Kj = MeshlessEOS->EOSBulkModulus(matj, rhoj, Pj);
+        const double mui = MeshlessEOS->EOSShearModulus(matId[i]);
+        const double muj = MeshlessEOS->EOSShearModulus(matj);
+#else
+        const double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
+        const double Kj = MeshlessEOS->EOSBulkModulus(rhoj, Pj);
+        const double mui = 0., muj = 0.; (void)matj;
+#endif
+        const double ci = sqrt((Ki + 4./3.*mui)/rho[i]), cj = sqrt((Kj + 4./3.*muj)/rhoj);
+        const double wtB = rho[i]*ci*rhoj*cj / (rho[i]*ci + rhoj*cj) * FNormT
+                         * (1. + TENSILE_CORRECTION_DAMP * f);
+        return wtB * (m[i] + mj) / (m[i]*mj);
+    };
+    for (int i = 0; i < N; ++i){
+        double lam = 0.;
+        for (int jn = 0; jn < noi[i]; ++jn){
+            const int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
+            lam += rateOf(i, x[j], y[j], vx[j], vy[j], sml[j], rho[j], P[j], m[j],
+#if USE_MATID
+                          matId[j],
+#else
+                          0,
+#endif
+                          fabMonaghan[i*MAX_NUM_INTERACTIONS+jn]);
+        }
+#if PERIODIC_BOUNDARIES
+        if (gp){
+            for (int jn = 0; jn < noiGhosts[i]; ++jn){
+                const int j = nnlGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn];
+                lam += rateOf(i, gp->x[j], gp->y[j], gp->vx[j], gp->vy[j], gp->sml[j], gp->rho[j],
+                              gp->P[j], gp->m[j],
+#if USE_MATID
+                              gp->matId[j],
+#else
+                              0,
+#endif
+                              fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn]);
+            }
+        }
+#endif
+        const double load = lam * dampDt;
+        dampScale[i] = (load > TENSILE_CORRECTION_DAMP_LIMIT_C) ? TENSILE_CORRECTION_DAMP_LIMIT_C / load : 1.;
+    }
+}
+#endif // TENSILE_CORRECTION_DAMP_LIMIT == 3
+
 #if GIZMO_ELASTIC_FLUX
 // Port of GIZMO solids/elastic_stress_tensor_force.h (eigenvalue branch), in the
 // demonstrator's lab frame. Computed once per pair (i<jj); the flux-symmetry copy
@@ -1047,10 +1134,56 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #if TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL
     // Anti-clumping approach damping: boost the radial dissipation for pairs
     // that are closer than the local spacing (f > 0) AND closing (vdotr < 0).
-    // Scaling a dissipation coefficient cannot inject energy and cannot break
-    // the pair antisymmetry, so conservation is untouched at any strength.
+    // Scaling a dissipation coefficient cannot break the pair antisymmetry, so
+    // conservation is untouched at any strength. It removes kinetic energy only
+    // semi-discretely: beyond lambda dt ~ 1 the explicit kick overshoots and
+    // cools single particles (TENSILE_CORRECTION_DAMP_LIMIT).
     if (TENSILE_CORRECTION_DAMP > 0. && f > 0. && vdotr < 0.){
+#if TENSILE_CORRECTION_DAMP_LIMIT || OUTPUT_DAMP_DIAG
+        // Stability limit (see TENSILE_CORRECTION_DAMP_LIMIT): lambda dt of the
+        // boosted coefficient against the pair's reduced mass. Symmetric in
+        // (i, jj), so the pair force stays antisymmetric.
+        const double wt0 = wt_r, wtB = wt_r * (1. + TENSILE_CORRECTION_DAMP * f);
+        const double muij = m[i]*mJ[jj] / (m[i] + mJ[jj]);
+        const double ldt = (dampDt > 0.) ? wtB * dampDt / muij : 0.;
+        double wtL = wtB;
+#if TENSILE_CORRECTION_DAMP_LIMIT == 1
+        if (dampDt > 0.) wtL = std::min(wtB, std::max(wt0, TENSILE_CORRECTION_DAMP_LIMIT_C * muij / dampDt));
+#elif TENSILE_CORRECTION_DAMP_LIMIT == 2
+        if (ldt > 0.) wtL = std::max(wt0, -std::expm1(-ldt) * muij / dampDt);
+#elif TENSILE_CORRECTION_DAMP_LIMIT == 3
+        {
+            // a periodic image uses its parent's budget
+#if PERIODIC_BOUNDARIES
+            const int jB = gp ? gp->parent[jj] : jj;
+#else
+            const int jB = jj;
+#endif
+            wtL = std::max(wt0, wtB * std::min(dampScale[i], dampScale[jB]));
+        }
+#endif
+        wt_r = wtL;
+#if OUTPUT_DAMP_DIAG
+        {
+            // A periodic-image pair is evaluated from both real sides (each
+            // sees the other's ghost), so it books on i only.
+#if PERIODIC_BOUNDARIES
+            const int nBook = gp ? 1 : 2;
+#else
+            const int nBook = 2;
+#endif
+            const int capped = (wtL < wtB) ? 1 : 0;
+            for (int k = 0; k < nBook; ++k){
+                const int p = (k == 0) ? i : jj;
+                dampLdt[p] += ldt; dampNb[p] += 1; dampNcap[p] += capped;
+                if (ldt > dampLdtMax[p]) dampLdtMax[p] = ldt;
+                if (dampLdt[p] > dampLdtRun[p]) dampLdtRun[p] = dampLdt[p];
+            }
+        }
+#endif
+#else
         wt_r *= (1. + TENSILE_CORRECTION_DAMP * f);
+#endif
     }
 #endif
     const double denT = rhoi*cTi + rhoj*cTj;
@@ -4920,6 +5053,12 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
         tqHLLC[i] = 0.; tqDev[i] = 0.; tqWtT[i] = 0.; tqWtR[i] = 0.;
     }
 #endif
+#if OUTPUT_DAMP_DIAG
+    // Per-pass load, accumulated by both partners in addGizmoElasticStressFlux.
+    for (int i=0; i<N; ++i){
+        dampLdt[i] = 0.; dampLdtMax[i] = 0.; dampNb[i] = 0; dampNcap[i] = 0;
+    }
+#endif
     for (int i=0; i<N; ++i){
 
         // if (!(i % (N/VERBOSITY_PARTICLES))){
@@ -7350,6 +7489,13 @@ void Particles::dump2file(std::string filename, double simTime){
     HighFive::DataSet numActiveFlawsDataSet = h5File.createDataSet<int>("/numActiveFlaws", HighFive::DataSpace(N));
 #endif
 #endif
+#if OUTPUT_DAMP_DIAG
+    HighFive::DataSet dampLdtDataSet    = h5File.createDataSet<double>("/dampLdt", HighFive::DataSpace(N));
+    HighFive::DataSet dampLdtMaxDataSet = h5File.createDataSet<double>("/dampLdtMax", HighFive::DataSpace(N));
+    HighFive::DataSet dampLdtRunDataSet = h5File.createDataSet<double>("/dampLdtRun", HighFive::DataSpace(N));
+    HighFive::DataSet dampNbDataSet     = h5File.createDataSet<int>("/dampNb", HighFive::DataSpace(N));
+    HighFive::DataSet dampNcapDataSet   = h5File.createDataSet<int>("/dampNcap", HighFive::DataSpace(N));
+#endif
 #if TENSILE_CORRECTION && OUTPUT_FAB
     HighFive::DataSet fabAvgDataSet = h5File.createDataSet<double>("/fabAvg", HighFive::DataSpace(N));
     HighFive::DataSet fabMaxDataSet = h5File.createDataSet<double>("/fabMax", HighFive::DataSpace(N));
@@ -7514,6 +7660,13 @@ void Particles::dump2file(std::string filename, double simTime){
     damageTotalDataSet.write(damageTotalVec);
     numActiveFlawsDataSet.write(numActiveFlawsVec);
 #endif
+#endif
+#if OUTPUT_DAMP_DIAG
+    dampLdtDataSet.write(std::vector<double>(dampLdt, dampLdt + N));
+    dampLdtMaxDataSet.write(std::vector<double>(dampLdtMax, dampLdtMax + N));
+    dampLdtRunDataSet.write(std::vector<double>(dampLdtRun, dampLdtRun + N));
+    dampNbDataSet.write(std::vector<int>(dampNb, dampNb + N));
+    dampNcapDataSet.write(std::vector<int>(dampNcap, dampNcap + N));
 #endif
 #if TENSILE_CORRECTION && OUTPUT_FAB
     {

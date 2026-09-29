@@ -208,6 +208,26 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     /// computeFabMonaghan from the pair values (normal + periodic pairs).
     double *fTCpart;
 #endif
+#if TENSILE_CORRECTION_DAMP_LIMIT || OUTPUT_DAMP_DIAG
+    /// Velocity-change interval of one flux pass, set by the time loop before
+    /// solveRiemannProblems (see TENSILE_CORRECTION_DAMP_LIMIT).
+    double dampDt { 0. };
+#endif
+#if TENSILE_CORRECTION_DAMP_LIMIT == 3
+    /// Per-particle budget factor of the boosted approach damping, see
+    /// TENSILE_CORRECTION_DAMP_LIMIT 3; filled by computeDampBudget.
+    double *dampScale;
+    void computeDampBudget(
+#if PERIODIC_BOUNDARIES
+        const Particles *gp = nullptr
+#endif
+    );
+#endif
+#if OUTPUT_DAMP_DIAG
+    /// Approach-damping load per particle, see OUTPUT_DAMP_DIAG.
+    double *dampLdt, *dampLdtMax, *dampLdtRun;
+    int *dampNb, *dampNcap;
+#endif
     /// @param gp when non-null, additionally fills fabMonaghanGhosts for every
     ///           periodic-image pair (i, nnlGhosts[...]).
     void computeFabMonaghan(

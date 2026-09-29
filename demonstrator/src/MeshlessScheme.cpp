@@ -525,6 +525,22 @@ void MeshlessScheme::run(){
 
 
 
+#if TENSILE_CORRECTION_DAMP_LIMIT || OUTPUT_DAMP_DIAG
+        // Velocity-change interval of THIS flux pass: under TIME_KDK it feeds the
+        // closing half kick of the previous step and the opening half of this one.
+#if TIME_KDK
+        particles->dampDt = kdkHaveHalf ? 0.5*(kdkDtPrev + timeStep) : 0.5*timeStep;
+#else
+        particles->dampDt = timeStep;
+#endif
+#endif
+#if TENSILE_CORRECTION_DAMP_LIMIT == 3
+#if PERIODIC_BOUNDARIES
+        particles->computeDampBudget(&ghostParticles);
+#else
+        particles->computeDampBudget();
+#endif
+#endif
         Logger(INFO) << "    > Solving Riemann problems";
 #if PERIODIC_BOUNDARIES
         particles->solveRiemannProblems(ghostParticles);
