@@ -367,7 +367,10 @@ WL[1] += pDummy;
 
 // #if TENSILE_CORRECTION && TENSILE_CORRECTION_1
 #if USE_DUMMY_PRESSURE
-    if (pDummy > 0){
+    // != 0, not > 0: with TENSILE_CORRECTION_FMAX_HLLC > 1 the remainder (1 - f) pDummy
+    // is negative and must still be subtracted -- that is the repulsion beyond the
+    // tension. For f <= 1 it is >= 0, so this is bit-identical to the old "> 0" test.
+    if (pDummy != 0.){
         Fij[2] -= pDummy;
         Fij[1] -= pDummy * Sstar;
     }
