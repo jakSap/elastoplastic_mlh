@@ -390,7 +390,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // Tested 2026-09-29 (testcases/damp_limit_20260929, MA-Obsidian/2026-09-29-damp-limit):
 // every mode removes the streaks at C <= 0.7 (blocks to d0.00625: 164 -> 0), but
 // the T.1 rings d0.05 then clump at the contact tips -- p1d18f10's ring margin
-// came partly from the overshoot. No C passes both; hence default 0.
+// came partly from the overshoot. No C passes both. Default 1 / C 0.5 since
+// 2026-09-29 evening (user priority: L_z convergence > no negE > clumping; test
+// plan reference, study testcases/hires_20260929).
 // NOTE lambda ~ 1/h and dt ~ h, so lambda dt is resolution-independent at fixed
 // CFL: an active limiter means DAMP acts as "at most the fraction C of the
 // relative normal velocity per step" -- a numerical, not a physical, strength.
@@ -406,7 +408,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       contact-face particle is hit by several closing partners at once
 //       (measured with OUTPUT_DAMP_DIAG, blocks d0.05: sum lambda dt 1.46 at a
 //       per-pair max of 0.58).
-#define TENSILE_CORRECTION_DAMP_LIMIT 0
+#define TENSILE_CORRECTION_DAMP_LIMIT 1
 // C of modes 1 and 3 (fraction of the relative normal velocity removed per step at most)
 #define TENSILE_CORRECTION_DAMP_LIMIT_C 0.5
 // Per-particle approach-damping diagnostic in the h5 dump (TENSILE_CORRECTION_LOCAL,
