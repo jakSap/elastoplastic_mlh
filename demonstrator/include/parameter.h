@@ -348,8 +348,11 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // FMAX above keeps clamping every other consumer (the stress-flux damping (1 - f_i),
 // where f > 1 would flip the sign of the tensile stress, and the approach damping).
 // Under GIZMO_ELASTIC_FLUX 1 the deviator is zeroed before the solve, so this cap
-// touches only the repulsion. Default = FMAX (bit-identical).
-#define TENSILE_CORRECTION_FMAX_HLLC TENSILE_CORRECTION_FMAX
+// touches only the repulsion.
+// Default 3.0 since 2026-09-30 (agR30 / g2R30): the only variant that removed the tensile
+// clumping of the fine rings (d0.035) and it halves the block AM error at d0.00625
+// (testcases/hires_20260929, tgate2_20260930). FMAX_HLLC = FMAX reproduces the old default.
+#define TENSILE_CORRECTION_FMAX_HLLC 3.0
 
 // Approach damping (TENSILE_CORRECTION_LOCAL only). 0 disables it.
 //
@@ -432,8 +435,10 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       particle, so ELASTIC_FACE_MODE 3 stays torque-free.
 //   approach damping (DAMP): only for pairs whose mean sigma_1 is > 0; symmetric in
 //       (i, j), so the boosted force stays central and antisymmetric.
-//   0 = off (bit-identical), 1 = on
-#define TENSILE_CORRECTION_TRACTION_GATE 0
+//   0 = off (the ungated scheme up to 2026-09-30), 1 = on (default since 2026-09-30).
+// Builds without TENSILE_CORRECTION or without the GIZMO elastic flux (e.g. GEF 0
+// comparisons, tc0) must set it to 0, like TENSILE_CORRECTION_DAMP_LIMIT.
+#define TENSILE_CORRECTION_TRACTION_GATE 1
 // Per-particle approach-damping diagnostic in the h5 dump (TENSILE_CORRECTION_LOCAL,
 // 2D): dampLdt = sum over the particle's boosted pairs of lambda_ij dt (UNLIMITED,
 // Gershgorin-type load), dampLdtMax = max over them, dampNb = number of boosted
