@@ -48,8 +48,10 @@ VARIANTS = {
     "pel":    dict(flags={**PREF, "VON_MISES_PLASTICITY": 0, "OUTPUT_PLASTIC_STRAIN": 0},
                    doc="elastic baseline of the true-2D model"),
     "prr":    dict(flags={**PREF, "YIELD_RETURN": 0}, doc="exact radial return"),
-    "ptc0":   dict(flags={**PREF, "TENSILE_CORRECTION": 0, "TENSILE_CORRECTION_TRACTION_GATE": 0,
-                          "OUTPUT_FAB": 0}, doc="tensile correction off (P-R4)"),
+    "ptc0":   dict(flags={**PREF, "TENSILE_CORRECTION": 0, "TENSILE_CORRECTION_PARTICLE": 0,
+                          "TENSILE_CORRECTION_DAMP_LIMIT": 0, "TENSILE_CORRECTION_TRACTION_GATE": 0,
+                          "OUTPUT_FAB": 0},       # = tgate studies' tc0 + gate off (parameter.h #errors)
+                   doc="tensile correction off (P-R4)"),
     "pps":    dict(flags={**PREF, "SOLID_2D_MODEL": 0}, doc="old plane-strain rate"),
     "legacy": dict(flags={}, doc="branch defaults (P1a)"),
     "base":   dict(flags={}, commit=BASE_COMMIT, doc="3835f4a itself (P1a)"),

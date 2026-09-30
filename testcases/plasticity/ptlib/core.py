@@ -153,12 +153,19 @@ def cmd_refreeze(args):
     old = S.M
     if (M.COMMIT, M.BASE_COMMIT) != (old.COMMIT, old.BASE_COMMIT):
         die("COMMIT changed: start a new study (./pt new)")
+    # A changed/removed variant or test is allowed only while nothing was built or run with it.
+    used_v = set()
+    for t in old.TESTS:
+        for v, r, rel in S.runs(t):
+            if os.path.exists(S.p("runs", rel)):
+                used_v.add(v)
     for k, v in old.VARIANTS.items():
-        if M.VARIANTS.get(k) != v:
-            die("variant '%s' changed or removed: start a new study" % k)
+        built = glob.glob(S.p("build_%s" % k)) + glob.glob(S.p("build_%s_*" % k))
+        if M.VARIANTS.get(k) != v and (built or k in used_v):
+            die("variant '%s' changed or removed but already built/run: start a new study" % k)
     for k, v in old.TESTS.items():
-        if repr(M.TESTS.get(k)) != repr(v):
-            die("test '%s' changed or removed: start a new study" % k)
+        if repr(M.TESTS.get(k)) != repr(v) and any(os.path.exists(S.p("runs", rel)) for _, _, rel in S.runs(k)):
+            die("test '%s' changed or removed but already has run dirs: start a new study" % k)
     for k in ("MATERIAL", "BUILD_GROUPS"):
         if getattr(M, k) != getattr(old, k):
             die("%s changed: start a new study" % k)
