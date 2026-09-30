@@ -1139,17 +1139,12 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     // semi-discretely: beyond lambda dt ~ 1 the explicit kick overshoots and
     // cools single particles (TENSILE_CORRECTION_DAMP_LIMIT).
 #if TENSILE_CORRECTION_TRACTION_GATE
-    // only for pairs in effective tension along r_ij: mean traction P - n.S.n < 0
-    bool dampTension = false;
-    {
-        const double r2g = dx*dx + dy*dy;
-        if (r2g > 0.){
-            const double nx = dx/sqrt(r2g), ny = dy/sqrt(r2g);
-            const double tI = P[i]   - (Sxx[i]*nx*nx   + 2.*Sxy[i]*nx*ny   + Syy[i]*ny*ny);
-            const double tJ = PJ[jj] - (SxxJ[jj]*nx*nx + 2.*SxyJ[jj]*nx*ny + SyyJ[jj]*ny*ny);
-            dampTension = 0.5*(tI + tJ) < 0.;
-        }
-    }
+    // only for pairs whose material is in effective tension: mean of the largest principal
+    // total stress sigma_1 = lambda_max(S) - P of i and j is > 0
+    auto sigma1 = [](double sxx, double sxy, double syy, double p){
+        return 0.5*(sxx + syy) + sqrt(0.25*(sxx - syy)*(sxx - syy) + sxy*sxy) - p; };
+    const bool dampTension = 0.5*(sigma1(Sxx[i], Sxy[i], Syy[i], P[i])
+                                + sigma1(SxxJ[jj], SxyJ[jj], SyyJ[jj], PJ[jj])) > 0.;
 #else
     const bool dampTension = true;
 #endif
@@ -5200,11 +5195,7 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #endif
                 // GIZMO keeps the Riemann problem isotropic; the deviatoric stress
                 // is added as a separate SPH flux after the solve (see below).
-                // With TENSILE_CORRECTION_TRACTION_GATE the solver zeroes it itself,
-                // after reading the face-normal traction for the TC_1 gate.
-#if !TENSILE_CORRECTION_TRACTION_GATE
                 fSxxR = fSxyR = fSyyR = fSxxL = fSxyL = fSyyL = 0.;
-#endif
 #endif
 #if DIM == 3
                 double fSxzR = Sxz[i];
@@ -5438,12 +5429,9 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 // GIZMO keeps the Riemann problem isotropic; the deviatoric stress
                 // is added as a separate SPH flux after the solve. The ghost path
                 // must do this too, or the periodic faces carry the stress twice.
-                // (TENSILE_CORRECTION_TRACTION_GATE: zeroed in the solver, see above.)
-#if !TENSILE_CORRECTION_TRACTION_GATE
                 fSxxR = fSxyR = fSyyR = fSxxL = fSxyL = fSyyL = 0.;
 #if DIM == 3
                 fSxzR = fSyzR = fSzzR = fSxzL = fSyzL = fSzzL = 0.;
-#endif
 #endif
 #endif // GIZMO_ELASTIC_FLUX
 #endif

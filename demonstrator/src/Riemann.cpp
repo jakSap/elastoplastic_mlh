@@ -349,11 +349,6 @@ void Riemann::HLLCFlux(double *Fij){
 #if USE_DUMMY_PRESSURE
 double pEffR = WR[1] - SijRotR[0];
 double pEffL = WL[1] - SijRotL[0];
-#if TENSILE_CORRECTION_TRACTION_GATE
-// The caller passed the real deviator so that pEff is the true face-normal traction
-// (P - S_nn); GIZMO_ELASTIC_FLUX solves the isotropic problem, so zero it now.
-for (int a = 0; a < DIM*DIM; ++a){ SijRotR[a] = 0.; SijRotL[a] = 0.; }
-#endif
 double pDummy = 0;
 if (pEffR < 0 | pEffL < 0){
     pDummy = -1. * std::min(pEffR, pEffL);

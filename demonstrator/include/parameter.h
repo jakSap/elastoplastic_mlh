@@ -414,21 +414,24 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 
 // Traction gate for EVERY tensile-correction channel (user decision 2026-09-30,
 // MA-Obsidian/2026-09-30.md): a correction may act only where the material is in
-// effective tension, i.e. where the normal traction t = P - n.S.n (compression
-// positive, the sign of the solver's pEff) on the plane it acts on is negative.
+// effective tension, i.e. where the traction is negative on SOME plane: the largest
+// principal value sigma_1 of the total stress sigma = -P I + S is > 0.
+// (Version 1, commit 1c05cca, used the traction along the pair / face normal instead.
+// Wrong: in the rings' outer surface layer under hoop tension the particles pair up
+// RADIALLY, where the traction is ~0, so the gate switched the correction off exactly
+// where the material was in tension -- found by the user 2026-09-30.)
 // Clumping under compression (e.g. the contact edge of the colliding rings) is a
 // different defect and must not be hidden by a tensile correction; with the gate
 // every correction is visibly confined to tension, so a later tear can be
 // attributed to physics (damage, yield) or to the correction.
 // f itself stays geometric (pair collapse); the gate decides where it may act:
-//   TENSILE_CORRECTION_1 (Riemann repulsion): pEff = P - S_nn with the REAL face-normal
-//       deviator (under GIZMO_ELASTIC_FLUX the solver otherwise sees P only and misses
-//       tension carried by S); S is zeroed only after that, so the solve is unchanged.
+//   TENSILE_CORRECTION_1 (Riemann repulsion): unchanged. Under GIZMO_ELASTIC_FLUX it acts
+//       only at P < 0 (hydrostatic tension), so it is already confined to tension.
 //   stress-flux damping (1 - f_i): only principal components whose TOTAL principal
 //       stress lambda_k - P is tensile (lambda_k > max(0, P)); still one tensor per
 //       particle, so ELASTIC_FACE_MODE 3 stays torque-free.
-//   approach damping (DAMP): only for pairs whose mean traction along r_ij is < 0;
-//       symmetric in (i, j), so the boosted force stays central and antisymmetric.
+//   approach damping (DAMP): only for pairs whose mean sigma_1 is > 0; symmetric in
+//       (i, j), so the boosted force stays central and antisymmetric.
 //   0 = off (bit-identical), 1 = on
 #define TENSILE_CORRECTION_TRACTION_GATE 0
 // Per-particle approach-damping diagnostic in the h5 dump (TENSILE_CORRECTION_LOCAL,
