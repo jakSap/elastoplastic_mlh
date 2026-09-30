@@ -57,7 +57,11 @@ def main():
     p.add_argument("test")
     p.add_argument("note", help="what you saw")
     p = add("movie", movie.cmd_movie, "render movies/<run>_<field>.mp4 + last frame PNG", tests=True, sel=True)
-    p.add_argument("--field", default="gp", choices=sorted(movie.FIELDS))
+    p.add_argument("--field", default="gp",
+                   help="%s; with --compare a comma list gives one field per panel (last one repeats)"
+                        % "|".join(sorted(movie.FIELDS)))
+    p.add_argument("--compare", action="store_true", help="one movie per rung, the variants side by side")
+    p.add_argument("--profile", action="store_true", help="P2/P3: y-averaged Sigma and v profiles + exact/reference")
     args = ap.parse_args()
     args.fn(args)
 
