@@ -1138,7 +1138,22 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     // conservation is untouched at any strength. It removes kinetic energy only
     // semi-discretely: beyond lambda dt ~ 1 the explicit kick overshoots and
     // cools single particles (TENSILE_CORRECTION_DAMP_LIMIT).
-    if (TENSILE_CORRECTION_DAMP > 0. && f > 0. && vdotr < 0.){
+#if TENSILE_CORRECTION_TRACTION_GATE
+    // only for pairs in effective tension along r_ij: mean traction P - n.S.n < 0
+    bool dampTension = false;
+    {
+        const double r2g = dx*dx + dy*dy;
+        if (r2g > 0.){
+            const double nx = dx/sqrt(r2g), ny = dy/sqrt(r2g);
+            const double tI = P[i]   - (Sxx[i]*nx*nx   + 2.*Sxy[i]*nx*ny   + Syy[i]*ny*ny);
+            const double tJ = PJ[jj] - (SxxJ[jj]*nx*nx + 2.*SxyJ[jj]*nx*ny + SyyJ[jj]*ny*ny);
+            dampTension = 0.5*(tI + tJ) < 0.;
+        }
+    }
+#else
+    const bool dampTension = true;
+#endif
+    if (TENSILE_CORRECTION_DAMP > 0. && f > 0. && vdotr < 0. && dampTension){
 #if TENSILE_CORRECTION_DAMP_LIMIT || OUTPUT_DAMP_DIAG
         // Stability limit (see TENSILE_CORRECTION_DAMP_LIMIT): lambda dt of the
         // boosted coefficient against the pair's reduced mass. Symmetric in
@@ -1247,11 +1262,17 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
             const double *FV = FVec;
 #endif
             double prefac = -0.5 * l[kk] * (FV[0]*e[kk][0] + FV[1]*e[kk][1]);
+#if TENSILE_CORRECTION_TRACTION_GATE
+            // only where the total principal stress l_k - P is tensile
+            const double lGate = std::max(0., (side == 0) ? P[i] : PJ[jj]);
+#else
+            const double lGate = 0.;
+#endif
 #if TENSILE_CORRECTION_PARTICLE
             // this side's OWN factor (see parameter.h): one damped S per particle
-            if (l[kk] > 0.) prefac *= 1. - fTCpart[(side == 0) ? i : jTC];
+            if (l[kk] > lGate) prefac *= 1. - fTCpart[(side == 0) ? i : jTC];
 #else
-            if (l[kk] > 0.) prefac *= 1. - f;
+            if (l[kk] > lGate) prefac *= 1. - f;
 #endif
             cmag[0] += prefac * e[kk][0];
             cmag[1] += prefac * e[kk][1];
@@ -1432,10 +1453,15 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
             // eigenvector kk is column kk of evec: evec[kk*DIM + component]
             const double ek0 = evec[kk*DIM+0], ek1 = evec[kk*DIM+1], ek2 = evec[kk*DIM+2];
             double prefac = -0.5 * eval[kk] * (FVec[0]*ek0 + FVec[1]*ek1 + FVec[2]*ek2);
-#if TENSILE_CORRECTION_PARTICLE
-            if (eval[kk] > 0.) prefac *= 1. - fTCpart[(side == 0) ? i : jTC];
+#if TENSILE_CORRECTION_TRACTION_GATE
+            const double lGate = std::max(0., (side == 0) ? P[i] : PJ[jj]);
 #else
-            if (eval[kk] > 0.) prefac *= 1. - f;
+            const double lGate = 0.;
+#endif
+#if TENSILE_CORRECTION_PARTICLE
+            if (eval[kk] > lGate) prefac *= 1. - fTCpart[(side == 0) ? i : jTC];
+#else
+            if (eval[kk] > lGate) prefac *= 1. - f;
 #endif
             cmag[0] += prefac * ek0;
             cmag[1] += prefac * ek1;
@@ -5174,7 +5200,11 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #endif
                 // GIZMO keeps the Riemann problem isotropic; the deviatoric stress
                 // is added as a separate SPH flux after the solve (see below).
+                // With TENSILE_CORRECTION_TRACTION_GATE the solver zeroes it itself,
+                // after reading the face-normal traction for the TC_1 gate.
+#if !TENSILE_CORRECTION_TRACTION_GATE
                 fSxxR = fSxyR = fSyyR = fSxxL = fSxyL = fSyyL = 0.;
+#endif
 #endif
 #if DIM == 3
                 double fSxzR = Sxz[i];
@@ -5408,9 +5438,12 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 // GIZMO keeps the Riemann problem isotropic; the deviatoric stress
                 // is added as a separate SPH flux after the solve. The ghost path
                 // must do this too, or the periodic faces carry the stress twice.
+                // (TENSILE_CORRECTION_TRACTION_GATE: zeroed in the solver, see above.)
+#if !TENSILE_CORRECTION_TRACTION_GATE
                 fSxxR = fSxyR = fSyyR = fSxxL = fSxyL = fSyyL = 0.;
 #if DIM == 3
                 fSxzR = fSyzR = fSzzR = fSxzL = fSyzL = fSzzL = 0.;
+#endif
 #endif
 #endif // GIZMO_ELASTIC_FLUX
 #endif

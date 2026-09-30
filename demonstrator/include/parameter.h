@@ -411,6 +411,26 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define TENSILE_CORRECTION_DAMP_LIMIT 1
 // C of modes 1 and 3 (fraction of the relative normal velocity removed per step at most)
 #define TENSILE_CORRECTION_DAMP_LIMIT_C 0.5
+
+// Traction gate for EVERY tensile-correction channel (user decision 2026-09-30,
+// MA-Obsidian/2026-09-30.md): a correction may act only where the material is in
+// effective tension, i.e. where the normal traction t = P - n.S.n (compression
+// positive, the sign of the solver's pEff) on the plane it acts on is negative.
+// Clumping under compression (e.g. the contact edge of the colliding rings) is a
+// different defect and must not be hidden by a tensile correction; with the gate
+// every correction is visibly confined to tension, so a later tear can be
+// attributed to physics (damage, yield) or to the correction.
+// f itself stays geometric (pair collapse); the gate decides where it may act:
+//   TENSILE_CORRECTION_1 (Riemann repulsion): pEff = P - S_nn with the REAL face-normal
+//       deviator (under GIZMO_ELASTIC_FLUX the solver otherwise sees P only and misses
+//       tension carried by S); S is zeroed only after that, so the solve is unchanged.
+//   stress-flux damping (1 - f_i): only principal components whose TOTAL principal
+//       stress lambda_k - P is tensile (lambda_k > max(0, P)); still one tensor per
+//       particle, so ELASTIC_FACE_MODE 3 stays torque-free.
+//   approach damping (DAMP): only for pairs whose mean traction along r_ij is < 0;
+//       symmetric in (i, j), so the boosted force stays central and antisymmetric.
+//   0 = off (bit-identical), 1 = on
+#define TENSILE_CORRECTION_TRACTION_GATE 0
 // Per-particle approach-damping diagnostic in the h5 dump (TENSILE_CORRECTION_LOCAL,
 // 2D): dampLdt = sum over the particle's boosted pairs of lambda_ij dt (UNLIMITED,
 // Gershgorin-type load), dampLdtMax = max over them, dampNb = number of boosted
@@ -1189,6 +1209,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #endif
 #if (TENSILE_CORRECTION_DAMP_LIMIT || OUTPUT_DAMP_DIAG) && !(TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL && GIZMO_ELASTIC_FLUX && DIM == 2)
 #error "TENSILE_CORRECTION_DAMP_LIMIT / OUTPUT_DAMP_DIAG act on the approach damping, which exists only in the 2D GIZMO stress flux with TENSILE_CORRECTION_LOCAL."
+#endif
+#if TENSILE_CORRECTION_TRACTION_GATE && !(TENSILE_CORRECTION && GIZMO_ELASTIC_FLUX && USE_HLLC && !ELASTIC_HLLC_EP)
+#error "TENSILE_CORRECTION_TRACTION_GATE is implemented for the GIZMO elastic flux on the x-split HLLC path."
+#endif
+#if TENSILE_CORRECTION_TRACTION_GATE && TENSILE_CORRECTION_DAMP_LIMIT == 3
+#error "TENSILE_CORRECTION_TRACTION_GATE: the per-particle damping budget (DAMP_LIMIT 3) is not gated yet."
 #endif
 #if TENSILE_CORRECTION_DAMP_LIMIT > 3
 #error "TENSILE_CORRECTION_DAMP_LIMIT must be 0 (off), 1 (cap), 2 (exponential) or 3 (per-particle budget)."
