@@ -1407,7 +1407,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // define how much tolerance of flux antisymmetry is allowed in checkFluxSymmetry
 #define FLUX_SYM_TOL 1e-20
 
-// floor for internal energy u, set to negative value to disable
+// floor for internal energy u, set to negative value to disable; may be non-integer (e.g. 0.01).
+// Not conservative: the energy it adds is logged per kick ("Energy floor: clamped ..."), and u <= 0
+// still logs the "Negative internal energy" ERROR before the clamp.
 #define ENERGY_FLOOR -1
 
 // Output per-particle condition number of the gradient estimation matrix E

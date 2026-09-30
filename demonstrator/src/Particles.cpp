@@ -2099,11 +2099,9 @@ void Particles::compuis(const double &dt, const double &kernelSize){
         if (u[i] < 0.){
             Logger(WARN) << "+++DANGER+++ negative specific internal energy encountered.";
         }
-#if ENERGY_FLOOR >= 0
-        if (u[i] < ENERGY_FLOOR){
+        if (ENERGY_FLOOR >= 0 && u[i] < ENERGY_FLOOR){ // see updateState()
             u[i] = ENERGY_FLOOR;
         }
-#endif
     }
 }
 
@@ -5857,12 +5855,10 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
         }
 #endif
 
-#if ENERGY_FLOOR >= 0
-        if (u[i] < ENERGY_FLOOR){
+        if (ENERGY_FLOOR >= 0 && u[i] < ENERGY_FLOOR){ // see updateState()
             u[i] = ENERGY_FLOOR;
             Logger(ERROR) << "Clamped internal energy at " << ENERGY_FLOOR;
         }
-#endif
 
 #if MOVE_PARTICLES
         // MOVE PARTICLES
@@ -5908,6 +5904,8 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
 }
 
 void Particles::updateState(const double &dt){
+    int floorN = 0;
+    double floorDE = 0.;
     for(int i=0; i<N; ++i){
         double vxi = vx[i], vyi = vy[i];
 #if DRIFT_KDK
@@ -5969,11 +5967,18 @@ void Particles::updateState(const double &dt){
             Logger(ERROR) << "Negative internal energy. u[" << i << "] =" << u[i] << ", eF = " << eF[i];
         }
 #endif
-#if ENERGY_FLOOR >= 0
-        if (u[i] < ENERGY_FLOOR){
+        // ENERGY_FLOOR may be non-integer (e.g. 0.01), which #if cannot evaluate,
+        // hence a constant-folded condition; < 0 disables the floor (default).
+        // The floor adds energy: count it, the ERROR above still reports u <= 0.
+        if (ENERGY_FLOOR >= 0 && u[i] < ENERGY_FLOOR){
+            ++floorN;
+            floorDE += m[i]*(ENERGY_FLOOR - u[i]);
             u[i] = ENERGY_FLOOR;
         }
-#endif
+    }
+    if (floorN > 0){
+        Logger(WARN) << "Energy floor: clamped " << floorN << " particles to u = " << ENERGY_FLOOR
+                     << ", added energy " << floorDE;
     }
 
 #if AM_SPIN
