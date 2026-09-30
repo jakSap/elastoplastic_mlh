@@ -285,6 +285,11 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     /// active-flaw count, crack-growth speed and the active-flaw cap.
     void integrateDamage(const double &dt);
 #endif // FRAGMENTATION
+#if OUTPUT_PLASTIC_STRAIN
+    /// Accumulated plastic shear strain, sum of (1 - f) sqrt(J2)/mu over the
+    /// yield returns (include/Plasticity.h); diagnostic, written as /plasticStrain.
+    double *plasticStrain;
+#endif
 #endif // ELASTIC
     void assignParticlesAndCells(Domain &domain);
     void gridNNS(Domain &domain, const double &kernelSize);

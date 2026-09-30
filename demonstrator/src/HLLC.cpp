@@ -638,8 +638,8 @@ void HLLC::xSplitElasticHLLCEP(int matIdL, int matIdR,
     const double muL = 0.;
     const double muR = 0.;
 #endif
-    const double aL = sqrt(std::max(KL + 4.0/3.0 * muL, 4.0/3.0 * muL) / WL[0]);
-    const double aR = sqrt(std::max(KR + 4.0/3.0 * muR, 4.0/3.0 * muR) / WR[0]);
+    const double aL = sqrt(std::max(KL + ELASTIC_LONG_MU_FAC * muL, ELASTIC_LONG_MU_FAC * muL) / WL[0]);
+    const double aR = sqrt(std::max(KR + ELASTIC_LONG_MU_FAC * muR, ELASTIC_LONG_MU_FAC * muR) / WR[0]);
 
     // Davis wave speeds clamped to bracket the interface (eq. 44)
     const double SL = std::min(std::min(vL - aL, vR - aR), 0.0);
@@ -654,7 +654,7 @@ void HLLC::xSplitElasticHLLCEP(int matIdL, int matIdR,
     // Star density and log-closure star stress (eqs. 41-43); unused by the
     // elastic flux, kept as the entry point for yielding / plastic waves.
     // const double rhoStarL = WL[0] * SLmvL / (SL - Sstar);
-    // const double sxxStarL = SxxL - 4.0/3.0 * muL * log(rhoStarL / WL[0]);
+    // const double sxxStarL = SxxL - ELASTIC_LONG_MU_FAC * muL * log(rhoStarL / WL[0]);
 
     // Flux at x/t = 0: sample the contact side, then the star correction
     // F*K = FK + SK*(U*K - UK); the clamp makes SL <= 0 <= SR always hold.
@@ -821,8 +821,8 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
     const double muL = 0.;
     const double muR = 0.;
 #endif
-    const double aL = sqrt((KL + 4.0/3.0 * muL) / WL[0]);
-    const double aR = sqrt((KR + 4.0/3.0 * muR) / WR[0]);
+    const double aL = sqrt((KL + ELASTIC_LONG_MU_FAC * muL) / WL[0]);
+    const double aR = sqrt((KR + ELASTIC_LONG_MU_FAC * muR) / WR[0]);
 #else
 #if EOS == 1 || EOS == 2
     const double aL = MeshlessEOS.EOSAdiabaticSoundSpeed(matIdL, WL[0], WL[1]);

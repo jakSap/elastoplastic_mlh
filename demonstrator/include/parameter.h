@@ -227,6 +227,17 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // Shear modulus mu now lives per-material in the EOS material table
 // (see EquationOfState::MurnaghanMaterial.mu); look it up via
 // MeshlessEOS->EOSShearModulus(matId[i]).
+/// 2D solid model (acts only in DIM 2; 3D is unchanged).
+///   0 = plane strain: dS/dt = 2 mu (D - tr(D)/3 I) + Jaumann, i.e. the 3D rate
+///       with dvz/dz = 0; longitudinal modulus K + 4/3 mu. S_zz is not stored,
+///       so the in-plane S is not traceless and J2 over the 2x2 tensor is not
+///       the plane-strain J2 (the pre-2026-09-30 behaviour).
+///   1 = true 2D, GIZMO's model (solids/elastic_physics.c, trace_vel/NDim):
+///       dS/dt = 2 mu (D - tr(D)/2 I) + Jaumann, S traceless in 2D, longitudinal
+///       modulus K + mu in every wave speed (Riemann solvers, HLL weights, CFL,
+///       damping budget, crack speed); matches GIZMO's sqrt(c_Till^2 + mu/rho).
+/// Plasticity test plan (MA-Obsidian/2026-09-30-testplan-plastisch.md): 1.
+#define SOLID_2D_MODEL 0
 /// Legacy von Mises plasticity (1 = on, 0 = off). When enabled (and no
 /// per-material plasticity model below is selected) the deviatoric stress is
 /// clamped to a constant yield surface YIELD_STRESS via a radial return after
@@ -276,6 +287,34 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
                                 + DRUCKER_PRAGER_PLASTICITY + COLLINS_PLASTICITY)
 /// True when any radial-return plasticity (legacy or per-material) is active.
 #define PLASTICITY_ANY (PLASTICITY || PLASTICITY_MODEL_COUNT)
+
+/// Yield return map applied after each stress update (include/Plasticity.h).
+/// The yield surface is J2 = Y^2/DIM in both.
+///   0 = radial return onto the surface, S <- S sqrt(Y^2/(DIM J2)).
+///   1 = GIZMO (elastic_physics.c), S <- S Y^2/(DIM J2): no square root, so the
+///       state lands inside the surface by the fraction it overshot (the Benz &
+///       Asphaug / miluphcuda form); the difference vanishes as dt -> 0.
+#define YIELD_RETURN 0
+/// Accumulate the plastic shear strain gamma_p = sum (1 - f) sqrt(J2)/mu per
+/// particle and write it as /plasticStrain (diagnostic only).
+#define OUTPUT_PLASTIC_STRAIN 0
+
+/// Longitudinal (P-wave) modulus K + ELASTIC_LONG_MU_FAC mu of the solid model.
+#if DIM == 2 && SOLID_2D_MODEL == 1
+#define ELASTIC_LONG_MU_FAC 1.0
+#else
+#define ELASTIC_LONG_MU_FAC (4./3.)
+#endif
+
+#if SOLID_2D_MODEL != 0 && SOLID_2D_MODEL != 1
+#error "SOLID_2D_MODEL must be 0 (plane strain) or 1 (true 2D, GIZMO)."
+#endif
+#if YIELD_RETURN != 0 && YIELD_RETURN != 1
+#error "YIELD_RETURN must be 0 (radial return) or 1 (GIZMO)."
+#endif
+#if OUTPUT_PLASTIC_STRAIN && !PLASTICITY_ANY
+#error "OUTPUT_PLASTIC_STRAIN needs a plasticity model (PLASTICITY or *_PLASTICITY)."
+#endif
 
 #if PLASTICITY_MODEL_COUNT > 1
 #error "Select at most one of VON_MISES/MOHR_COULOMB/DRUCKER_PRAGER/COLLINS_PLASTICITY."
