@@ -14,7 +14,17 @@ def snaps(d):
 def load(fn):
     with h5py.File(fn) as h:
         return {q: h[q][:] for q in ("x", "v", "rho", "m", "u")}
+def amplitude(d):
+    """A from the run's IC (attrs 'amplitude'), default 1e-6."""
+    try:
+        cfg = open(os.path.join(os.path.dirname(d.rstrip("/")), "config.info")).read()
+        ic = [l.split()[1] for l in cfg.splitlines() if l.startswith("initFile")][0]
+        with h5py.File(os.path.join(HERE, ic)) as h: return float(h.attrs["amplitude"])
+    except Exception:
+        return 1e-6
 def metrics(d, n, T):
+    global A
+    A = amplitude(d)
     S = snaps(d); f1 = [fn for t, fn in S if abs(t - T) < 1e-7]
     if not f1: return None
     s0, s1 = load(S[0][1]), load(f1[0]); t = T

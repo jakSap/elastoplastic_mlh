@@ -499,6 +499,13 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     void updateStateAndPosition(const double &dt, const Domain &domain);
     void updateState(const double &dt);
     void moveParticles(const double &dt, const Domain &domain);
+#if RECON_HESSIAN
+    /// quadratic Taylor weights per pair (basis u^2, uv, v^2) and per-particle coefficients (see RECON_HESSIAN)
+    double (*psijTildeHess_xi)[3] { nullptr };
+    double (*psijTildeHess_xiGhosts)[3] { nullptr };
+    double (*rhoHess)[3], (*PHess)[3], (*vxHess)[3], (*vyHess)[3];
+    void compHessians(Particles &ghostParticles);
+#endif
 #if MOMENTUM_PREF
     /// reference pressure removed from the momentum flux in collectFluxes (see MOMENTUM_PREF)
     double momentumPref { 0. };

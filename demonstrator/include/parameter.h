@@ -1248,6 +1248,18 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   1 = P_ref = volume-weighted mean pressure
 #define MOMENTUM_PREF 0
 
+/// Quadratic face reconstruction on the periodic path: W_face = W_i + grad W.d + RECON_HESSIAN_FAC *
+/// (c0 dx^2 + c1 dx dy + c2 dy^2), d = x_ij - x_i, with the quadratic Taylor coefficients c of the same
+/// least-squares fit (GRADIENT_ORDER >= 2). Fields rho, P, v (not S). RECON_HESSIAN_FAC = 1 is the Taylor
+/// polynomial (what POLY_RECONSTRUCTION does on the non-periodic path); 2/3 is the point-value correction:
+/// for the midpoint flux operator sum_j 2 V psiTilde_j F_ij the face value F_i + D F/2 + a D^2 F (D = dx.grad)
+/// leaves an O(D^3) error (a - 1/12)/2, so a = 1/12 = 2/3 * 1/8 makes the central operator fourth order and the
+/// L - R jump O(D^5). Linearised (proto/mfm_stab.py): FAC 1 makes the acoustic modes GROW (anti-diffusive,
+/// Re/|Im| = +8.7e-3 with cubic faces); FAC 2/3 is stable and 13x less dissipative than the linear recon.
+///   0 = off, 1 = on
+#define RECON_HESSIAN 0
+#define RECON_HESSIAN_FAC (2./3.)
+
 /// Third-order strong-stability-preserving Runge-Kutta (Shu & Osher 1988) instead of the
 /// kick-drift schemes above:
 ///   U1 = U0 + dt L(U0),  U2 = 3/4 U0 + 1/4 (U1 + dt L(U1)),  U3 = 1/3 U0 + 2/3 (U2 + dt L(U2)).
@@ -1314,6 +1326,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #endif
 #if FACE_GRAD_WEIGHTS && (!USE_HLLC || FRAGMENTATION || OUTPUT_ENERGY_BUDGET)
 #error "FACE_GRAD_WEIGHTS: the backward-face swap is wired into the HLLC solves only (no damage, no energy budget)."
+#endif
+#if RECON_HESSIAN && !(SECOND_ORDER_GRADIENTS && DIM == 2 && PERIODIC_BOUNDARIES && !POLY_RECONSTRUCTION_ACTIVE)
+#error "RECON_HESSIAN is wired for the 2D periodic path with GRADIENT_ORDER >= 2 (and without POLY_RECONSTRUCTION)."
 #endif
 #if FACE_GRAD_WEIGHTS && !SECOND_ORDER_GRADIENTS
 #error "FACE_GRAD_WEIGHTS builds the faces from the higher-order gradient weights: set GRADIENT_ORDER >= 2."

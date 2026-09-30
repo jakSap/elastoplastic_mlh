@@ -48,6 +48,10 @@ V[a_plim]="${FULL/PAIRWISE_LIMITER:0/PAIRWISE_LIMITER:1}"           # pairwise l
 V[a_slim]="${FULL/SLOPE_LIMITING:0/SLOPE_LIMITING:1}"               # slope limiter on
 V[a_f1pref]="${V[a_f1]/MOMENTUM_PREF:1/}"                           # GO3 + seed + RK3 only (default faces, P0 kept)
 V[hop]="GRADIENT_ORDER:3 SLOPE_LIMITING:0 PAIRWISE_LIMITER:0 SURFACE_GRAD_BLEND:0"   # Hopkins' recipe alone
+# quadratic face reconstruction (RECON_HESSIAN): point-value corrected (2/3) vs Taylor (1)
+V[q23]="$FULL RECON_HESSIAN:1"                                     # full + corrected quadratic recon
+V[qT]="$FULL RECON_HESSIAN:1 RECON_HESSIAN_FAC:1.0"                # full + Taylor quadratic recon
+V[f1q23]="${V[a_f1]} RECON_HESSIAN:1"                              # first-order faces + P_ref + corrected recon
 [ -f "$HERE/variants.sh" ] && source "$HERE/variants.sh"
 for t in "$@"; do
     [ -n "${V[$t]+x}" ] || { echo "unknown variant $t" >&2; exit 1; }

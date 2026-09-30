@@ -401,6 +401,10 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     rhoExplicit = new double[numParticles]();
     rhoKernel   = new double[numParticles]();
 #endif
+#if RECON_HESSIAN
+    rhoHess = new double[numParticles][3](); PHess = new double[numParticles][3]();
+    vxHess  = new double[numParticles][3](); vyHess = new double[numParticles][3]();
+#endif
 #if OUTPUT_CONDITION_NUMBER
     conditionNumber = new double[numParticles];
 #if DIM == 2
@@ -415,6 +419,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         psijTilde_xi = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
 #if SECOND_ORDER_GRADIENTS
         psijTildeGrad_xi = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
+#if RECON_HESSIAN
+        psijTildeHess_xi = new double[numParticles*MAX_NUM_INTERACTIONS][3]();
+#endif
 #if SURFACE_GRAD_BLEND
         gradBlend = new double[numParticles]();
 #endif
@@ -486,6 +493,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         psijTilde_xiGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
 #if SECOND_ORDER_GRADIENTS
         psijTildeGrad_xiGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
+#endif
+#if RECON_HESSIAN
+        psijTildeHess_xiGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][3]();
 #endif
         AijGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
 #if ELASTIC_FACE_MODE == 3
@@ -579,6 +589,9 @@ Particles::~Particles() {
 #endif
 #endif
 #if EXPLICIT_VOL_INTEGRATION
+#if RECON_HESSIAN
+    delete[] rhoHess; delete[] PHess; delete[] vxHess; delete[] vyHess;
+#endif
     delete[] rhoExplicit;
     delete[] rhoKernel;
 #endif
@@ -659,6 +672,9 @@ Particles::~Particles() {
         delete[] psijTilde_xi;
 #if SECOND_ORDER_GRADIENTS
         delete[] psijTildeGrad_xi;
+#if RECON_HESSIAN
+        delete[] psijTildeHess_xi;
+#endif
 #if SURFACE_GRAD_BLEND
         delete[] gradBlend;
 #endif
@@ -727,6 +743,9 @@ Particles::~Particles() {
         delete[] psijTilde_xiGhosts;
 #if SECOND_ORDER_GRADIENTS
         delete[] psijTildeGrad_xiGhosts;
+#endif
+#if RECON_HESSIAN
+        delete[] psijTildeHess_xiGhosts;
 #endif
         delete[] AijGhosts;
 #if ELASTIC_FACE_MODE == 3
@@ -4653,6 +4672,16 @@ void Particles::compRiemannStatesLR(const double &dt){
             APPLY_GRADIENTS_F(WijL[iW][2], GRAD_FO(vx)[j], GRAD_HI(vx)[j], vxPolyH[j], hInv_j, wF, xijxj);
             APPLY_GRADIENTS_F(WijR[iW][3], GRAD_FO(vy)[i], GRAD_HI(vy)[i], vyPolyH[i], hInv_i, wF, xijxi);
             APPLY_GRADIENTS_F(WijL[iW][3], GRAD_FO(vy)[j], GRAD_HI(vy)[j], vyPolyH[j], hInv_j, wF, xijxj);
+#if RECON_HESSIAN
+            {
+                const double qi = RECON_HESSIAN_FAC, a0 = xijxi[0], a1 = xijxi[1], b0 = xijxj[0], b1 = xijxj[1];
+                auto Q = [](const double *c, double u, double v){ return c[0]*u*u + c[1]*u*v + c[2]*v*v; };
+                WijR[iW][0] += qi*Q(rhoHess[i], a0, a1); WijL[iW][0] += qi*Q(rhoHess[j], b0, b1);
+                WijR[iW][1] += qi*Q(PHess[i], a0, a1);   WijL[iW][1] += qi*Q(PHess[j], b0, b1);
+                WijR[iW][2] += qi*Q(vxHess[i], a0, a1);  WijL[iW][2] += qi*Q(vxHess[j], b0, b1);
+                WijR[iW][3] += qi*Q(vyHess[i], a0, a1);  WijL[iW][3] += qi*Q(vyHess[j], b0, b1);
+            }
+#endif
 #if DIM==3
             APPLY_GRADIENTS_F(WijR[iW][4], GRAD_FO(vz)[i], GRAD_HI(vz)[i], vzPolyH[i], hInv_i, wF, xijxi);
             APPLY_GRADIENTS_F(WijL[iW][4], GRAD_FO(vz)[j], GRAD_HI(vz)[j], vzPolyH[j], hInv_j, wF, xijxj);
@@ -6509,6 +6538,36 @@ void Particles::updateGhostState(Particles &ghostParticles){
     }
 }
 
+#if RECON_HESSIAN
+void Particles::compHessians(Particles &ghostParticles){
+    // Quadratic Taylor coefficients c (f(x_i + d) ~ f_i + grad.d + c0 dx^2 + c1 dx dy + c2 dy^2) of rho, P,
+    // v from the same least-squares fit as the gradient (see RECON_HESSIAN), then copied to the ghosts.
+    double *f[4] = { rho, P, vx, vy };
+    double *fg[4] = { ghostParticles.rho, ghostParticles.P, ghostParticles.vx, ghostParticles.vy };
+    double (*H[4])[3] = { rhoHess, PHess, vxHess, vyHess };
+    double (*Hg[4])[3] = { ghostParticles.rhoHess, ghostParticles.PHess, ghostParticles.vxHess, ghostParticles.vyHess };
+    for (int q=0; q<4; ++q){
+        for (int i=0; i<N; ++i){
+            double c[3] = {0., 0., 0.};
+            for (int j=0; j<noi[i]; ++j){
+                const int jj = nnl[j+i*MAX_NUM_INTERACTIONS];
+                const double df = f[q][jj] - f[q][i];
+                for (int k=0; k<3; ++k) c[k] += psijTildeHess_xi[j+i*MAX_NUM_INTERACTIONS][k]*df;
+            }
+            for (int j=0; j<noiGhosts[i]; ++j){
+                const int g = nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS];
+                const double df = fg[q][g] - f[q][i];
+                for (int k=0; k<3; ++k) c[k] += psijTildeHess_xiGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS][k]*df;
+            }
+            for (int k=0; k<3; ++k) H[q][i][k] = c[k];
+        }
+        for (int i=0; i<N*(DIM+1); ++i)
+            if (ghostMap[i] >= 0)
+                for (int k=0; k<3; ++k) Hg[q][ghostMap[i]][k] = H[q][i/(DIM+1)][k];
+    }
+}
+#endif
+
 void Particles::updateGhostGradients(Particles &ghostParticles){
     for (int i=0; i<N*(DIM+1); ++i){
         if (ghostMap[i] >= 0){
@@ -6917,6 +6976,15 @@ void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles){
                         val += Mmat[alpha*GRAD_MAT_DIM+k]*pbasis[k];
                     psijTildeGrad_xi[j+i*MAX_NUM_INTERACTIONS][alpha] = sInv*val*psij_xi;
                 }
+#if RECON_HESSIAN
+                // quadratic Taylor coefficients (basis u^2, uv, v^2 of buildGradBasis)
+                for (int c=0; c<3; ++c){
+                    double val = 0.;
+                    for (int k=0; k<GRAD_MAT_DIM; ++k)
+                        val += Mmat[(DIM+c)*GRAD_MAT_DIM+k]*pbasis[k];
+                    psijTildeHess_xi[j+i*MAX_NUM_INTERACTIONS][c] = sInv*sInv*val*psij_xi;
+                }
+#endif
             }
             for (int j=0; j<noiGhosts[i]; ++j){
                 int g = nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS];
@@ -6936,6 +7004,14 @@ void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles){
                         val += Mmat[alpha*GRAD_MAT_DIM+k]*pbasis[k];
                     psijTildeGrad_xiGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS][alpha] = sInv*val*psij_xi;
                 }
+#if RECON_HESSIAN
+                for (int c=0; c<3; ++c){
+                    double val = 0.;
+                    for (int k=0; k<GRAD_MAT_DIM; ++k)
+                        val += Mmat[(DIM+c)*GRAD_MAT_DIM+k]*pbasis[k];
+                    psijTildeHess_xiGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS][c] = sInv*sInv*val*psij_xi;
+                }
+#endif
             }
         } else {
             for (int j=0; j<noi[i]; ++j)
@@ -6946,6 +7022,10 @@ void Particles::compPsijTilde(Helper &helper, const Particles &ghostParticles){
                 for (int alpha=0; alpha<DIM; ++alpha)
                     psijTildeGrad_xiGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS][alpha]
                         = psijTilde_xiGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS][alpha];
+#if RECON_HESSIAN
+            for (int j=0; j<noi[i]; ++j) for (int c=0; c<3; ++c) psijTildeHess_xi[j+i*MAX_NUM_INTERACTIONS][c] = 0.;
+            for (int j=0; j<noiGhosts[i]; ++j) for (int c=0; c<3; ++c) psijTildeHess_xiGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS][c] = 0.;
+#endif
         }
 #endif
     }
@@ -7221,6 +7301,16 @@ void Particles::compRiemannStatesLR(const double &dt,
             WijLGhosts[iW][2] += Helper::dotProduct(ghostParticles.vxGrad[j], xijxj);
             WijRGhosts[iW][3] += Helper::dotProduct(vyGrad[i], xijxi);
             WijLGhosts[iW][3] += Helper::dotProduct(ghostParticles.vyGrad[j], xijxj);
+#if RECON_HESSIAN
+            {
+                const double qi = RECON_HESSIAN_FAC, a0 = xijxi[0], a1 = xijxi[1], b0 = xijxj[0], b1 = xijxj[1];
+                auto Q = [](const double *c, double u, double v){ return c[0]*u*u + c[1]*u*v + c[2]*v*v; };
+                WijRGhosts[iW][0] += qi*Q(rhoHess[i], a0, a1); WijLGhosts[iW][0] += qi*Q(ghostParticles.rhoHess[j], b0, b1);
+                WijRGhosts[iW][1] += qi*Q(PHess[i], a0, a1);   WijLGhosts[iW][1] += qi*Q(ghostParticles.PHess[j], b0, b1);
+                WijRGhosts[iW][2] += qi*Q(vxHess[i], a0, a1);  WijLGhosts[iW][2] += qi*Q(ghostParticles.vxHess[j], b0, b1);
+                WijRGhosts[iW][3] += qi*Q(vyHess[i], a0, a1);  WijLGhosts[iW][3] += qi*Q(ghostParticles.vyHess[j], b0, b1);
+            }
+#endif
 #if DIM==3
             WijRGhosts[iW][4] += Helper::dotProduct(vzGrad[i], xijxi);
             WijLGhosts[iW][4] += Helper::dotProduct(ghostParticles.vzGrad[j], xijxj);

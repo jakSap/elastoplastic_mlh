@@ -190,6 +190,9 @@ void MeshlessScheme::run(){
 #endif
         particles->updateGhostGradients(ghostParticles);
 #endif // SLOPE_LIMITING
+#if RECON_HESSIAN
+        particles->compHessians(ghostParticles);
+#endif
 #else // PERIODIC_BOUNDARIES
         particles->compPsijTilde(helper);
         particles->gradient(particles->rho, particles->rhoGrad);
@@ -542,6 +545,9 @@ void MeshlessScheme::run(){
         Logger(DEBUG) << "      > Update limited ghost gradients";
         particles->updateGhostGradients(ghostParticles);
 #endif // SLOPE_LIMITING
+#if RECON_HESSIAN
+        particles->compHessians(ghostParticles);
+#endif
 #else // PERIODIC_BOUNDARIES
         particles->compPsijTilde(helper);
 
