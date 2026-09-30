@@ -445,6 +445,20 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // pairs, dampNcap = number of those the limiter reduced (this flux pass), and
 // dampLdtRun = running max of dampLdt over the run. Numerics unchanged.
 #define OUTPUT_DAMP_DIAG 0
+// Per-particle internal-energy budget in the h5 dump (2026-09-30, to find what drives u < 0).
+// Numerics unchanged (one extra Riemann solve per pair without the repulsion, used only for
+// the split). With finite masses one kick changes u exactly by
+//     du = -dt/m * sum_c ( E_c - v_mid . p_c ),   v_mid = (v_old + v_new)/2,
+// where (E_c, p_c) are the energy and momentum fluxes of channel c; the running integral of
+// each channel's du over the real kicks (the TIME_KDK predictor is not counted) is dumped:
+//   ebH   hydro Riemann flux without the tensile repulsion (pressure work)
+//   ebR   TENSILE_CORRECTION_1 repulsion (full Riemann flux minus ebH)
+//   ebS   GIZMO stress flux, deviator, undamped
+//   ebSD  its tensile damping (1 - f_i): damped minus undamped deviator flux
+//   ebV   stress-flux dissipation (longitudinal wt_r without the DAMP boost, transverse wt_t)
+//   ebD   approach-damping boost (DAMP): the extra longitudinal dissipation
+// Check: u(t) - u(0) = ebH + ebR + ebS + ebSD + ebV + ebD to round-off.
+#define OUTPUT_ENERGY_BUDGET 0
 
 // Two Parameters for the tensile correction facor, as in Monaghan, 2000
 // (TENSILE_CORRECTION_LOCAL reuses both: PREFAC scales f, POWER sharpens the
@@ -1534,4 +1548,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #error "TIME_KDK: damage, the AM_METHOD 4-6 repairs and SPH are not wired into the half-kick store."
 #endif
 
+#if OUTPUT_ENERGY_BUDGET && !(DIM == 2 && ELASTIC && USE_HLLC && GIZMO_ELASTIC_FLUX && TENSILE_CORRECTION && ENFORCE_FLUX_SYM && MESHLESS_FINITE_MASS && !PERIODIC_BOUNDARIES && !FRAGMENTATION && !ADIABATIC_FACE_CORRECTION && AM_METHOD == 0)
+#error "OUTPUT_ENERGY_BUDGET: 2D GIZMO elastic flux with TENSILE_CORRECTION, symmetric fluxes, finite mass, no periodic boundaries / fragmentation / AFC / AM corrections."
+#endif
 #endif //DEMONSTRATOR_PARAMETER_H

@@ -647,7 +647,13 @@ void MeshlessScheme::run(){
         // Predict the sync state at t^{n+1} with this step's rates (GIZMO's
         // VelPred): the next flux pass is built from it, and the next closing
         // half kick replaces it by the solution.
+#if OUTPUT_ENERGY_BUDGET
+        particles->ebCount = false;   // discarded by loadKickState: not part of the budget
+#endif
         particles->updateState(timeStep/2.);
+#if OUTPUT_ENERGY_BUDGET
+        particles->ebCount = true;
+#endif
 #if !TIME_KDK_FIELD_DRIFT
         particles->integrateStressTensor(timeStep/2.);
 #if EXPLICIT_VOL_INTEGRATION

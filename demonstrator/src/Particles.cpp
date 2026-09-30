@@ -292,6 +292,10 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     dampLdtRun = new double[numParticles]();
     dampNb = new int[numParticles](); dampNcap = new int[numParticles]();
 #endif
+#if OUTPUT_ENERGY_BUDGET
+    ebF = new double[numParticles][EB_NCH][3]();
+    ebU = new double[numParticles][EB_NCH]();
+#endif
     Sxx = new double[numParticles]();
     Sxy = new double[numParticles]();
     Syy = new double[numParticles]();
@@ -595,6 +599,9 @@ Particles::~Particles() {
 #endif
 #if OUTPUT_DAMP_DIAG
     delete[] dampLdt; delete[] dampLdtMax; delete[] dampLdtRun; delete[] dampNb; delete[] dampNcap;
+#endif
+#if OUTPUT_ENERGY_BUDGET
+    delete[] ebF; delete[] ebU;
 #endif
     delete[] Sxx;
     delete[] Sxy;
@@ -1131,6 +1138,9 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     const double ci  = sqrt((Ki + 4./3.*mui)/rhoi), cj  = sqrt((Kj + 4./3.*muj)/rhoj);
     const double cTi = sqrt(mui/rhoi),               cTj = sqrt(muj/rhoj);
     double wt_r = rhoi*ci*rhoj*cj / (rhoi*ci + rhoj*cj) * FNormT;
+#if OUTPUT_ENERGY_BUDGET
+    const double wtR0 = wt_r;   // before the DAMP boost
+#endif
 #if TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL
     // Anti-clumping approach damping: boost the radial dissipation for pairs
     // that are closer than the local spacing (f > 0) AND closing (vdotr < 0).
@@ -1216,6 +1226,9 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     // deviatoric stress force: project face onto stress eigenvectors, damp tensile
     // (positive) principal components by (1 - f); summed over both sides at wt=-0.5
     double cmag[2] = {0., 0.};
+#if OUTPUT_ENERGY_BUDGET
+    double cDev0[2] = {0., 0.};   // deviator flux without the tensile damping
+#endif
     for (int side = 0; side < 2; ++side){
         const int p = (side == 0) ? i : jj;
         // Side-0 reads `this`, side-1 the j-side binding (== `this` unless the
@@ -1257,6 +1270,10 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
             const double *FV = FVec;
 #endif
             double prefac = -0.5 * l[kk] * (FV[0]*e[kk][0] + FV[1]*e[kk][1]);
+#if OUTPUT_ENERGY_BUDGET
+            cDev0[0] += prefac * e[kk][0];
+            cDev0[1] += prefac * e[kk][1];
+#endif
 #if TENSILE_CORRECTION_TRACTION_GATE
             // only where the total principal stress l_k - P is tensile
             const double lGate = std::max(0., (side == 0) ? P[i] : PJ[jj]);
@@ -1276,6 +1293,10 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #if TORQUE_DIAG
     // Deviatoric traction, captured before the dissipation terms touch cmag.
     const double cDev[2] = { cmag[0], cmag[1] };
+#endif
+#if OUTPUT_ENERGY_BUDGET
+    const double cDevD[2] = { cmag[0], cmag[1] };   // damped deviator flux
+    double ebProjR = 0.;                           // longitudinal projection used by wt_r
 #endif
     // HLL-type dissipation of velocity differences (longitudinal + transverse shear wave)
 #if RECON_FACE_DV
@@ -1305,10 +1326,16 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
         cmag[0] -= wt_r*projR*dx + wt_t*(dvF[0] - projF*dx);
         cmag[1] -= wt_r*projR*dy + wt_t*(dvF[1] - projF*dy);
+#if OUTPUT_ENERGY_BUDGET
+        ebProjR = projR;
+#endif
     }
 #else
     cmag[0] -= wt_rt*dx + wt_t*dv[0];
     cmag[1] -= wt_rt*dy + wt_t*dv[1];
+#if OUTPUT_ENERGY_BUDGET
+    ebProjR = vdotr * rinv * rinv;
+#endif
 #endif
 #if TORQUE_DIAG
     // Channel torque budget. The three pieces are RECOMPUTED here rather than
@@ -1373,6 +1400,18 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     }
 #endif
     const double cmag_E = cmag[0]*v_int[0] + cmag[1]*v_int[1];
+#if OUTPUT_ENERGY_BUDGET
+    {
+        // channel c contributes the flux (E, p) = -(c . v_int, c), like cmag below
+        const double cD[2]  = { -(wt_r - wtR0)*ebProjR*dx, -(wt_r - wtR0)*ebProjR*dy };
+        const double cS[2]  = { cDev0[0], cDev0[1] };
+        const double cSD[2] = { cDevD[0] - cDev0[0], cDevD[1] - cDev0[1] };
+        const double cV[2]  = { cmag[0] - cDevD[0] - cD[0], cmag[1] - cDevD[1] - cD[1] };
+        const double *cc[4] = { cS, cSD, cV, cD };
+        for (int k = 0; k < 4; ++k)
+            ebAddPair(i, jj, 2 + k, -(cc[k][0]*v_int[0] + cc[k][1]*v_int[1]), -cc[k][0], -cc[k][1]);
+    }
+#endif
 
     // demonstrator convention: dp_i/dt = -sum_j Fij, so add the negative of GIZMO's force
     Fout[1] -= cmag_E;
@@ -5080,6 +5119,10 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
         dampLdt[i] = 0.; dampLdtMax[i] = 0.; dampNb[i] = 0; dampNcap[i] = 0;
     }
 #endif
+#if OUTPUT_ENERGY_BUDGET
+    for (int i=0; i<N; ++i)
+        for (int c=0; c<EB_NCH; ++c) ebF[i][c][0] = ebF[i][c][1] = ebF[i][c][2] = 0.;
+#endif
     for (int i=0; i<N; ++i){
 
         // if (!(i % (N/VERBOSITY_PARTICLES))){
@@ -5219,6 +5262,19 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 int matIdR_ii = 0;
                 int matIdL_ii = 0;
 #endif
+#if OUTPUT_ENERGY_BUDGET
+                // the same face without the tensile repulsion (fab = 0), on copies: the
+                // solver rotates W and vFrame into the face frame in place
+                double FH[DIM+2];
+                {
+                    double WL0[DIM+2], WR0[DIM+2], vFr0[DIM];
+                    for (int d=0; d<DIM+2; ++d){ WL0[d] = WijL[ii][d]; WR0[d] = WijR[ii][d]; }
+                    for (int d=0; d<DIM; ++d) vFr0[d] = vFrame[ii][d];
+                    Riemann solver0 { WL0, WR0, vFr0, Aij[ii], i, matIdL_ii, matIdR_ii, *MeshlessEOS,
+                                      0.0, fSxxL, fSxyL, fSyyL, fSxxR, fSxyR, fSyyR };
+                    solver0.HLLCFlux(FH);
+                }
+#endif
                 Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i,
                                 matIdL_ii, matIdR_ii, *MeshlessEOS
 #if ELASTIC
@@ -5240,6 +5296,10 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 solver.HLLCFlux(Fij[ii]);
 #if ADIABATIC_FACE_CORRECTION
                 applyAdiabaticFaceCorrection(i, jj, ii, solver.faceP_M(), solver.faceS_M(), Fij[ii]);
+#endif
+#if OUTPUT_ENERGY_BUDGET
+                ebAddPair(i, jj, 0, FH[1], FH[2], FH[3]);
+                ebAddPair(i, jj, 1, Fij[ii][1] - FH[1], Fij[ii][2] - FH[2], Fij[ii][3] - FH[3]);
 #endif
 #if TORQUE_DIAG
                 // Pressure/Riemann channel: snapshot the torque of the pure HLLC
@@ -5889,6 +5949,13 @@ void Particles::updateState(const double &dt){
         u[i] = Q[0]/m[i]-.5*(vx[i]*vx[i]+vy[i]*vy[i]+vz[i]*vz[i]);
 #else
         u[i] = Q[0]/m[i]-.5*(vx[i]*vx[i]+vy[i]*vy[i]);
+#endif
+#if OUTPUT_ENERGY_BUDGET
+        if (ebCount){
+            const double vmx = .5*(vxi + vx[i]), vmy = .5*(vyi + vy[i]);
+            for (int c=0; c<EB_NCH; ++c)
+                ebU[i][c] -= dt/m[i]*(ebF[i][c][0] - vmx*ebF[i][c][1] - vmy*ebF[i][c][2]);
+        }
 #endif
 #if EOS != 1 // Ok for murnaghan
         if (u[i] <= 0.){
@@ -7516,6 +7583,16 @@ void Particles::dump2file(std::string filename, double simTime){
     HighFive::DataSet dampLdtRunDataSet = h5File.createDataSet<double>("/dampLdtRun", HighFive::DataSpace(N));
     HighFive::DataSet dampNbDataSet     = h5File.createDataSet<int>("/dampNb", HighFive::DataSpace(N));
     HighFive::DataSet dampNcapDataSet   = h5File.createDataSet<int>("/dampNcap", HighFive::DataSpace(N));
+#endif
+#if OUTPUT_ENERGY_BUDGET
+    {
+        const char *ebName[EB_NCH] = { "/ebH", "/ebR", "/ebS", "/ebSD", "/ebV", "/ebD" };
+        for (int c=0; c<EB_NCH; ++c){
+            std::vector<double> ebVec(N);
+            for (int k=0; k<N; ++k) ebVec[k] = ebU[k][c];
+            h5File.createDataSet<double>(ebName[c], HighFive::DataSpace(N)).write(ebVec);
+        }
+    }
 #endif
 #if TENSILE_CORRECTION && OUTPUT_FAB
     HighFive::DataSet fabAvgDataSet = h5File.createDataSet<double>("/fabAvg", HighFive::DataSpace(N));

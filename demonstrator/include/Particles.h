@@ -228,6 +228,20 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     double *dampLdt, *dampLdtMax, *dampLdtRun;
     int *dampNb, *dampNcap;
 #endif
+#if OUTPUT_ENERGY_BUDGET
+    /// Internal-energy budget, see OUTPUT_ENERGY_BUDGET. ebF: this flux pass's channel
+    /// fluxes (energy, momentum x, y), same sign convention as eF / vF; ebU: running
+    /// integral of each channel's du; ebCount = false for the discarded TIME_KDK predictor.
+    static constexpr int EB_NCH = 6;
+    double (*ebF)[EB_NCH][3];
+    double (*ebU)[EB_NCH];
+    bool ebCount { true };
+    /// pair (i, j) computed once (ENFORCE_FLUX_SYM): i gets +F, j the mirrored -F
+    void ebAddPair(int i, int j, int ch, double E, double px, double py){
+        ebF[i][ch][0] += E; ebF[i][ch][1] += px; ebF[i][ch][2] += py;
+        ebF[j][ch][0] -= E; ebF[j][ch][1] -= px; ebF[j][ch][2] -= py;
+    }
+#endif
     /// @param gp when non-null, additionally fills fabMonaghanGhosts for every
     ///           periodic-image pair (i, nnlGhosts[...]).
     void computeFabMonaghan(
