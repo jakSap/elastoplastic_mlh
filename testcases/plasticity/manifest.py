@@ -53,6 +53,8 @@ VARIANTS = {
                           "OUTPUT_FAB": 0},       # = tgate studies' tc0 + gate off (parameter.h #errors)
                    doc="tensile correction off (P-R4)"),
     "pps":    dict(flags={**PREF, "SOLID_2D_MODEL": 0}, doc="old plane-strain rate"),
+    "pns":    dict(flags={**PREF, "EXPLICIT_VOL_SEED_RHO0": 0},   # 2026-09-30: is the t=0 rho0 seed behind the P4 negE?
+                   doc="pref without the rho0 density seed (kernel-sum start)"),
     "legacy": dict(flags={}, doc="branch defaults (P1a)"),
     "base":   dict(flags={}, commit=BASE_COMMIT, doc="3835f4a itself (P1a)"),
     "gz":     dict(code="gizmo", doc="GIZMO MFM reference (P-R1)"),
@@ -127,7 +129,7 @@ TESTS = {
     **{f"P0b_{drv}": dict(tier="P0b", ic=("block", {"drive": drv, "rate": 0.1, "half": 1.0}),
                           rungs=["0.05", "0.025", "0.0125"], t_end=0.55, dump_dt=0.02,
                           box=(-3., -3., 3., 3.), group="std", material={},
-                          variants=["pref", "prr", "ptc0", "pps", "gz"],
+                          variants=["pref", "pns", "prr", "ptc0", "pps", "gz"],
                           check=("p0b", {"drive": drv, "rate": 0.1, "inner": 0.25,
                                          "tol_elastic": 0.01, "tol_plateau": 0.02, "tol_plateau_prr": 0.01,
                                          "tol_scatter": 0.02, "tol_gz": 0.02, "tol_tc": 0.005}))
@@ -136,7 +138,7 @@ TESTS = {
     "P2_plate": dict(tier="P2", ic=("slabs", {"L": 4.0, "H": 0.2, "up": 0.1}),
                      rungs=["0.02", "0.01", "0.005"], t_end=3.0, dump_dt=0.1,
                      box=(-8., 0., 8., 0.2), group="per", material={},
-                     variants=["pref", "prr", "ptc0", "pps", "gz"],
+                     variants=["pref", "pns", "prr", "ptc0", "pps", "gz"],
                      check=("p2", {"up": 0.1, "t_fit": (1.0, 3.0), "tol_U": 0.01, "tol_hel": 0.02,
                                    "tol_sigma": 0.01, "margin_gz": 0.005})),
     # ---- P3: thin flyer, release + attenuation (1D reference code) -----------------------
@@ -145,7 +147,7 @@ TESTS = {
     "P3_flyer": dict(tier="P3", ic=("flyer", {"Lf": 0.2, "Lt": 4.0, "H": 0.2, "vf": 0.2}),
                      rungs=["0.02", "0.01", "0.005"], t_end=3.0, dump_dt=0.05,
                      box=(-6., 0., 10., 0.2), group="per", material={},   # same aspect as P2: one GIZMO build
-                     variants=["pref", "prr", "ptc0", "gz"],
+                     variants=["pref", "pns", "prr", "ptc0", "gz"],
                      check=("p3", {"vf": 0.2, "Lf": 0.2, "Lt": 4.0, "gauges": (0.5, 1.0, 1.5, 2.0, 2.5, 3.0),
                                    "arrival_min": 1.0,
                                    "tol_peak": 0.03, "tol_arrival": 0.01, "margin_gz": 0.005,
@@ -154,7 +156,7 @@ TESTS = {
     "P4_taylor": dict(tier="P4", ic=("bars", {"L": 2.0, "W": 0.5, "v": 0.1}),
                       rungs=["0.05", "0.025", "0.0125", "0.00625"], t_end=12.0, dump_dt=0.25,
                       box=(-4., -2., 4., 2.), group="std", material={},
-                      variants=["pref", "prr", "ptc0", "gz"],
+                      variants=["pref", "pns", "prr", "ptc0", "gz"],
                       check=("p4", {"L": 2.0, "W": 0.5, "v": 0.1, "tol_Lconv": 0.01, "tol_Wconv": 0.03,
                                     "tol_Lgz": 0.01, "tol_Wgz": 0.03})),
 }
