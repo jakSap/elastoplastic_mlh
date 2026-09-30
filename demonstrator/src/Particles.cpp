@@ -3,6 +3,7 @@
 //
 
 #include "../include/Particles.h"
+#include "../include/Plasticity.h"
 
 // Kernel functions live in include/Kernel.h (selected via KERNEL_FUNCTION).
 
@@ -317,6 +318,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     numFlaws       = new int[numParticles]();
     numActiveFlaws = new int[numParticles]();
 #endif // FRAGMENTATION
+#if OUTPUT_PLASTIC_STRAIN
+    plasticStrain = new double[numParticles]();
+#endif
 #endif // ELASTIC
 
 #if RUNSPH
@@ -620,6 +624,9 @@ Particles::~Particles() {
     delete[] numFlaws;
     delete[] numActiveFlaws;
 #endif // FRAGMENTATION
+#if OUTPUT_PLASTIC_STRAIN
+    delete[] plasticStrain;
+#endif
 #endif // ELASTIC
 #if RUNSPH
 	//delete[] unimportant;
@@ -903,7 +910,7 @@ void Particles::computeDampBudget(
         const double Kj = MeshlessEOS->EOSBulkModulus(rhoj, Pj);
         const double mui = 0., muj = 0.; (void)matj;
 #endif
-        const double ci = sqrt((Ki + 4./3.*mui)/rho[i]), cj = sqrt((Kj + 4./3.*muj)/rhoj);
+        const double ci = sqrt((Ki + ELASTIC_LONG_MU_FAC*mui)/rho[i]), cj = sqrt((Kj + ELASTIC_LONG_MU_FAC*muj)/rhoj);
         const double wtB = rho[i]*ci*rhoj*cj / (rho[i]*ci + rhoj*cj) * FNormT
                          * (1. + TENSILE_CORRECTION_DAMP * f);
         return wtB * (m[i] + mj) / (m[i]*mj);
@@ -1128,7 +1135,7 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     const double Kj = MeshlessEOS->EOSBulkModulus(rhoj, PJ[jj]);
     const double mui = 0., muj = 0.;
 #endif
-    const double ci  = sqrt((Ki + 4./3.*mui)/rhoi), cj  = sqrt((Kj + 4./3.*muj)/rhoj);
+    const double ci  = sqrt((Ki + ELASTIC_LONG_MU_FAC*mui)/rhoi), cj  = sqrt((Kj + ELASTIC_LONG_MU_FAC*muj)/rhoj);
     const double cTi = sqrt(mui/rhoi),               cTj = sqrt(muj/rhoj);
     double wt_r = rhoi*ci*rhoj*cj / (rhoi*ci + rhoj*cj) * FNormT;
 #if TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL
@@ -1407,7 +1414,7 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     const double Kj = MeshlessEOS->EOSBulkModulus(rhoj, PJ[jj]);
     const double mui = 0., muj = 0.;
 #endif
-    const double ci  = sqrt((Ki + 4./3.*mui)/rhoi), cj  = sqrt((Kj + 4./3.*muj)/rhoj);
+    const double ci  = sqrt((Ki + ELASTIC_LONG_MU_FAC*mui)/rhoi), cj  = sqrt((Kj + ELASTIC_LONG_MU_FAC*muj)/rhoj);
     const double cTi = sqrt(mui/rhoi),               cTj = sqrt(muj/rhoj);
     const double wt_r = rhoi*ci*rhoj*cj / (rhoi*ci + rhoj*cj) * FNormT;
     const double denT = rhoi*cTi + rhoj*cTj;
@@ -1541,9 +1548,10 @@ void Particles::integrateStressTensor(const double &dt) {
 
         // Traceless viscous strain rate (eq. 36-41, first line each)
 #if DIM == 2
-        const double visc_xx =  (4./3.)*mu*dvx_dx - (2./3.)*mu*dvy_dy;
-        const double visc_yy = -(2./3.)*mu*dvx_dx + (4./3.)*mu*dvy_dy;
-        const double visc_xy = mu * (dvy_dx + dvx_dy);
+        // plane strain or true 2D, see SOLID_2D_MODEL
+        double visc_xx, visc_yy, visc_xy;
+        Plasticity::devRate2D(mu, dvx_dx, dvx_dy, dvy_dx, dvy_dy,
+                              visc_xx, visc_yy, visc_xy);
 #elif DIM == 3
         const double visc_xx =  (4./3.)*mu*dvx_dx - (2./3.)*mu*dvy_dy - (2./3.)*mu*dvz_dz;
         const double visc_yy = -(2./3.)*mu*dvx_dx + (4./3.)*mu*dvy_dy - (2./3.)*mu*dvz_dz;
@@ -1639,21 +1647,20 @@ void Particles::integrateStressTensor(const double &dt) {
             const double Y = YIELD_STRESS;   // legacy constant von Mises
 #endif
 #if DIM == 2
-            const double J2 = 0.5 * (Sxx[i]*Sxx[i] + Syy[i]*Syy[i]
-                                      + 2.0*Sxy[i]*Sxy[i]);
-            const double Y2_over_d = Y * Y / 2.0;
+            const double J2 = Plasticity::J2_2D(Sxx[i], Syy[i], Sxy[i]);
 #else
-            const double J2 = 0.5 * (Sxx[i]*Sxx[i] + Syy[i]*Syy[i] + Szz[i]*Szz[i]
-                                      + 2.0*(Sxy[i]*Sxy[i] + Sxz[i]*Sxz[i] + Syz[i]*Syz[i]));
-            const double Y2_over_d = Y * Y / 3.0;
+            const double J2 = Plasticity::J2_3D(Sxx[i], Syy[i], Szz[i],
+                                                Sxy[i], Sxz[i], Syz[i]);
 #endif
-            // Radial return: scale S so that J2 -> Y2_over_d. Since J2 is
-            // quadratic in S, the factor is the square root of the ratio.
-            if (J2 > Y2_over_d && J2 > 0.0) {
-                const double f = std::sqrt(Y2_over_d / J2);
+            // Scale S back to (or, YIELD_RETURN 1, inside) J2 = Y^2/DIM.
+            const double f = Plasticity::yieldFactor(J2, Y);
+            if (f < 1.0) {
                 Sxx[i] *= f;  Syy[i] *= f;  Sxy[i] *= f;
 #if DIM == 3
                 Szz[i] *= f;  Sxz[i] *= f;  Syz[i] *= f;
+#endif
+#if OUTPUT_PLASTIC_STRAIN
+                plasticStrain[i] += Plasticity::plasticShearIncrement(J2, f, mu);
 #endif
             }
         }
@@ -1701,7 +1708,7 @@ void Particles::integrateDamage(const double &dt){
 
         if (nActive > 0){
             // Crack-growth speed: 0.4 x longitudinal elastic wave speed.
-            const double cl2 = (K + 4.0/3.0 * muS * (1.0 - Di)) / rho[i];
+            const double cl2 = (K + ELASTIC_LONG_MU_FAC * muS * (1.0 - Di)) / rho[i];
             const double cg  = 0.4 * std::sqrt(cl2 > 0.0 ? cl2 : 0.0);
             dddt[i] = nActive * cg / sml[i];   // d(damage)/dt; damage is DIM-root
             damage[i] += dt * dddt[i];
@@ -4376,7 +4383,7 @@ double Particles::compElasticTimestep(){
         double Ki  = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
         double mui = 0.;
 #endif
-        double ci = sqrt((Ki + 4.0/3.0 * mui) / rho[i]);
+        double ci = sqrt((Ki + ELASTIC_LONG_MU_FAC * mui) / rho[i]);
 
         for (int jn=0; jn<noi[i]; ++jn){
             int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
@@ -4388,7 +4395,7 @@ double Particles::compElasticTimestep(){
             double Kj  = MeshlessEOS->EOSBulkModulus(rho[j], P[j]);
             double muj = 0.;
 #endif
-            double cj = sqrt((Kj + 4.0/3.0 * muj) / rho[j]);
+            double cj = sqrt((Kj + ELASTIC_LONG_MU_FAC * muj) / rho[j]);
 
             double xij[DIM], vij[DIM];
             xij[0] = x[i] - x[j];
@@ -7509,6 +7516,9 @@ void Particles::dump2file(std::string filename, double simTime){
     HighFive::DataSet damageTotalDataSet = h5File.createDataSet<double>("/damageTotal", HighFive::DataSpace(N));
     HighFive::DataSet numActiveFlawsDataSet = h5File.createDataSet<int>("/numActiveFlaws", HighFive::DataSpace(N));
 #endif
+#if OUTPUT_PLASTIC_STRAIN
+    HighFive::DataSet plasticStrainDataSet = h5File.createDataSet<double>("/plasticStrain", HighFive::DataSpace(N));
+#endif
 #endif
 #if OUTPUT_DAMP_DIAG
     HighFive::DataSet dampLdtDataSet    = h5File.createDataSet<double>("/dampLdt", HighFive::DataSpace(N));
@@ -7680,6 +7690,9 @@ void Particles::dump2file(std::string filename, double simTime){
     damageDataSet.write(damageVec);
     damageTotalDataSet.write(damageTotalVec);
     numActiveFlawsDataSet.write(numActiveFlawsVec);
+#endif
+#if OUTPUT_PLASTIC_STRAIN
+    plasticStrainDataSet.write(std::vector<double>(plasticStrain, plasticStrain + N));
 #endif
 #endif
 #if OUTPUT_DAMP_DIAG

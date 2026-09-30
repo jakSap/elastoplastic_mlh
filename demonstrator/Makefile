@@ -170,4 +170,11 @@ test-damage: | $(TRGTDIR)
 	@echo "Running damage/plasticity test ..."
 	@$(TRGTDIR)/test_damage
 
-.PHONY: all debug clean cleaner install prepare-run binac binac-load-modules test-kernel test-damage check-flags
+# Plasticity unit test P0a (MA-Obsidian/2026-09-30-testplan-plastisch.md): header-only
+# include/Plasticity.h, every SOLID_2D_MODEL / YIELD_RETURN mode from one build.
+test-plasticity: | $(TRGTDIR)
+	@echo "Building plasticity unit test (P0a) ..."
+	@g++ -std=c++11 -O2 -I$(INCLDIR) tests/test_plasticity.cpp -o $(TRGTDIR)/test_plasticity
+	@$(TRGTDIR)/test_plasticity
+
+.PHONY: all debug clean cleaner install prepare-run binac binac-load-modules test-kernel test-damage test-plasticity check-flags
