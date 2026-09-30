@@ -495,8 +495,11 @@ def cmd_status(args):
     print("study    ", S.path)
     print("commit   ", S.meta["commit"][:7], "on", S.meta["branch"], "  harness", S.meta["harness"])
     head = sh(["git", "-C", M.REPO, "rev-parse", "--short", M.BRANCH], check=False)
-    if head != S.meta["commit"][:7]:
-        print("NOTE      branch %s is now at %s (study pins %s)" % (M.BRANCH, head, S.meta["commit"][:7]))
+    moved = subprocess.run(["git", "-C", M.REPO, "diff", "--quiet", S.meta["commit"], M.BRANCH, "--",
+                            "demonstrator"]).returncode
+    if moved:
+        print("NOTE      demonstrator/ on %s (%s) differs from the study's commit %s -- results stay tied to %s;"
+              " pin a new commit only when told to" % (M.BRANCH, head, S.meta["commit"][:7], S.meta["commit"][:7]))
     if live.COMMIT != M.COMMIT:
         print("NOTE      live manifest pins %s -> this study is not the current one" % live.COMMIT)
     # errors first (elastic plan rule 6)
