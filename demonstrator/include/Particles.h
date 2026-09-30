@@ -499,6 +499,21 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     void updateStateAndPosition(const double &dt, const Domain &domain);
     void updateState(const double &dt);
     void moveParticles(const double &dt, const Domain &domain);
+#if MOMENTUM_PREF
+    /// reference pressure removed from the momentum flux in collectFluxes (see MOMENTUM_PREF)
+    double momentumPref { 0. };
+#endif
+#if TIME_RK3
+    /// SSP-RK3 stage store U0 (see TIME_RK3): positions, velocity, specific total energy
+    /// e = u + v^2/2, ln rhoExplicit and S at the start of the step.
+    std::vector<double> rkX, rkY, rkZ, rkVx, rkVy, rkVz, rkE, rkLnRho;
+#if ELASTIC
+    std::vector<double> rkSxx, rkSxy, rkSyy, rkSxz, rkSyz, rkSzz;
+#endif
+    void rkSave();
+    /// U <- a U0 + b U (a + b = 1); positions by minimum image in the periodic box.
+    void rkBlend(double a, double b, const Domain &domain);
+#endif
 
 #if ELASTIC
     void slopeLimiterStress(Particles *ghostParticles=nullptr);

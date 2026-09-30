@@ -25,6 +25,10 @@ private:
     std::vector<std::vector<double>> x {}, v {};
     std::vector<int> matId {};
     bool hasSml { false };
+#if EXPLICIT_VOL_SEED_IC
+    // /rho: density at t = 0 that seeds rhoExplicit (required under EXPLICIT_VOL_SEED_IC)
+    std::vector<double> rhoIC {};
+#endif
 #if ELASTIC
     // Optional initial deviatoric stress, same dataset names as the snapshot
     // output (/Sxx, /Sxy, /Syy [, /Sxz, /Syz, /Szz]), so a snapshot can be fed

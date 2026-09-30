@@ -1189,6 +1189,75 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   2 = as 1, gradient mapped to the midpoint geometry
 #define TIME_KDK_FIELD_DRIFT 2
 
+// ---------------------------------------------------------------------------
+// Third-order study 2026-10-01 (branch thirdorder, MA-Obsidian/2026-10-01-dritte-ordnung.md).
+// Hopkins (2015) sec. 2.8: higher order "by increasing the order of the gradient" -- plus
+// higher-order reconstruction, time integration and quadrature/effective faces. Measured on
+// the ideal-gas soundwave (truncation prototype testcases/thirdorder_20261001/proto): raising
+// GRADIENT_ORDER alone leaves every equation second order; the momentum equation is held at
+// O(h^2) by the face closure sum_j A_ij (the background pressure P0 sum_j A_ij), which is
+// O(h^2) with the first-order psiTilde even for exact volumes, and O(h^4) with the
+// cubic-exact weights. All three flags default to 0 (bit-identical).
+// ---------------------------------------------------------------------------
+
+/// Build the effective faces A_ij = V_i psiTilde_j(x_i) - V_j psiTilde_i(x_j) from the
+/// higher-order least-squares gradient weights psijTildeGrad (GRADIENT_ORDER >= 2) instead of
+/// the first-order psijTilde. A_ij stays antisymmetric for any weights, so conservation is
+/// unchanged; any consistent gradient weights also keep sum_j psiTilde_j (x_j - x_i)^T = I.
+/// With the cubic-exact weights (GRADIENT_ORDER 3) the face closure sum_j A_ij of a smoothly
+/// deformed lattice drops from O(h^2) to O(h^4), and on a point-symmetric stencil the central
+/// flux operator becomes fourth order even with LINEAR face reconstruction (the cubic weights
+/// annihilate the O(D^3) midpoint term). Particles on the GRAD_MAT_COND_MAX fallback carry the
+/// first-order weights there, so the faces fall back with them.
+///   0 = first-order weights (Hopkins 2015 / GIZMO)
+///   1 = higher-order weights psijTildeGrad
+#define FACE_GRAD_WEIGHTS 0
+
+/// With FACE_GRAD_WEIGHTS, 78 % of the faces of the square lattice point against x_j - x_i (the
+/// negative outer coefficients of the cubic-exact weights, like a fourth-order difference), and
+/// the Riemann solver upwinds along A_ij. 1 = hand the solver the two sides in geometric order
+/// for those faces (A_ij . (x_j - x_i) < 0). Measured 2026-10-01: does NOT stabilise (the growth
+/// comes from the background-pressure closure, see MOMENTUM_PREF; linearised growth 3.6 -> 5.0)
+/// and, being a switch on the sign of A.dx, it injects a non-smooth error where faces nearly
+/// perpendicular to dx flip with the wave phase. Kept for the record; leave at 0.
+#define FACE_GRAD_WEIGHTS_SWAP 0
+
+/// Seed rhoExplicit at t = 0 from an IC dataset /rho instead of the kernel-sum density (and
+/// skip EXPLICIT_VOL_SEED_SKIP). The kernel sum is a smoothed density, its error O(h^2); a
+/// third-order run needs the density to third order from the start, which the IC generator
+/// knows exactly (point values rho(x_i)). The IC must carry /rho.
+///   0 = seed from the kernel density (default)
+///   1 = seed from /rho
+#define EXPLICIT_VOL_SEED_IC 0
+
+/// Remove a global reference pressure from the MOMENTUM flux: F_mom,ij = (P*_ij - P_ref) A_ij,
+/// P_ref = volume-weighted mean pressure of the pass. A_ij = -A_ji, so sum_i sum_j A_ij P_ref = 0
+/// and momentum stays exactly conserved; the energy flux keeps the full P* (compression work of
+/// the background pressure is physical), so total energy stays conserved too.
+/// Why: a uniform pressure exerts no force in the continuum, but P0 sum_j A_ij does in the scheme.
+/// With the first-order faces that closure is O(h^2) (it limits the ideal-gas soundwave to second
+/// order) and it is also the weak restoring force of the particle lattice; with FACE_GRAD_WEIGHTS it
+/// is O(h^4) for smooth deformations but ANTI-restoring at mid wavenumbers: linearised MFM at rest
+/// (proto/mfm_stab.py, n = 16) has real eigenvalues +3.6 (growth ~ 1/dx) with P0 = 0.6, none
+/// without it. Removing P_ref leaves the lattice modes neutral (max Re lambda ~ 1e-9).
+/// Only the constant part of the pressure is removed, so this cures the closure error exactly for
+/// small perturbations of a uniform state, not for O(1) pressure variations.
+///   0 = off
+///   1 = P_ref = volume-weighted mean pressure
+#define MOMENTUM_PREF 0
+
+/// Third-order strong-stability-preserving Runge-Kutta (Shu & Osher 1988) instead of the
+/// kick-drift schemes above:
+///   U1 = U0 + dt L(U0),  U2 = 3/4 U0 + 1/4 (U1 + dt L(U1)),  U3 = 1/3 U0 + 2/3 (U2 + dt L(U2)).
+/// Every stage rebuilds the full state at its own geometry (neighbour search, h, density,
+/// gradients, faces, fluxes); the stage update is the Euler step x += dt v, (m v, E) -= dt F,
+/// ln rhoExplicit -= dt div v, S += dt dS/dt, and the stages are combined linearly in x
+/// (minimum image), v, the specific total energy (so E stays conserved), ln rhoExplicit and S.
+/// No half-step predictor (RECON_TIME_PRED 0). Three flux passes per step. Fixed timestep only.
+///   0 = off
+///   1 = SSP-RK3
+#define TIME_RK3 0
+
 /// |S_M|/c_s above which the face is treated as doing shock work and the
 /// Godunov energy flux is kept unchanged. GIZMO: epsilon_entropic_eos_big,
 /// "can be anything from (small number = more diffusive, less accurate entropy
@@ -1240,6 +1309,18 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #endif
 #if TIME_KDK && RECON_TIME_PRED
 #error "TIME_KDK evaluates the fluxes at the sync time; the half-step predictor would move them to t + dt/2: set RECON_TIME_PRED 0."
+#endif
+#if FACE_GRAD_WEIGHTS && (!USE_HLLC || FRAGMENTATION || OUTPUT_ENERGY_BUDGET)
+#error "FACE_GRAD_WEIGHTS: the backward-face swap is wired into the HLLC solves only (no damage, no energy budget)."
+#endif
+#if FACE_GRAD_WEIGHTS && !SECOND_ORDER_GRADIENTS
+#error "FACE_GRAD_WEIGHTS builds the faces from the higher-order gradient weights: set GRADIENT_ORDER >= 2."
+#endif
+#if TIME_RK3 && (TIME_KDK || DRIFT_KDK || TIME_DKD || RECON_TIME_PRED || FRAME_HALFSTEP)
+#error "TIME_RK3 is its own time integrator: set TIME_KDK, DRIFT_KDK, TIME_DKD, RECON_TIME_PRED and FRAME_HALFSTEP to 0."
+#endif
+#if TIME_RK3 && (ADAPTIVE_TIMESTEP || !ELASTIC)
+#error "TIME_RK3 is implemented for a fixed timestep on the ELASTIC updateState/moveParticles path."
 #endif
 #if TIME_KDK_FIELD_DRIFT && !TIME_KDK
 #error "TIME_KDK_FIELD_DRIFT changes how TIME_KDK advances S and rhoExplicit: enable TIME_KDK."
@@ -1587,6 +1668,13 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #endif
 #if TIME_KDK && (FRAGMENTATION || AM_TORQUE_TRACK || RUNSPH)
 #error "TIME_KDK: damage, the AM_METHOD 4-6 repairs and SPH are not wired into the half-kick store."
+#endif
+#if TIME_RK3 && (!MOVE_PARTICLES || FRAGMENTATION || AM_TORQUE_TRACK || RUNSPH || TORQUE_DIAG || AM_SELFTEST \
+                 || TENSILE_CORRECTION_DAMP_LIMIT || OUTPUT_DAMP_DIAG || OUTPUT_ENERGY_BUDGET)
+#error "TIME_RK3: moving particles only; damage, AM repairs/diagnostics, SPH, the damping limiter and the energy budget are not wired into the stages."
+#endif
+#if EXPLICIT_VOL_SEED_IC && (!EXPLICIT_VOL_INTEGRATION || EXPLICIT_VOL_SEED_RHO0)
+#error "EXPLICIT_VOL_SEED_IC seeds rhoExplicit from the IC: needs EXPLICIT_VOL_INTEGRATION 1 and EXPLICIT_VOL_SEED_RHO0 0."
 #endif
 
 #if OUTPUT_ENERGY_BUDGET && !(DIM == 2 && ELASTIC && USE_HLLC && GIZMO_ELASTIC_FLUX && TENSILE_CORRECTION && ENFORCE_FLUX_SYM && MESHLESS_FINITE_MASS && !PERIODIC_BOUNDARIES && !FRAGMENTATION && !ADIABATIC_FACE_CORRECTION && AM_METHOD == 0)

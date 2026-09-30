@@ -103,6 +103,190 @@ void MeshlessScheme::run(){
     double kdkDtPrev = 0.;      // dt of the step the next closing half kick belongs to
 #endif
 
+#if TIME_RK3
+    // ---- SSP-RK3 (see TIME_RK3 in parameter.h) ------------------------------
+    // One full rates pass at the current state: geometry, density, gradients,
+    // faces, fluxes. Leaves vF/eF (updateState), grad v (explicit volume, S)
+    // and the working rho/P at this stage's state.
+    auto rk3Rates = [&](){
+#if VARIABLE_SML
+        double nnsRadius = std::max(config.kernelSize, particles->hMax());
+#else
+        double nnsRadius = config.kernelSize;
+#endif
+        int nnsRetry = 0;
+        bool nnsRetryNeeded;
+        do {
+#if !PERIODIC_BOUNDARIES
+            double domainLimits[DIM*2];
+            particles->getDomainLimits(domainLimits);
+            Domain::Cell boundingBox { domainLimits };
+            domain.bounds = boundingBox;
+            domain.createGrid(nnsRadius);
+#elif VARIABLE_SML
+            if (nnsRadius > domain.cellSizeX) domain.createGrid(nnsRadius);
+#endif
+            particles->assignParticlesAndCells(domain);
+#if PERIODIC_BOUNDARIES
+            particles->createGhostParticles(domain, ghostParticles, nnsRadius);
+#endif
+            particles->gridNNS(domain, nnsRadius);
+#if PERIODIC_BOUNDARIES
+            particles->ghostNNS(domain, ghostParticles, nnsRadius);
+#endif
+#if VARIABLE_SML
+#if PERIODIC_BOUNDARIES
+            particles->updateAllSmoothingLengths(ghostParticles);
+#else
+            particles->updateAllSmoothingLengths();
+#endif
+            const double hMaxAfterSolve = particles->hMax();
+            nnsRetryNeeded = (hMaxAfterSolve > nnsRadius);
+            if (nnsRetryNeeded){
+                if (++nnsRetry > NNS_MAX_RETRIES){
+                    Logger(ERROR) << "      > h_max=" << hMaxAfterSolve << " still exceeds NNS search radius="
+                                  << nnsRadius << " after " << NNS_MAX_RETRIES << " retries. Aborting.";
+                    exit(8);
+                }
+                nnsRadius = hMaxAfterSolve * NNS_SEARCH_MARGIN;
+            }
+#else
+            nnsRetryNeeded = false;
+#endif
+        } while (nnsRetryNeeded);
+        particles->compDensity();
+#if PERIODIC_BOUNDARIES
+        particles->compDensity(ghostParticles);
+#endif
+#if EXPLICIT_VOL_INTEGRATION
+        particles->applyExplicitVolumeOverride();
+#endif
+        particles->compPressure();
+#if PERIODIC_BOUNDARIES
+        particles->updateGhostState(ghostParticles);
+        particles->compPsijTilde(helper, ghostParticles);
+        particles->gradient(particles->rho, particles->rhoGrad, ghostParticles.rho, ghostParticles);
+        particles->gradient(particles->vx, particles->vxGrad, ghostParticles.vx, ghostParticles);
+        particles->gradient(particles->vy, particles->vyGrad, ghostParticles.vy, ghostParticles);
+#if DIM == 3
+        particles->gradient(particles->vz, particles->vzGrad, ghostParticles.vz, ghostParticles);
+#endif
+        particles->gradient(particles->P, particles->PGrad, ghostParticles.P, ghostParticles);
+#if ELASTIC
+        particles->gradient(particles->Sxx, particles->SxxGrad, ghostParticles.Sxx, ghostParticles);
+        particles->gradient(particles->Sxy, particles->SxyGrad, ghostParticles.Sxy, ghostParticles);
+        particles->gradient(particles->Syy, particles->SyyGrad, ghostParticles.Syy, ghostParticles);
+#if DIM == 3
+        particles->gradient(particles->Sxz, particles->SxzGrad, ghostParticles.Sxz, ghostParticles);
+        particles->gradient(particles->Syz, particles->SyzGrad, ghostParticles.Syz, ghostParticles);
+        particles->gradient(particles->Szz, particles->SzzGrad, ghostParticles.Szz, ghostParticles);
+#endif
+#endif // ELASTIC
+        particles->updateGhostGradients(ghostParticles);
+#if SLOPE_LIMITING
+        particles->slopeLimiter(&ghostParticles);
+#if ELASTIC
+        particles->slopeLimiterStress(&ghostParticles);
+#endif
+        particles->updateGhostGradients(ghostParticles);
+#endif // SLOPE_LIMITING
+#else // PERIODIC_BOUNDARIES
+        particles->compPsijTilde(helper);
+        particles->gradient(particles->rho, particles->rhoGrad);
+        particles->gradient(particles->vx, particles->vxGrad);
+        particles->gradient(particles->vy, particles->vyGrad);
+#if DIM == 3
+        particles->gradient(particles->vz, particles->vzGrad);
+#endif
+        particles->gradient(particles->P, particles->PGrad);
+#if ELASTIC
+        particles->gradient(particles->Sxx, particles->SxxGrad);
+        particles->gradient(particles->Sxy, particles->SxyGrad);
+        particles->gradient(particles->Syy, particles->SyyGrad);
+#if DIM == 3
+        particles->gradient(particles->Sxz, particles->SxzGrad);
+        particles->gradient(particles->Syz, particles->SyzGrad);
+        particles->gradient(particles->Szz, particles->SzzGrad);
+#endif
+#endif // ELASTIC
+#if SLOPE_LIMITING
+        particles->slopeLimiter();
+#if ELASTIC
+        particles->slopeLimiterStress();
+#endif
+#endif // SLOPE_LIMITING
+#if SURFACE_GRAD_BLEND && SECOND_ORDER_GRADIENTS
+        particles->compFirstOrderGradients();
+#endif
+#if POLY_RECONSTRUCTION_ACTIVE
+        particles->compPolyCoefficients();
+#endif
+#endif // PERIODIC_BOUNDARIES
+        particles->compEffectiveFace();
+#if ELASTIC_FACE_MODE == 1
+        particles->compElasticAreaCorrection();
+#endif
+#if PERIODIC_BOUNDARIES
+        particles->compEffectiveFace(ghostParticles);
+#endif
+#if TENSILE_CORRECTION
+#if PERIODIC_BOUNDARIES
+        particles->computeFabMonaghan(&ghostParticles);
+#else
+        particles->computeFabMonaghan();
+#endif
+#endif
+        particles->compRiemannStatesLR(0.);
+#if PERIODIC_BOUNDARIES
+        particles->compRiemannStatesLR(0., ghostParticles);
+        particles->solveRiemannProblems(ghostParticles);
+#else
+        Particles ghostParticlesDummy { 0, particles->MeshlessEOS, true };
+        particles->solveRiemannProblems(ghostParticlesDummy);
+#endif
+        particles->collectFluxes(helper);
+    };
+    // Seed the explicit density at the very first pass (from the kernel sum, or
+    // from the IC under EXPLICIT_VOL_SEED_IC), so every stage has a valid store.
+#if EXPLICIT_VOL_INTEGRATION
+    particles->explicitVolSeedSkip = 0;
+#endif
+    const double rkA[3] = { 0., .75, 1./3. };
+    const double rkB[3] = { 1., .25, 2./3. };
+    bool rkFinished = false;
+    do {
+        Logger(INFO) << "  > TIME: " << t << ", STEP: " << step;
+        timeStep = config.timeStep;
+        for (int s = 0; s < 3; ++s){
+            Logger(INFO) << "    > RK3 stage " << s+1;
+            rk3Rates();
+            if (s == 0){
+                // the rates pass only derives (rho, P, gradients, fluxes) from the
+                // state, so the store and the snapshot see the solution at t^n
+                particles->rkSave();
+                writeDumpIfDue();
+                if (t >= config.timeEnd){
+                    Logger(INFO) << "    > t = " << t << " -> FINISHED!";
+                    rkFinished = true;
+                    break;
+                }
+            }
+            // Euler step from this stage's state: drift with its v first
+            particles->moveParticles(timeStep, domain);
+            particles->updateState(timeStep);
+#if ELASTIC
+            particles->integrateStressTensor(timeStep);
+#endif
+#if EXPLICIT_VOL_INTEGRATION
+            particles->integrateExplicitVolumeHalfStep(timeStep, /*finalize=*/true);
+#endif
+            if (s > 0) particles->rkBlend(rkA[s], rkB[s], domain);
+        }
+        if (rkFinished) break;
+        t += timeStep;
+        ++step;
+    } while (t < config.timeEnd + timeStep);
+#else // TIME_RK3
     do {
         Logger(INFO) << "  > TIME: " << t << ", STEP: " << step;
 
@@ -764,6 +948,7 @@ void MeshlessScheme::run(){
         // END DEBUGGING
 
     } while(t<config.timeEnd+timeStep);
+#endif // TIME_RK3
 
     double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - tStart).count() / 60.0;
     Logger(INFO) << "Total wall-clock time: " << elapsed << " min";

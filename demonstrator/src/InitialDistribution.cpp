@@ -31,6 +31,12 @@ InitialDistribution::InitialDistribution(const std::string &file){
         smlSet.read(sml);
         hasSml = true;
     }
+#if EXPLICIT_VOL_SEED_IC
+    if (!h5file.exist("/rho")) {
+        throw std::runtime_error("EXPLICIT_VOL_SEED_IC is enabled but the IC file has no /rho dataset.");
+    }
+    h5file.getDataSet("/rho").read(rhoIC);
+#endif
 #if ELASTIC
     // optional initial deviatoric stress (all components or none)
     {
@@ -107,6 +113,12 @@ void InitialDistribution::getAllParticles(Particles &particles, double defaultSm
                   || (int)numFlaws.size() != numberOfParticles){
         throw std::length_error("Length of /flaws or /numFlaws does not match number of particles.");
     }
+#endif
+#if EXPLICIT_VOL_SEED_IC
+    if ((int)rhoIC.size() != numberOfParticles){
+        throw std::length_error("Length of /rho does not match number of particles.");
+    }
+    for (int p = 0; p < numberOfParticles; ++p) particles.rhoExplicit[p] = rhoIC[p];
 #endif
     std::vector<std::vector<double>>::iterator xit = x.begin();
     std::vector<std::vector<double>>::iterator vit = v.begin();

@@ -2828,6 +2828,19 @@ void Particles::applyExplicitVolumeOverride(){
     }
     return;
 #endif
+#if EXPLICIT_VOL_SEED_IC
+    // rhoExplicit already holds the IC's /rho (InitialDistribution::getAllParticles):
+    // use it from the very first pass, no seed-skip step.
+    if (!explicitVolInitialized){
+        for (int i = 0; i < N; ++i){
+            rhoKernel[i] = rho[i];
+            rho[i]       = rhoExplicit[i];
+        }
+        explicitVolInitialized = true;
+        explicitVolSeedSkip = 0;
+        return;
+    }
+#endif
     // Skip the first EXPLICIT_VOL_SEED_SKIP step(s): keep the working rho at the
     // kernel density so the t=0 startup-NNS truncation (~0.89) self-heals by
     // re-summation before it seeds the (re-summation-free) advected density.
@@ -4155,9 +4168,15 @@ void Particles::compEffectiveFace(){
             // the faces from Mass/Density.
             const double Vi  = m[i]  / rho[i];
             const double Vji = m[ji] / rho[ji];
+#if FACE_GRAD_WEIGHTS
+            // Faces from the higher-order gradient weights (see FACE_GRAD_WEIGHTS).
+            auto *psiF = psijTildeGrad_xi;
+#else
+            auto *psiF = psijTilde_xi;
+#endif
             for (int alpha=0; alpha<DIM; ++alpha){
-                Aij[i*MAX_NUM_INTERACTIONS+j][alpha] = Vi*psijTilde_xi[i*MAX_NUM_INTERACTIONS+j][alpha]
-                        - Vji*psijTilde_xi[ij+ji*MAX_NUM_INTERACTIONS][alpha];
+                Aij[i*MAX_NUM_INTERACTIONS+j][alpha] = Vi*psiF[i*MAX_NUM_INTERACTIONS+j][alpha]
+                        - Vji*psiF[ij+ji*MAX_NUM_INTERACTIONS][alpha];
 #if ELASTIC_FACE_MODE == 3
                 AhalfI[i*MAX_NUM_INTERACTIONS+j][alpha] = Vi*psijTilde_xi[i*MAX_NUM_INTERACTIONS+j][alpha];
                 AhalfJ[i*MAX_NUM_INTERACTIONS+j][alpha] = Vji*psijTilde_xi[ij+ji*MAX_NUM_INTERACTIONS][alpha];
@@ -5280,6 +5299,29 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                     solver0.HLLCFlux(FH);
                 }
 #endif
+#if FACE_GRAD_WEIGHTS && FACE_GRAD_WEIGHTS_SWAP
+                // Backward face (see FACE_GRAD_WEIGHTS_SWAP): the higher-order weights make A_ij
+                // point against x_j - x_i for the farther neighbours (like the negative outer
+                // coefficients of a fourth-order difference). The solver upwinds along A_ij,
+                // so without this the pair is anti-dissipative. Hand it the two sides in
+                // geometric order instead; the flux P* A_ij keeps its vector.
+                {
+                    double Ad = Aij[ii][0]*(x[nnl[ii]] - x[i]) + Aij[ii][1]*(y[nnl[ii]] - y[i]);
+#if DIM == 3
+                    Ad += Aij[ii][2]*(z[nnl[ii]] - z[i]);
+#endif
+                    if (Ad < 0.){
+                        for (int d=0; d<DIM+2; ++d) std::swap(WijL[ii][d], WijR[ii][d]);
+                        std::swap(matIdL_ii, matIdR_ii);
+#if ELASTIC
+                        std::swap(fSxxL, fSxxR); std::swap(fSxyL, fSxyR); std::swap(fSyyL, fSyyR);
+#if DIM == 3
+                        std::swap(fSxzL, fSxzR); std::swap(fSyzL, fSyzR); std::swap(fSzzL, fSzzR);
+#endif
+#endif
+                    }
+                }
+#endif
                 Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i,
                                 matIdL_ii, matIdR_ii, *MeshlessEOS
 #if ELASTIC
@@ -5512,6 +5554,29 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 // WijLGhosts) and the L slots the i-side. Passing the stress the
                 // other way round -- as this call site used to -- silently hands
                 // the solver each side's neighbour stress.
+#if FACE_GRAD_WEIGHTS && FACE_GRAD_WEIGHTS_SWAP
+                // Backward face (see FACE_GRAD_WEIGHTS_SWAP): the higher-order weights make A_ij
+                // point against x_j - x_i for the farther neighbours (like the negative outer
+                // coefficients of a fourth-order difference). The solver upwinds along A_ij,
+                // so without this the pair is anti-dissipative. Hand it the two sides in
+                // geometric order instead; the flux P* A_ij keeps its vector.
+                {
+                    double Ad = AijGhosts[ii][0]*(ghostParticles.x[nnlGhosts[ii]] - x[i]) + AijGhosts[ii][1]*(ghostParticles.y[nnlGhosts[ii]] - y[i]);
+#if DIM == 3
+                    Ad += AijGhosts[ii][2]*(ghostParticles.z[nnlGhosts[ii]] - z[i]);
+#endif
+                    if (Ad < 0.){
+                        for (int d=0; d<DIM+2; ++d) std::swap(WijLGhosts[ii][d], WijRGhosts[ii][d]);
+                        std::swap(matIdL_g, matIdR_g);
+#if ELASTIC
+                        std::swap(fSxxL, fSxxR); std::swap(fSxyL, fSxyR); std::swap(fSyyL, fSyyR);
+#if DIM == 3
+                        std::swap(fSxzL, fSxzR); std::swap(fSyzL, fSyzR); std::swap(fSzzL, fSzzR);
+#endif
+#endif
+                    }
+                }
+#endif
                 Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i,
                                matIdL_g, matIdR_g, *MeshlessEOS
 #if ELASTIC
@@ -5627,6 +5692,13 @@ void Particles::collectFluxes(Helper &helper){
         && diagStepCounter - diagActivatedAt < DIAG_WINDOW_STEPS) {
         diagActive = true;
     }
+#endif
+#if MOMENTUM_PREF
+    // Global reference pressure for the momentum flux (see MOMENTUM_PREF): the
+    // volume-weighted mean pressure of this pass.
+    double prefNum = 0., prefDen = 0.;
+    for (int i=0; i<N; ++i){ const double Vi = m[i]/rho[i]; prefNum += P[i]*Vi; prefDen += Vi; }
+    momentumPref = prefNum/prefDen;
 #endif
     for (int i=0; i<N; ++i){
         mF[i] = 0.;
@@ -5765,6 +5837,20 @@ void Particles::collectFluxes(Helper &helper){
                             //  << " v_ij = " << vFrame[ii][0] << " " << vFrame[i][1]
                              ;
             }
+        }
+#endif
+
+#if MOMENTUM_PREF
+        {
+            // -P_ref sum_j A_ij: the face flux of a uniform pressure, removed from the momentum only
+            double sA[DIM] = {0.};
+            for (int j=0; j<noi[i]; ++j)
+                for (int d=0; d<DIM; ++d) sA[d] += Aij[j+i*MAX_NUM_INTERACTIONS][d];
+#if PERIODIC_BOUNDARIES
+            for (int j=0; j<noiGhosts[i]; ++j)
+                for (int d=0; d<DIM; ++d) sA[d] += AijGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS][d];
+#endif
+            for (int d=0; d<DIM; ++d) vF[i][d] -= momentumPref*sA[d];
         }
 #endif
 
@@ -6191,6 +6277,102 @@ void Particles::moveParticles(const double &dt, const Domain &domain){
     }
 #endif // MOVE_PARTICLES
 }
+#if TIME_RK3
+void Particles::rkSave(){
+    rkX.assign(x, x + N); rkY.assign(y, y + N);
+    rkVx.assign(vx, vx + N); rkVy.assign(vy, vy + N);
+#if DIM == 3
+    rkZ.assign(z, z + N); rkVz.assign(vz, vz + N);
+#endif
+    rkE.resize(N);
+    for (int i=0; i<N; ++i){
+        double v2 = vx[i]*vx[i] + vy[i]*vy[i];
+#if DIM == 3
+        v2 += vz[i]*vz[i];
+#endif
+        rkE[i] = u[i] + .5*v2;
+    }
+#if EXPLICIT_VOL_INTEGRATION
+    rkLnRho.resize(N);
+    for (int i=0; i<N; ++i) rkLnRho[i] = explicitVolInitialized ? std::log(rhoExplicit[i]) : 0.;
+#endif
+#if ELASTIC
+    rkSxx.assign(Sxx, Sxx + N); rkSxy.assign(Sxy, Sxy + N); rkSyy.assign(Syy, Syy + N);
+#if DIM == 3
+    rkSxz.assign(Sxz, Sxz + N); rkSyz.assign(Syz, Syz + N); rkSzz.assign(Szz, Szz + N);
+#endif
+#endif
+}
+
+void Particles::rkBlend(double a, double b, const Domain &domain){
+#if PERIODIC_BOUNDARIES
+    const double Lx = domain.bounds.maxX - domain.bounds.minX;
+    const double Ly = domain.bounds.maxY - domain.bounds.minY;
+#if DIM == 3
+    const double Lz = domain.bounds.maxZ - domain.bounds.minZ;
+#endif
+#endif
+    for (int i=0; i<N; ++i){
+        // positions: x = a x0 + b x = x0 + b (x - x0), the displacement taken by minimum image
+        double dx = x[i] - rkX[i], dy = y[i] - rkY[i];
+#if DIM == 3
+        double dz = z[i] - rkZ[i];
+#endif
+#if PERIODIC_BOUNDARIES
+        dx -= Lx*std::round(dx/Lx);
+        dy -= Ly*std::round(dy/Ly);
+#if DIM == 3
+        dz -= Lz*std::round(dz/Lz);
+#endif
+#endif
+        x[i] = rkX[i] + b*dx;
+        y[i] = rkY[i] + b*dy;
+#if DIM == 3
+        z[i] = rkZ[i] + b*dz;
+#endif
+#if PERIODIC_BOUNDARIES
+        if (x[i] < domain.bounds.minX) x[i] += Lx; else if (domain.bounds.maxX <= x[i]) x[i] -= Lx;
+        if (y[i] < domain.bounds.minY) y[i] += Ly; else if (domain.bounds.maxY <= y[i]) y[i] -= Ly;
+#if DIM == 3
+        if (z[i] < domain.bounds.minZ) z[i] += Lz; else if (domain.bounds.maxZ <= z[i]) z[i] -= Lz;
+#endif
+#endif
+        // velocity and specific total energy linearly (m is constant under MFM, so
+        // momentum and total energy stay conserved), u recovered from e
+        double v2 = vx[i]*vx[i] + vy[i]*vy[i];
+#if DIM == 3
+        v2 += vz[i]*vz[i];
+#endif
+        const double e = a*rkE[i] + b*(u[i] + .5*v2);
+        vx[i] = a*rkVx[i] + b*vx[i];
+        vy[i] = a*rkVy[i] + b*vy[i];
+        v2 = vx[i]*vx[i] + vy[i]*vy[i];
+#if DIM == 3
+        vz[i] = a*rkVz[i] + b*vz[i];
+        v2 += vz[i]*vz[i];
+#endif
+        u[i] = e - .5*v2;
+#if EXPLICIT_VOL_INTEGRATION
+        // ln rhoExplicit is what the stage integrates (d ln rho/dt = -div v)
+        if (explicitVolInitialized){
+            rhoExplicit[i] = std::exp(a*rkLnRho[i] + b*std::log(rhoExplicit[i]));
+            rho[i] = rhoExplicit[i];
+        }
+#endif
+#if ELASTIC
+        Sxx[i] = a*rkSxx[i] + b*Sxx[i];
+        Sxy[i] = a*rkSxy[i] + b*Sxy[i];
+        Syy[i] = a*rkSyy[i] + b*Syy[i];
+#if DIM == 3
+        Sxz[i] = a*rkSxz[i] + b*Sxz[i];
+        Syz[i] = a*rkSyz[i] + b*Syz[i];
+        Szz[i] = a*rkSzz[i] + b*Szz[i];
+#endif
+#endif
+    }
+}
+#endif // TIME_RK3
+
 #if PERIODIC_BOUNDARIES
 void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
                                      const double &kernelSize){
@@ -6911,12 +7093,17 @@ void Particles::compEffectiveFace(const Particles &ghostParticles){
             // exactly the spurious net outward flux the real path was fixed for.
             const double Vi  = m[i] / rho[i];
             const double Vji = ghostParticles.m[ji] / ghostParticles.rho[ji];
+#if FACE_GRAD_WEIGHTS
+            auto *psiF = psijTildeGrad_xiGhosts;
+#else
+            auto *psiF = psijTilde_xiGhosts;
+#endif
             for (int alpha=0; alpha<DIM; ++alpha){
                 // Drop the reverse term if p has no ghost of i (non-reciprocal):
                 // indexing a stale slot would corrupt the face.
                 const double rev = (ij < 0) ? 0.
-                    : Vji * psijTilde_xiGhosts[ij+p*MAX_NUM_GHOST_INTERACTIONS][alpha];
-                AijGhosts[ii][alpha] = Vi*psijTilde_xiGhosts[ii][alpha] - rev;
+                    : Vji * psiF[ij+p*MAX_NUM_GHOST_INTERACTIONS][alpha];
+                AijGhosts[ii][alpha] = Vi*psiF[ii][alpha] - rev;
 #if ELASTIC_FACE_MODE == 3
                 AhalfIGhosts[ii][alpha] = Vi*psijTilde_xiGhosts[ii][alpha];
                 AhalfJGhosts[ii][alpha] = rev;
