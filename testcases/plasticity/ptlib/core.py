@@ -566,7 +566,8 @@ def cmd_next(args):
         if tier == "P0a":
             print("do: ./pt unit")
         else:
-            print("do: ./pt setup %s && ./pt run %s --detach   (when finished) ./pt check %s" % (tier, tier, tier))
+            print("do: ./pt build %s && ./pt setup %s && ./pt run %s --detach   (when finished) ./pt check %s"
+                  % (tier, tier, tier, tier))
         return
     print("all tiers PASS")
 
