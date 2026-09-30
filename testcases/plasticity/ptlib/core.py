@@ -437,7 +437,7 @@ def cmd_run(args):
         return
     variants = args.variants.split(",") if args.variants else None
     rungs = args.rungs.split(",") if args.rungs else None
-    todo = []
+    todo, absent = [], 0
     for test in S.tests(args.tests):
         for v, r, rel in S.runs(test, variants, rungs):
             st = run_state(S, rel)
@@ -448,10 +448,12 @@ def cmd_run(args):
                 if ok:
                     todo.append(rel)
             elif st == "absent":
-                print("  skip %s: not set up (./pt setup %s)" % (rel, test))
+                absent += 1
             elif st == "DIED":
                 print("  skip %s: a previous run died without exit_code -- inspect, then ./pt reset %s"
                       % (rel, rel))
+    if absent:
+        print("  (%d selected run(s) not set up -- ./pt setup first if you want them)" % absent)
     if not todo:
         print("nothing to run")
         return

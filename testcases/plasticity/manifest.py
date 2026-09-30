@@ -140,11 +140,14 @@ TESTS = {
                      check=("p2", {"up": 0.1, "t_fit": (1.0, 3.0), "tol_U": 0.01, "tol_hel": 0.02,
                                    "tol_sigma": 0.01, "margin_gz": 0.005})),
     # ---- P3: thin flyer, release + attenuation (1D reference code) -----------------------
-    "P3_flyer": dict(tier="P3", ic=("flyer", {"Lf": 0.5, "Lt": 4.0, "H": 0.2, "vf": 0.2}),
+    # Lf = 0.2: in the 1D reference the flyer's release catches the plastic shock at X ~ 1.3-1.8 and
+    # attenuates it to ~0.07 by X ~ 2.9 within t = 3 (Lf = 0.5 would need t ~ 6: no attenuation in the domain).
+    "P3_flyer": dict(tier="P3", ic=("flyer", {"Lf": 0.2, "Lt": 4.0, "H": 0.2, "vf": 0.2}),
                      rungs=["0.02", "0.01", "0.005"], t_end=3.0, dump_dt=0.05,
                      box=(-6., 0., 10., 0.2), group="per", material={},   # same aspect as P2: one GIZMO build
                      variants=["pref", "prr", "ptc0", "gz"],
-                     check=("p3", {"vf": 0.2, "Lf": 0.5, "Lt": 4.0, "gauges": (0.25, 0.5, 1.0, 1.5, 2.0, 2.5),
+                     check=("p3", {"vf": 0.2, "Lf": 0.2, "Lt": 4.0, "gauges": (0.5, 1.0, 1.5, 2.0, 2.5, 3.0),
+                                   "arrival_min": 1.0,
                                    "tol_peak": 0.03, "tol_arrival": 0.01, "margin_gz": 0.005,
                                    "ref_cells": 20000})),
     # ---- P4: Taylor bars (symmetric bar impact) ----------------------------------------

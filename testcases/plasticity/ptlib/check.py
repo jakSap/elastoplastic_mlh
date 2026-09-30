@@ -505,9 +505,11 @@ def ref1d(mat, Lf, Lt, vf, t_out, cells, cfl=0.3, c0=1.0, c1=0.1):
             k += 1
             continue
         dt = cfl * np.min(dx / (c + np.abs(dv) + 1e-30))
+        if not (np.isfinite(dt) and dt > 0):
+            raise RuntimeError("ref1d: non-finite state at t = %g" % t)
         dt = min(dt, t_out[k] - t) if t_out[k] - t > 1e-14 else dt
         f = np.zeros(nz + 1)
-        f[:-1] -= sig; f[1:] += sig                           # free ends: outside stress 0
+        f[:-1] += sig; f[1:] -= sig          # node j: sigma_right - sigma_left; free ends: outside stress 0
         v = v + dt * f / mn
         xn = x + dt * v
         dxn = xn[1:] - xn[:-1]
@@ -520,7 +522,7 @@ def ref1d(mat, Lf, Lt, vf, t_out, cells, cfl=0.3, c0=1.0, c1=0.1):
     return out
 
 
-def check_p3(S, test, vf, Lf, Lt, gauges, tol_peak, tol_arrival, margin_gz, ref_cells):
+def check_p3(S, test, vf, Lf, Lt, gauges, arrival_min, tol_peak, tol_arrival, margin_gz, ref_cells):
     runs, missing = runs_by(S, test)
     T = S.M.TESTS[test]
     mat = mat_of(S, test)
@@ -540,11 +542,14 @@ def check_p3(S, test, vf, Lf, Lt, gauges, tol_peak, tol_arrival, margin_gz, ref_
     sHEL = exact_plate(mat, 0.5 * vf, 1)["sigma_hel"]
 
     def curve(series, d):
-        """peak Sigma vs its Lagrangian depth, and front arrival times at the gauges."""
+        """peak Sigma vs its Lagrangian depth, and precursor arrival times at the gauges >= arrival_min.
+        Sigma is taken relative to the undisturbed target at t = 0 (GIZMO: kernel-sum density offset)."""
         pk, xpk, te, xe = [], [], [], []
+        X0, s0 = series[0][1], series[0][2]
+        sig0 = float(np.median(s0[(X0 > 1.0) & (X0 < Lt - 1.0)]))
         for t, Xc, sig, v in series:
             m = Xc > 0
-            Xb, sb = profile(Xc[m], sig[m], 0, Lt, d)
+            Xb, sb = profile(Xc[m], sig[m] - sig0, 0, Lt, d)
             i = int(np.argmax(sb))
             pk.append(sb[i]); xpk.append(Xb[i])
             e = last_cross(Xb, sb, 0.5 * sHEL)
@@ -552,7 +557,8 @@ def check_p3(S, test, vf, Lf, Lt, gauges, tol_peak, tol_arrival, margin_gz, ref_
         pk, xpk, te, xe = map(np.array, (pk, xpk, te, xe))
         good = np.isfinite(xe)
         peak_at = {g: float(np.interp(g, xpk[np.argsort(xpk)], pk[np.argsort(xpk)])) for g in gauges}
-        arr = {g: float(np.interp(g, xe[good], te[good])) for g in gauges if xe[good].max() > g}
+        arr = {g: float(np.interp(g, xe[good], te[good])) for g in gauges
+               if g >= arrival_min and good.any() and xe[good].max() > g}
         return peak_at, arr
 
     def run_series(rel):

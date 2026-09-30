@@ -157,11 +157,13 @@ def ic_name(test, T, rung):
     kind, a = T["ic"]
     if kind == "copy":
         return os.path.basename(a["src"])
+    # generated ICs carry a hash of their arguments, so a changed manifest never reuses a stale file
+    h = hashlib.md5(repr(sorted(a.items())).encode()).hexdigest()[:6]
     if kind == "block":
-        return "block_%s_d%s.h5" % (a["drive"], rung)
+        return "block_%s_d%s_%s.h5" % (a["drive"], rung, h)
     if kind == "wave":
-        return "wave%s_true2d_n%s.h5" % (a["mode"], rung)
-    return "%s_d%s.h5" % (kind, rung)
+        return "wave%s_true2d_n%s_%s.h5" % (a["mode"], rung, h)
+    return "%s_d%s_%s.h5" % (kind, rung, h)
 
 
 def ensure_ic(S, test, rung):
