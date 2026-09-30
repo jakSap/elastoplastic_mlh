@@ -520,10 +520,14 @@ def cmd_status(args):
                 errs.append("%-40s %s (exit %s)" % (rel, st, open(S.p("runs", rel, "exit_code")).read().strip()
                                                     if st == "FAILED" else "-"))
     if os.path.exists(S.p("summary.txt")):
+        last = {}                                  # latest line per run (a reset run appears again)
         for l in open(S.p("summary.txt")):
+            if l.strip() and not l.startswith("#"):
+                last[l.split()[0]] = l
+        for name, l in last.items():
             f = dict(kv.split("=", 1) for kv in l.split()[1:] if "=" in kv)
             if f.get("exit") == "0" and (f.get("errors", "0") != "0" or f.get("negE_lines", "0") != "0"):
-                errs.append("%-40s exit 0 but errors=%s negE_lines=%s" % (l.split()[0], f.get("errors"),
+                errs.append("%-40s exit 0 but errors=%s negE_lines=%s" % (name, f.get("errors"),
                                                                           f.get("negE_lines")))
     print("\nERRORS   " + ("none" if not errs else "\n  " + "\n  ".join(errs)))
     # builds
