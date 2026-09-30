@@ -1214,12 +1214,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define FACE_GRAD_WEIGHTS 0
 
 /// With FACE_GRAD_WEIGHTS, 78 % of the faces of the square lattice point against x_j - x_i (the
-/// negative outer coefficients of the cubic-exact weights, like a fourth-order difference), and
-/// the Riemann solver upwinds along A_ij. 1 = hand the solver the two sides in geometric order
-/// for those faces (A_ij . (x_j - x_i) < 0). Measured 2026-10-01: does NOT stabilise (the growth
-/// comes from the background-pressure closure, see MOMENTUM_PREF; linearised growth 3.6 -> 5.0)
-/// and, being a switch on the sign of A.dx, it injects a non-smooth error where faces nearly
-/// perpendicular to dx flip with the wave phase. Kept for the record; leave at 0.
+/// negative outer coefficients of the cubic-exact weights, like a fourth-order difference).
+/// 1 = hand the Riemann solver the two sides in geometric order for those faces (A_ij.(x_j-x_i) < 0).
+/// Measured 2026-10-01: WRONG idea, leave at 0. The upwind dissipation -Z|A| nn^T (v_i - v_j)/2 is
+/// invariant under n -> -n, so backward faces are not anti-dissipative; the swap is what breaks it
+/// (velocity block of the linearised operator +0.30, growth 3.6 -> 5.0), and as a switch on the sign
+/// of A.dx it injects a non-smooth error where faces nearly perpendicular to dx flip with the wave.
 #define FACE_GRAD_WEIGHTS_SWAP 0
 
 /// Seed rhoExplicit at t = 0 from an IC dataset /rho instead of the kernel-sum density (and
@@ -1236,13 +1236,15 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// the background pressure is physical), so total energy stays conserved too.
 /// Why: a uniform pressure exerts no force in the continuum, but P0 sum_j A_ij does in the scheme.
 /// With the first-order faces that closure is O(h^2) (it limits the ideal-gas soundwave to second
-/// order) and it is also the weak restoring force of the particle lattice; with FACE_GRAD_WEIGHTS it
-/// is O(h^4) for smooth deformations but ANTI-restoring at mid wavenumbers: linearised MFM at rest
-/// (proto/mfm_stab.py, n = 16) has real eigenvalues +3.6 (growth ~ 1/dx) with P0 = 0.6, none
-/// without it. Removing P_ref leaves the lattice modes neutral (max Re lambda ~ 1e-9).
-/// Only the constant part of the pressure is removed, so this cures the closure error exactly for
-/// small perturbations of a uniform state, not for O(1) pressure variations.
-///   0 = off
+/// order). With FACE_GRAD_WEIGHTS it is O(h^4) but drives an instability (linearised MFM at rest,
+/// proto/mfm_stab.py, n = 16: real eigenvalue +3.6, growth ~ 1/dx) through two channels, each unstable
+/// alone: V = m/rhoExplicit inside A_ij (positions frozen: +3.25) and an hourglass-type displacement
+/// mode the kernel density hardly sees (rhoExplicit, u frozen: +3.60); a restoring force built on the
+/// kernel density does not catch it. With first-order faces the position response stabilises the same
+/// closure (+1.55 frozen, +0.18 full). Removing P_ref leaves everything neutral (~1e-9), and with the
+/// cubic faces it changes no digit of the soundwave error, only the stability.
+/// Only the constant part of the pressure is removed: with O(1) pressure variations the instability
+/// returns where P > P_ref (soundwave A = 0.1, n128: |v_y| 3e-13 -> 5e-12 over half a period).
 ///   1 = P_ref = volume-weighted mean pressure
 #define MOMENTUM_PREF 0
 

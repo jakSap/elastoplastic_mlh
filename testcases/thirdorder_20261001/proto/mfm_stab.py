@@ -17,7 +17,8 @@ P0 = 0.6
 
 class Scheme:
     def __init__(self, n, face_order=1, grad_order=1, swap=False, P0=P0, nnn=32, divv_order=None,
-                 riemann="acoustic", quad=0.0, ny=12, pbg=False, divv_face=False):
+                 riemann="acoustic", quad=0.0, ny=12, pbg=False, divv_face=False, beta=0.0, hp_passes=1,
+                 qmode="ratio"):
         self.n = n; self.dx = LX/n; self.LY = ny*self.dx
         q = (np.arange(n) + .5)*self.dx; ys = (np.arange(ny) + .5)*self.dx
         X, Y = np.meshgrid(q, ys, indexing="ij")
@@ -26,6 +27,7 @@ class Scheme:
         self.face_order, self.grad_order, self.swap, self.P0, self.nnn = face_order, grad_order, swap, P0, nnn
         self.divv_order = divv_order or grad_order
         self.riemann = riemann; self.quad = quad; self.pbg = pbg; self.divv_face = divv_face
+        self.beta = beta; self.hp_passes = hp_passes; self.qmode = qmode
         h0 = np.sqrt(nnn/np.pi)*self.dx
         tree = cKDTree(self.X0, boxsize=[LX, self.LY])
         pr = tree.query_pairs(1.35*h0, output_type="ndarray")
@@ -66,6 +68,7 @@ class Scheme:
             lo = np.where(f < 0, h, lo); hi = np.where(f >= 0, h, hi)
         h = .5*(lo + hi)
         w = W(r, h[i])
+        om_final = W(0., h) + np.bincount(i, w, N)
         E = np.zeros((N, 2, 2))
         for a in range(2):
             for b in range(2):
@@ -103,6 +106,25 @@ class Scheme:
             Ps = .5*(pL + pR); Vs = .5*(vnL + vnR)
         Pm = Ps - self.P0 if self.pbg else Ps
         mom = -np.stack([np.bincount(i, Aij[:, a]*Pm, N) for a in range(2)], 1)
+        self._A1 = V[i, None]*psi1 - V[j, None]*psi1[self.rev]
+        if self.beta:
+            # high-pass restoring force: q = ln(rho_K/rho_E), q_hp = q - S^p[q] (Shepard kernel average),
+            # pair "pressure" beta * Pbar_ij * (q_hp_i + q_hp_j)/2 on the FIRST-ORDER faces
+            S = lambda f: (W(0., h)*f + np.bincount(i, w*f[j], N))/om_final
+            if self.qmode == "ratio":
+                q = np.log(m*om_final/rhoE)
+                qs = q.copy()
+                for _ in range(self.hp_passes):
+                    qs = S(qs)
+                qhp = q - qs
+            else:                               # positions only, twicing high-pass (I - S)^2
+                q = np.log(m*om_final)
+                r1 = q - S(q)
+                qhp = r1 - S(r1)
+            A1 = self._A1
+            Pb = .5*(P[i] + P[j])
+            fr = self.beta*Pb*.5*(qhp[i] + qhp[j])
+            mom -= np.stack([np.bincount(i, A1[:, a]*fr, N) for a in range(2)], 1)
         en = -np.bincount(i, Aabs*Ps*Vs, N)
         ax, ay = mom[:, 0]/m, mom[:, 1]/m
         dudt = en/m - (vx*ax + vy*ay)
@@ -130,6 +152,15 @@ VARIANTS = {
     "f3": dict(face_order=3, grad_order=3),
     "f3swap": dict(face_order=3, grad_order=3, swap=True),
     "f3pbg": dict(face_order=3, grad_order=3, pbg=True),
+    "f3b1": dict(face_order=3, grad_order=3, beta=1.0),
+    "f3t1": dict(face_order=3, grad_order=3, beta=1.0, qmode="pos"),
+    "f3t4": dict(face_order=3, grad_order=3, beta=4.0, qmode="pos"),
+    "f3t16": dict(face_order=3, grad_order=3, beta=16.0, qmode="pos"),
+    "f3tm4": dict(face_order=3, grad_order=3, beta=-4.0, qmode="pos"),
+    "f3b2": dict(face_order=3, grad_order=3, beta=2.0),
+    "f3b4": dict(face_order=3, grad_order=3, beta=4.0),
+    "f3b2p2": dict(face_order=3, grad_order=3, beta=2.0, hp_passes=2),
+    "f3b1p0": dict(face_order=3, grad_order=3, beta=1.0, hp_passes=0),
     "basepbg": dict(face_order=1, grad_order=1, pbg=True),
     "f3dvf": dict(face_order=3, grad_order=3, divv_face=True),
     "f3dvfpbg": dict(face_order=3, grad_order=3, divv_face=True, pbg=True),
