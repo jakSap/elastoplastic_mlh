@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""pt -- plasticity test plan harness (MA-Obsidian/2026-09-30-testplan-plastisch.md).
+
+Typical session (see README.md):
+    ./pt new                      # study dir for the manifest's COMMIT
+    ./pt unit                     # P0a unit test
+    ./pt build                    # every build the manifest needs (git archive of COMMIT)
+    ./pt next                     # which tier is open, and the commands for it
+    ./pt setup P1a && ./pt run P1a --detach
+    ./pt status                   # errors first, builds, runs, verdicts
+    ./pt check P1a                # PASS / FAIL / INCOMPLETE / LOOK
+"""
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ptlib import core, check, movie  # noqa: E402
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="pt", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("-s", "--study", help="study dir (default: newest study of the manifest's COMMIT)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    def add(name, fn, help_, tests=False, sel=False):
+        p = sub.add_parser(name, help=help_)
+        p.set_defaults(fn=fn)
+        if tests:
+            p.add_argument("tests", nargs="?", default=None, help="test name, tier (P2) or comma list; default all")
+        if sel:
+            p.add_argument("--variants", help="comma list of variants (default: all of the test)")
+            p.add_argument("--rungs", help="comma list of rungs, e.g. 0.05,0.025 (default: all)")
+        return p
+
+    p = add("new", core.cmd_new, "create the study dir for the manifest's COMMIT")
+    p.add_argument("--date", help="YYYYMMDD (default today)")
+    add("refreeze", core.cmd_refreeze, "add NEW tests/variants of the live manifest to the study")
+    p = add("pin", core.cmd_pin, "set COMMIT in manifest.py (must be on the branch)")
+    p.add_argument("commit")
+    add("unit", core.cmd_unit, "P0a: build + run the unit test of the pinned commit")
+    p = add("build", core.cmd_build, "build what the tests need (skips up-to-date builds)", tests=True)
+    p.add_argument("--variants")
+    p.add_argument("--force", action="store_true")
+    add("setup", core.cmd_setup, "write ICs + run dirs (never touches finished runs)", tests=True, sel=True)
+    p = add("run", core.cmd_run, "run pending runs locally", tests=True, sel=True)
+    p.add_argument("-j", "--jobs", type=int, default=4, help="concurrent slots (default 4; GIZMO = 2 slots)")
+    p.add_argument("--timeout", type=float, default=4 * 3600, help="seconds per run (default 4 h)")
+    p.add_argument("--detach", action="store_true", help="run in the background (log: <study>/queue_*.log)")
+    p = add("reset", core.cmd_reset, "delete the result of ONE run so it can be rerun")
+    p.add_argument("run", help="<test>/<variant>_<rung>, as printed by status")
+    add("status", core.cmd_status, "errors first, builds, runs, verdicts", tests=True)
+    add("next", core.cmd_next, "first tier that is not PASS, and what to do")
+    add("verify", core.cmd_verify, "provenance: builds == manifest, runs == builds")
+    add("check", check.cmd_check, "run the checkers, write checks/<test>.txt/.json", tests=True)
+    p = add("accept", check.cmd_accept, "turn a LOOK verdict into PASS after inspecting the movie")
+    p.add_argument("test")
+    p.add_argument("note", help="what you saw")
+    p = add("movie", movie.cmd_movie, "render movies/<run>_<field>.mp4 + last frame PNG", tests=True, sel=True)
+    p.add_argument("--field", default="gp", choices=sorted(movie.FIELDS))
+    args = ap.parse_args()
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    main()
