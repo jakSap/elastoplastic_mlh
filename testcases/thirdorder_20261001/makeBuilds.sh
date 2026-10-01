@@ -63,6 +63,7 @@ for e in m:1 t:2; do
     V[e1$s]="GRADIENT_ORDER:1 $E"                    # today's GEF 0 scheme (2nd-order baseline of 2026-09-25)
     V[t3p$s]="$FULL $E"                              # third-order recipe as for the ideal gas
     V[t3p${s}nc]="$FULL $E TENSILE_CORRECTION:0"
+    V[e1${s}x2]="GRADIENT_ORDER:1 $E XSPLIT_SHEAR_STAR:2"   # today's GEF 0 scheme + the tangential-traction fix
     V[q23r4$s]="${V[q23r4]} $E"                      # fourth order: RK4 + 2/3-quadratic recon incl. S
     V[q23r4${s}ls]="${V[q23r4]} $E RECON_HESSIAN_STRESS:0"   # ablation: S reconstructed linearly
     V[t3p${s}x1]="$FULL $E XSPLIT_SHEAR_STAR:1"      # tangential traction central (no side switch)
@@ -71,6 +72,16 @@ for e in m:1 t:2; do
 done
 V[t3pchk]="$FULL"                                    # t3p rebuilt after the elastic changes (bit-identity check)
 V[t3pmchk]="$FULL EOS:1"                             # t3pm rebuilt from the new tree (RK Euler stress stage, flag 0)
+# rotating disc (test plan A.1: Tillotson, mu = 0.22, free surface, fixed dt), 2026-10-01 evening. Non-periodic, so no
+# MOMENTUM_PREF (guarded: at a free surface P_ref would be an ambient pressure; the free-surface value is 0).
+# NOCOMMON = demonstrator defaults without the periodic COMMON block.
+DSK="PERIODIC_BOUNDARIES:0 EOS:2"
+V[dstd]="NOCOMMON PERIODIC_BOUNDARIES:0 ADAPTIVE_TIMESTEP:0"          # standard scheme (GEF 1, defaults), fixed dt
+V[dxs]="GRADIENT_ORDER:1 $DSK"                                         # today's GEF 0 scheme (2nd order)
+V[d3]="${FULL/MOMENTUM_PREF:1/} $DSK XSPLIT_SHEAR_STAR:2 SURFACE_GRAD_BLEND:1"   # third order + surface fade
+V[d3n]="${FULL/MOMENTUM_PREF:1/} $DSK XSPLIT_SHEAR_STAR:2"                      # third order, hard fallback only
+V[d3x0]="${FULL/MOMENTUM_PREF:1/} $DSK SURFACE_GRAD_BLEND:1"                    # third order without the fix
+V[d4]="${V[q23r4]/MOMENTUM_PREF:1/} $DSK XSPLIT_SHEAR_STAR:2 SURFACE_GRAD_BLEND:1" # fourth order (RK4 + quad recon)
 [ -f "$HERE/variants.sh" ] && source "$HERE/variants.sh"
 for t in "$@"; do
     [ -n "${V[$t]+x}" ] || { echo "unknown variant $t" >&2; exit 1; }
@@ -79,7 +90,8 @@ for t in "$@"; do
     [ -d "$DEMO/tests" ] && cp -R "$DEMO/tests" "$B/"
     rm -f "$B/include/parameter.h.cmp_backup"; [ -e "$B/holib" ] || ln -s "$DEMO/holib" "$B/holib"
     P="$B/include/parameter.h"
-    for kv in $COMMON ${V[$t]}; do set_flag "$P" "${kv%:*}" "${kv#*:}"; done
+    C="$COMMON"; VV="${V[$t]}"; [[ $VV == NOCOMMON* ]] && { C=""; VV="${VV#NOCOMMON}"; }
+    for kv in $C $VV; do set_flag "$P" "${kv%:*}" "${kv#*:}"; done
     { echo "snapshot of demonstrator/ $(date '+%F %T')"; git -C "$DEMO" rev-parse HEAD
       git -C "$DEMO" status --short -- . ; echo; echo "variant $t: ${V[$t]}"; echo "parameter.h diff vs demonstrator:"
       diff "$DEMO/include/parameter.h" "$P" || true; git -C "$DEMO" diff -- . ; } > "$B/SNAPSHOT.txt"
