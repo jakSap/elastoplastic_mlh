@@ -92,6 +92,7 @@ V[d3kdk]="${V[d3]/TIME_RK3:1 TIME_KDK:0 TIME_KDK_FIELD_DRIFT:0/}"     # TIME_KDK
 V[d3fb]="${V[d3]/FACE_GRAD_WEIGHTS:1/FACE_GRAD_WEIGHTS:2}"             # third order, faded faces
 V[d4fb]="${V[d4]/FACE_GRAD_WEIGHTS:1/FACE_GRAD_WEIGHTS:2}"             # fourth order, faded faces
 V[d4f1]="${V[d4]/FACE_GRAD_WEIGHTS:1/}"                                # fourth order, first-order faces (f1q23r4 route)
+V[d3fbx0]="${V[d3fb]/XSPLIT_SHEAR_STAR:2/}"                           # third order, faded faces, without the shear star state
 [ -f "$HERE/variants.sh" ] && source "$HERE/variants.sh"
 for t in "$@"; do
     [ -n "${V[$t]+x}" ] || { echo "unknown variant $t" >&2; exit 1; }

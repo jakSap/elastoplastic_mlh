@@ -1230,7 +1230,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   2 = 1 with a free-surface fade (non-periodic, SURFACE_GRAD_BLEND): each side's weights are
 ///       gradBlend_i psijTildeGrad + (1 - gradBlend_i) psijTilde, i.e. the faces drop to first order exactly
 ///       where the gradients do. Needed on free surfaces: with 1 the one-sided cubic weights of the outer
-///       rows build faces that drive a surface instability (rotating disc d0.05: u < 0 after 0.03 rotations,
+///       rows build faces that drive a surface instability (rotating disc d0.05: u < 0 after 0.17 rotations, break-up at 0.7,
 ///       2026-10-01); A_ij stays antisymmetric and linear-consistent for any blend.
 #define FACE_GRAD_WEIGHTS 0
 
