@@ -56,6 +56,20 @@ V[f1q23]="${V[a_f1]} RECON_HESSIAN:1"                              # first-order
 RK4="TIME_RK4:1 TIME_KDK:0 TIME_KDK_FIELD_DRIFT:0"
 V[q23r4]="${V[q23]/TIME_RK3:1 TIME_KDK:0 TIME_KDK_FIELD_DRIFT:0/$RK4}"
 V[f1q23r4]="${V[f1q23]/TIME_RK3:1 TIME_KDK:0 TIME_KDK_FIELD_DRIFT:0/$RK4}"
+# elastic branch, mu > 0 (2026-10-01 afternoon): Murnaghan (EOS 1) / Tillotson (EOS 2), ICs generateIC_elastic.py.
+# Suffix m = Murnaghan, t = Tillotson; nc = TENSILE_CORRECTION 0.
+for e in m:1 t:2; do
+    s=${e%:*}; E="EOS:${e#*:}"
+    V[e1$s]="GRADIENT_ORDER:1 $E"                    # today's GEF 0 scheme (2nd-order baseline of 2026-09-25)
+    V[t3p$s]="$FULL $E"                              # third-order recipe as for the ideal gas
+    V[t3p${s}nc]="$FULL $E TENSILE_CORRECTION:0"
+    V[q23r4$s]="${V[q23r4]} $E"                      # fourth order: RK4 + 2/3-quadratic recon incl. S
+    V[q23r4${s}ls]="${V[q23r4]} $E RECON_HESSIAN_STRESS:0"   # ablation: S reconstructed linearly
+    V[t3p${s}x1]="$FULL $E XSPLIT_SHEAR_STAR:1"      # tangential traction central (no side switch)
+    V[t3p${s}x2]="$FULL $E XSPLIT_SHEAR_STAR:2"      # tangential traction from the shear-wave star state
+    V[q23r4${s}x2]="${V[q23r4]} $E XSPLIT_SHEAR_STAR:2"
+done
+V[t3pchk]="$FULL"                                    # t3p rebuilt after the elastic changes (bit-identity check)
 [ -f "$HERE/variants.sh" ] && source "$HERE/variants.sh"
 for t in "$@"; do
     [ -n "${V[$t]+x}" ] || { echo "unknown variant $t" >&2; exit 1; }

@@ -5,12 +5,12 @@ import h5py, numpy as np, glob, sys, os
 k = 2*np.pi
 d, n = sys.argv[1], int(sys.argv[2])
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from analysis import amplitude
-A = amplitude(d + "/output")
+from analysis import ic_attrs
+W = ic_attrs(d + "/output"); A, c = W["A"], W["c"]
 for fn in sorted(glob.glob(d + "/output/*.h5")):
     with h5py.File(fn) as h:
         t = float(np.ravel(h['time'])[0]); x = h['x'][:]; v = h['v'][:]; rho = h['rho'][:]; u = h['u'][:]
-    e = (rho - rho.mean()*(1 + A*np.sin(k*(x[:, 0] - t))))/A
+    e = (rho - rho.mean()*(1 + A*np.sin(k*(x[:, 0] - c*t))))/A
     col = np.floor(x[:, 0]*n).astype(int) % n
     prof = np.bincount(col, e, n)/np.bincount(col, minlength=n)
     ydep = e - prof[col]
