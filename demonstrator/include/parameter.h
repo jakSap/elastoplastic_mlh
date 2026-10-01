@@ -1493,13 +1493,17 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// continuity integration with a robust SPH kernel-weighted estimator
 /// (Particle_DivVel, density.c:334/514: -sum_j dW/dr (dp.dv)/r, normalized by the
 /// kernel-sum neighbour number = omega), NOT the matrix-inverse MFM gradient trace.
-/// The MFM gradient is ill-conditioned at the ring's free surface and injects a
-/// spurious divergence that bloats/drifts the rings before contact (absent in GIZMO).
-/// NOTE: ported faithfully, but in the demonstrator the SPH estimator is slightly
-/// noisier at the free surface than the MFM trace and did not improve the rings, so
-/// it is left OFF by default; the working seed-fix run uses the MFM trace.
-/// 1 = GIZMO SPH estimator (faithful, noisier here); 0 = MFM gradient trace (DEFAULT).
-#define EXPLICIT_VOL_SPH_DIVV 0
+/// The linear-exact MFM trace does not see particle-scale motion: two neighbours
+/// closing in barely change it, so rhoExplicit and P do not resist the pairing and
+/// particles clump (P4 Taylor-bar contact layer, d0.0125: clump index 0.11 vs GIZMO
+/// 0.006-0.02). The SPH sum weights every pair, so P pushes closing pairs apart. With
+/// it newMFM reproduces GIZMO's outflow along the contact face, its row-to-row P noise
+/// and its tidy contact layer at d0.025 and d0.0125, while GIZMO with the MFM trace
+/// clumps like newMFM (study gzsys_20261001, 2026-10-01).
+/// Earlier note: at the rings' free surface the SPH estimator was slightly noisier than
+/// the MFM trace and did not improve the rings -- re-check the rings with this default.
+/// 1 = GIZMO SPH estimator (DEFAULT); 0 = MFM gradient trace (previous default).
+#define EXPLICIT_VOL_SPH_DIVV 1
 /// Number of initial steps to run on the kernel density before seeding the advected
 /// density. The demonstrator's t=0 kernel density is truncated by the incomplete
 /// startup NNS (bulk ~0.89) and self-heals by re-summation at step 1; seeding the
