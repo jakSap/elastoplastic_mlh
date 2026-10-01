@@ -98,7 +98,7 @@ if __name__ == "__main__":
         axs[0].plot(tsr[1:], tvL[1:], color=col, lw=2, ls="-" if src == "step" else ":", label=lab + ("" if src == "step" else " (snapshots)"))
         axs[1].plot(tsr[1:], tvE[1:] + 1e-18, color=col, lw=2, ls="-" if src == "step" else ":", label=lab)
         axs[2].plot(trot, [r[6] for r in S], color=col, lw=2, label=lab)
-    axs[0].set_ylabel("sum_n |dL_z| / |L_z(0)|  (every step)"); axs[0].set_yscale("log")
+    axs[0].set_ylabel("sum_n |dL_z| / |L_z(0)|  (every step)"); axs[0].set_yscale("log"); axs[0].set_ylim(1e-7, 3e-2)
     axs[0].set_title("(a) angular momentum, total variation", loc="left", fontsize=11)
     axs[1].set_ylabel("sum_n |dE| / E(0)  (every step)"); axs[1].set_yscale("log")
     axs[1].set_title("(b) total energy, total variation", loc="left", fontsize=11)
