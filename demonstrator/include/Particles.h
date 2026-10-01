@@ -504,6 +504,9 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     double (*psijTildeHess_xi)[3] { nullptr };
     double (*psijTildeHess_xiGhosts)[3] { nullptr };
     double (*rhoHess)[3], (*PHess)[3], (*vxHess)[3], (*vyHess)[3];
+#if ELASTIC
+    double (*SxxHess)[3], (*SxyHess)[3], (*SyyHess)[3];
+#endif
     void compHessians(Particles &ghostParticles);
 #endif
 #if MOMENTUM_PREF

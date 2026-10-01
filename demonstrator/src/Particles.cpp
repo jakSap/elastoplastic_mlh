@@ -404,6 +404,10 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
 #if RECON_HESSIAN
     rhoHess = new double[numParticles][3](); PHess = new double[numParticles][3]();
     vxHess  = new double[numParticles][3](); vyHess = new double[numParticles][3]();
+#if ELASTIC
+    SxxHess = new double[numParticles][3](); SxyHess = new double[numParticles][3]();
+    SyyHess = new double[numParticles][3]();
+#endif
 #endif
 #if OUTPUT_CONDITION_NUMBER
     conditionNumber = new double[numParticles];
@@ -591,6 +595,9 @@ Particles::~Particles() {
 #if EXPLICIT_VOL_INTEGRATION
 #if RECON_HESSIAN
     delete[] rhoHess; delete[] PHess; delete[] vxHess; delete[] vyHess;
+#if ELASTIC
+    delete[] SxxHess; delete[] SxyHess; delete[] SyyHess;
+#endif
 #endif
     delete[] rhoExplicit;
     delete[] rhoKernel;
@@ -1655,6 +1662,19 @@ void Particles::integrateStressTensor(const double &dt) {
         double k1_yz = visc_yz + 0.5*(syy-szz)*R_yz + 0.5*sxz*R_xy + 0.5*sxy*R_xz;
 #endif
 
+#if TIME_RK3 || TIME_RK4
+        // Runge-Kutta stage (TIME_RK3/TIME_RK4): a plain Euler step S += dt L(S); the stage
+        // combination supplies the order. The midpoint sub-step below would add dt^2/2 R k1 per
+        // stage, a term the RK weights do not expect (global O(dt) error wherever R != 0).
+        Sxx[i] = sxx + dt*k1_xx;
+        Syy[i] = syy + dt*k1_yy;
+        Sxy[i] = sxy + dt*k1_xy;
+#if DIM == 3
+        Szz[i] = szz + dt*k1_zz;
+        Sxz[i] = sxz + dt*k1_xz;
+        Syz[i] = syz + dt*k1_yz;
+#endif
+#else // TIME_RK3 || TIME_RK4
         // S_mid = S^n + (dt/2) * k1
         double sxx_m = sxx + 0.5*dt*k1_xx;
         double syy_m = syy + 0.5*dt*k1_yy;
@@ -1688,6 +1708,7 @@ void Particles::integrateStressTensor(const double &dt) {
         Sxz[i] = sxz + dt*k2_xz;
         Syz[i] = syz + dt*k2_yz;
 #endif
+#endif // TIME_RK3 || TIME_RK4
 
 #if PLASTICITY_ANY
         // --- Yield criterion: radial return to the von-Mises-equivalent Y ---
@@ -5281,6 +5302,15 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 APPLY_GRADIENTS_S(fSxyL, SxyGrad[jj], SxyPolyH[jj], hInv_j, xijxj_loc);
                 double fSyyL = Syy[jj];
                 APPLY_GRADIENTS_S(fSyyL, SyyGrad[jj], SyyPolyH[jj], hInv_j, xijxj_loc);
+#if RECON_HESSIAN && RECON_HESSIAN_STRESS
+                {   // quadratic stress reconstruction, as for rho, P, v in compRiemannStatesLR (see RECON_HESSIAN)
+                    const double qi = RECON_HESSIAN_FAC, a0 = xijxi_loc[0], a1 = xijxi_loc[1];
+                    auto Q = [](const double *c, double u, double v){ return c[0]*u*u + c[1]*u*v + c[2]*v*v; };
+                    fSxxR += qi*Q(SxxHess[i], a0, a1);  fSxxL += qi*Q(SxxHess[jj], -a0, -a1);
+                    fSxyR += qi*Q(SxyHess[i], a0, a1);  fSxyL += qi*Q(SxyHess[jj], -a0, -a1);
+                    fSyyR += qi*Q(SyyHess[i], a0, a1);  fSyyL += qi*Q(SyyHess[jj], -a0, -a1);
+                }
+#endif
 #if GIZMO_ELASTIC_FLUX
 #if RECON_FACE_TRACTION
                 // capture the reconstructed face stress before it is zeroed for the
@@ -5547,6 +5577,15 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 double fSxxL = ghostParticles.Sxx[jj] + Helper::dotProduct(ghostParticles.SxxGrad[jj], xijxj_loc);
                 double fSxyL = ghostParticles.Sxy[jj] + Helper::dotProduct(ghostParticles.SxyGrad[jj], xijxj_loc);
                 double fSyyL = ghostParticles.Syy[jj] + Helper::dotProduct(ghostParticles.SyyGrad[jj], xijxj_loc);
+#if RECON_HESSIAN && RECON_HESSIAN_STRESS
+                {   // quadratic stress reconstruction (see the real-particle site)
+                    const double qi = RECON_HESSIAN_FAC, a0 = xijxi_loc[0], a1 = xijxi_loc[1];
+                    auto Q = [](const double *c, double u, double v){ return c[0]*u*u + c[1]*u*v + c[2]*v*v; };
+                    fSxxR += qi*Q(SxxHess[i], a0, a1);  fSxxL += qi*Q(ghostParticles.SxxHess[jj], -a0, -a1);
+                    fSxyR += qi*Q(SxyHess[i], a0, a1);  fSxyL += qi*Q(ghostParticles.SxyHess[jj], -a0, -a1);
+                    fSyyR += qi*Q(SyyHess[i], a0, a1);  fSyyL += qi*Q(ghostParticles.SyyHess[jj], -a0, -a1);
+                }
+#endif
 #if DIM == 3
                 double fSxzR = Sxz[i] + Helper::dotProduct(SxzGrad[i], xijxi_loc);
                 double fSyzR = Syz[i] + Helper::dotProduct(SyzGrad[i], xijxi_loc);
@@ -6642,12 +6681,24 @@ void Particles::updateGhostState(Particles &ghostParticles){
 #if RECON_HESSIAN
 void Particles::compHessians(Particles &ghostParticles){
     // Quadratic Taylor coefficients c (f(x_i + d) ~ f_i + grad.d + c0 dx^2 + c1 dx dy + c2 dy^2) of rho, P,
-    // v from the same least-squares fit as the gradient (see RECON_HESSIAN), then copied to the ghosts.
-    double *f[4] = { rho, P, vx, vy };
-    double *fg[4] = { ghostParticles.rho, ghostParticles.P, ghostParticles.vx, ghostParticles.vy };
-    double (*H[4])[3] = { rhoHess, PHess, vxHess, vyHess };
-    double (*Hg[4])[3] = { ghostParticles.rhoHess, ghostParticles.PHess, ghostParticles.vxHess, ghostParticles.vyHess };
-    for (int q=0; q<4; ++q){
+    // v (and S under ELASTIC) from the same least-squares fit as the gradient (see RECON_HESSIAN), then copied
+    // to the ghosts.
+#if ELASTIC
+    constexpr int NQ = 7;
+    double *f[NQ] = { rho, P, vx, vy, Sxx, Sxy, Syy };
+    double *fg[NQ] = { ghostParticles.rho, ghostParticles.P, ghostParticles.vx, ghostParticles.vy,
+                       ghostParticles.Sxx, ghostParticles.Sxy, ghostParticles.Syy };
+    double (*H[NQ])[3] = { rhoHess, PHess, vxHess, vyHess, SxxHess, SxyHess, SyyHess };
+    double (*Hg[NQ])[3] = { ghostParticles.rhoHess, ghostParticles.PHess, ghostParticles.vxHess, ghostParticles.vyHess,
+                            ghostParticles.SxxHess, ghostParticles.SxyHess, ghostParticles.SyyHess };
+#else
+    constexpr int NQ = 4;
+    double *f[NQ] = { rho, P, vx, vy };
+    double *fg[NQ] = { ghostParticles.rho, ghostParticles.P, ghostParticles.vx, ghostParticles.vy };
+    double (*H[NQ])[3] = { rhoHess, PHess, vxHess, vyHess };
+    double (*Hg[NQ])[3] = { ghostParticles.rhoHess, ghostParticles.PHess, ghostParticles.vxHess, ghostParticles.vyHess };
+#endif
+    for (int q=0; q<NQ; ++q){
         for (int i=0; i<N; ++i){
             double c[3] = {0., 0., 0.};
             for (int j=0; j<noi[i]; ++j){

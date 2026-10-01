@@ -992,6 +992,22 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   1 = exact contact-frame flux
 #define MFM_CONTACT_FRAME 0
 
+/// Tangential traction of xSplitElasticHLLC (MFM, stress in the solver: GIZMO_ELASTIC_FLUX 0).
+/// The x-split solver carries only the longitudinal wave fan; the tangential momentum flux is -S_nt of
+/// the side the contact speed S* selects (L if S* >= 0), and the energy flux -v_t S_nt of the same side.
+/// In smooth flow S* is the O(h^2) difference of the reconstructed normal velocities, so the side flips
+/// wherever that small quantity changes sign: the flux error 1/2 |S_ntL - S_ntR| (O(h^3) with linear
+/// reconstruction) gets a sign switch, which shows as a broad spectrum of even harmonics in the
+/// mu > 0 longitudinal wave (thirdorder study 2026-10-01; face rotation gives S_nt != 0 there).
+///   0 = side picked by sign(S*) (default, unchanged)
+///   1 = central: S*_nt = (S_ntL + S_ntR)/2, v*_t = (v_tL + v_tR)/2 (no shear-wave dissipation)
+///   2 = shear-wave Riemann star state of the linear system dv_t/dt = (1/rho) dS_nt/dn,
+///       dS_nt/dt = mu dv_t/dn: with Z = sqrt(mu rho) per side,
+///       S*_nt = (Z_R S_ntL + Z_L S_ntR + Z_L Z_R (v_tR - v_tL)) / (Z_L + Z_R),
+///       v*_t  = (Z_L v_tL + Z_R v_tR + S_ntR - S_ntL) / (Z_L + Z_R)   (central at mu = 0),
+///       i.e. the upwind shear-wave dissipation the x-split fan lacks; flux -S*_nt, energy -v*_t S*_nt.
+#define XSPLIT_SHEAR_STAR 0
+
 /// Second-order (trapezoidal) drift of the particle positions.
 ///
 /// The step is kick-then-drift: updateState() applies the full-dt kick from
@@ -1250,7 +1266,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 
 /// Quadratic face reconstruction on the periodic path: W_face = W_i + grad W.d + RECON_HESSIAN_FAC *
 /// (c0 dx^2 + c1 dx dy + c2 dy^2), d = x_ij - x_i, with the quadratic Taylor coefficients c of the same
-/// least-squares fit (GRADIENT_ORDER >= 2). Fields rho, P, v (not S). RECON_HESSIAN_FAC = 1 is the Taylor
+/// least-squares fit (GRADIENT_ORDER >= 2). Fields rho, P, v and, under ELASTIC, the face stress S that
+/// xSplitElasticHLLC receives (added 2026-10-01 for the mu > 0 wave; S = 0 adds exact zeros, so mu = 0 runs are
+/// unchanged; under GIZMO_ELASTIC_FLUX the face stress is zeroed before the solve anyway). RECON_HESSIAN_FAC = 1 is the Taylor
 /// polynomial (what POLY_RECONSTRUCTION does on the non-periodic path); 2/3 is the point-value correction:
 /// for the midpoint flux operator sum_j 2 V psiTilde_j F_ij the face value F_i + D F/2 + a D^2 F (D = dx.grad)
 /// leaves an O(D^3) error (a - 1/12)/2, so a = 1/12 = 2/3 * 1/8 makes the central operator fourth order and the
@@ -1259,6 +1277,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   0 = off, 1 = on
 #define RECON_HESSIAN 0
 #define RECON_HESSIAN_FAC (2./3.)
+/// Include the face stress S in RECON_HESSIAN (ELASTIC). 0 = S stays linear while rho, P, v are quadratic
+/// (the pre-2026-10-01-afternoon behaviour; ablation only).
+#define RECON_HESSIAN_STRESS 1
 
 /// Third-order strong-stability-preserving Runge-Kutta (Shu & Osher 1988) instead of the
 /// kick-drift schemes above:
@@ -1343,6 +1364,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #endif
 #if TIME_RK3 && TIME_RK4
 #error "TIME_RK3 and TIME_RK4 are alternatives."
+#endif
+#if XSPLIT_SHEAR_STAR && (!ELASTIC || !MESHLESS_FINITE_MASS || MFM_CONTACT_FRAME || ELASTIC_HLLC_EP || GIZMO_ELASTIC_FLUX)
+#error "XSPLIT_SHEAR_STAR is wired into the MFM branch of xSplitElasticHLLC with the stress in the solver (ELASTIC, GIZMO_ELASTIC_FLUX 0, no contact frame, no HLLC_EP)."
 #endif
 #if TIME_RK4 && (TIME_KDK || DRIFT_KDK || TIME_DKD || RECON_TIME_PRED || FRAME_HALFSTEP || ADAPTIVE_TIMESTEP || !ELASTIC)
 #error "TIME_RK4: set TIME_KDK, DRIFT_KDK, TIME_DKD, RECON_TIME_PRED, FRAME_HALFSTEP, ADAPTIVE_TIMESTEP to 0 (ELASTIC path)."

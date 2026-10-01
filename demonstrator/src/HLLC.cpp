@@ -1064,6 +1064,34 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
 #endif // MFM_ENERGY_STARFIX
         }
     }
+#if XSPLIT_SHEAR_STAR
+    {
+        // Tangential traction from the shear-wave Riemann problem (see XSPLIT_SHEAR_STAR) instead of the
+        // side sign(S*) picked above: replace -S_nt and undo that side's -v_t S_nt in the energy flux.
+        const bool left = (Sstar >= 0.0);
+        const double *Wk = left ? WL : WR;
+#if XSPLIT_SHEAR_STAR == 2
+        const double ZL = sqrt(std::max(muL, 0.) * WL[0]);
+        const double ZR = sqrt(std::max(muR, 0.) * WR[0]);
+#else
+        const double ZL = 0., ZR = 0.;
+#endif
+        for (int d = 1; d < DIM; ++d){
+            const double SnL = SijRotL[d], SnR = SijRotR[d];   // row 0 of the face-frame stress: S_nt
+            const double vtL = WL[2+d], vtR = WR[2+d];
+            double Sst, vst;
+            if (ZL + ZR > 0.){
+                Sst = (ZR*SnL + ZL*SnR + ZL*ZR*(vtR - vtL)) / (ZL + ZR);
+                vst = (ZL*vtL + ZR*vtR + SnR - SnL) / (ZL + ZR);
+            } else {
+                Sst = .5*(SnL + SnR);
+                vst = .5*(vtL + vtR);
+            }
+            totflux[2+d] = -Sst;
+            totflux[1] += Wk[2+d] * (left ? SnL : SnR) - vst * Sst;
+        }
+    }
+#endif // XSPLIT_SHEAR_STAR
 
 }
 
