@@ -4226,15 +4226,30 @@ void Particles::compEffectiveFace(){
             // the faces from Mass/Density.
             const double Vi  = m[i]  / rho[i];
             const double Vji = m[ji] / rho[ji];
-#if FACE_GRAD_WEIGHTS
+#if FACE_GRAD_WEIGHTS == 2
+            // Surface fade (see FACE_GRAD_WEIGHTS 2): each side's weights blended with its own gradBlend
+            // between the higher-order and the first-order set; A_ij stays antisymmetric and linear-consistent.
+            const double wFi = gradBlend[i], wFj = gradBlend[ji];
+            double psiFi[DIM], psiFj[DIM];
+            for (int alpha=0; alpha<DIM; ++alpha){
+                psiFi[alpha] = wFi*psijTildeGrad_xi[i*MAX_NUM_INTERACTIONS+j][alpha]
+                             + (1. - wFi)*psijTilde_xi[i*MAX_NUM_INTERACTIONS+j][alpha];
+                psiFj[alpha] = wFj*psijTildeGrad_xi[ij+ji*MAX_NUM_INTERACTIONS][alpha]
+                             + (1. - wFj)*psijTilde_xi[ij+ji*MAX_NUM_INTERACTIONS][alpha];
+            }
+#elif FACE_GRAD_WEIGHTS
             // Faces from the higher-order gradient weights (see FACE_GRAD_WEIGHTS).
             auto *psiF = psijTildeGrad_xi;
 #else
             auto *psiF = psijTilde_xi;
 #endif
             for (int alpha=0; alpha<DIM; ++alpha){
+#if FACE_GRAD_WEIGHTS == 2
+                Aij[i*MAX_NUM_INTERACTIONS+j][alpha] = Vi*psiFi[alpha] - Vji*psiFj[alpha];
+#else
                 Aij[i*MAX_NUM_INTERACTIONS+j][alpha] = Vi*psiF[i*MAX_NUM_INTERACTIONS+j][alpha]
                         - Vji*psiF[ij+ji*MAX_NUM_INTERACTIONS][alpha];
+#endif
 #if ELASTIC_FACE_MODE == 3
                 AhalfI[i*MAX_NUM_INTERACTIONS+j][alpha] = Vi*psijTilde_xi[i*MAX_NUM_INTERACTIONS+j][alpha];
                 AhalfJ[i*MAX_NUM_INTERACTIONS+j][alpha] = Vji*psijTilde_xi[ij+ji*MAX_NUM_INTERACTIONS][alpha];

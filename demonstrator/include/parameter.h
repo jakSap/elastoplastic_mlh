@@ -1227,6 +1227,11 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// first-order weights there, so the faces fall back with them.
 ///   0 = first-order weights (Hopkins 2015 / GIZMO)
 ///   1 = higher-order weights psijTildeGrad
+///   2 = 1 with a free-surface fade (non-periodic, SURFACE_GRAD_BLEND): each side's weights are
+///       gradBlend_i psijTildeGrad + (1 - gradBlend_i) psijTilde, i.e. the faces drop to first order exactly
+///       where the gradients do. Needed on free surfaces: with 1 the one-sided cubic weights of the outer
+///       rows build faces that drive a surface instability (rotating disc d0.05: u < 0 after 0.03 rotations,
+///       2026-10-01); A_ij stays antisymmetric and linear-consistent for any blend.
 #define FACE_GRAD_WEIGHTS 0
 
 /// With FACE_GRAD_WEIGHTS, 78 % of the faces of the square lattice point against x_j - x_i (the
@@ -1362,6 +1367,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #endif
 #if MOMENTUM_PREF && !PERIODIC_BOUNDARIES
 #error "MOMENTUM_PREF assumes a periodic box: at a free surface sum_j A_ij is the missing boundary face, so P_ref would act as an ambient pressure on the body (the free-surface P_ref is 0, i.e. the flag off)."
+#endif
+#if FACE_GRAD_WEIGHTS == 2 && !(SURFACE_GRAD_BLEND && !PERIODIC_BOUNDARIES)
+#error "FACE_GRAD_WEIGHTS 2 fades the faces with gradBlend: needs SURFACE_GRAD_BLEND on the non-periodic path (periodic: use 1)."
 #endif
 #if FACE_GRAD_WEIGHTS && !SECOND_ORDER_GRADIENTS
 #error "FACE_GRAD_WEIGHTS builds the faces from the higher-order gradient weights: set GRADIENT_ORDER >= 2."

@@ -82,6 +82,16 @@ V[d3]="${FULL/MOMENTUM_PREF:1/} $DSK XSPLIT_SHEAR_STAR:2 SURFACE_GRAD_BLEND:1"  
 V[d3n]="${FULL/MOMENTUM_PREF:1/} $DSK XSPLIT_SHEAR_STAR:2"                      # third order, hard fallback only
 V[d3x0]="${FULL/MOMENTUM_PREF:1/} $DSK SURFACE_GRAD_BLEND:1"                    # third order without the fix
 V[d4]="${V[q23r4]/MOMENTUM_PREF:1/} $DSK XSPLIT_SHEAR_STAR:2 SURFACE_GRAD_BLEND:1" # fourth order (RK4 + quad recon)
+# disc ablation of d3 (the free surface goes unstable after ~0.15 rotations at d0.05): one ingredient changed each
+V[d3f1]="${V[d3]/FACE_GRAD_WEIGHTS:1/}"                                # first-order faces
+V[d3lim]="${V[d3]/SLOPE_LIMITING:0 PAIRWISE_LIMITER:0/SLOPE_LIMITING:1 PAIRWISE_LIMITER:1}"   # both limiters on
+V[d3ns]="${V[d3]/EXPLICIT_VOL_SEED_IC:1/}"                             # kernel-sum density seed
+V[d3g1]="${V[d3f1]/GRADIENT_ORDER:3/GRADIENT_ORDER:1}"                 # linear-exact gradients (faces first order)
+V[d3kdk]="${V[d3]/TIME_RK3:1 TIME_KDK:0 TIME_KDK_FIELD_DRIFT:0/}"     # TIME_KDK instead of RK3
+# fix: cubic faces faded to first order at the surface with gradBlend (FACE_GRAD_WEIGHTS 2)
+V[d3fb]="${V[d3]/FACE_GRAD_WEIGHTS:1/FACE_GRAD_WEIGHTS:2}"             # third order, faded faces
+V[d4fb]="${V[d4]/FACE_GRAD_WEIGHTS:1/FACE_GRAD_WEIGHTS:2}"             # fourth order, faded faces
+V[d4f1]="${V[d4]/FACE_GRAD_WEIGHTS:1/}"                                # fourth order, first-order faces (f1q23r4 route)
 [ -f "$HERE/variants.sh" ] && source "$HERE/variants.sh"
 for t in "$@"; do
     [ -n "${V[$t]+x}" ] || { echo "unknown variant $t" >&2; exit 1; }
