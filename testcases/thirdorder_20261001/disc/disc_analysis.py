@@ -102,7 +102,7 @@ if __name__ == "__main__":
     axs[0].set_title("(a) angular momentum, total variation", loc="left", fontsize=11)
     axs[1].set_ylabel("sum_n |dE| / E(0)  (every step)"); axs[1].set_yscale("log")
     axs[1].set_title("(b) total energy, total variation", loc="left", fontsize=11)
-    axs[2].set_ylabel("min u  (IC: u = 1)"); axs[2].set_ylim(0.6, 1.02)
+    axs[2].set_ylabel("min u  (IC: u = 1)"); axs[2].set_ylim(0.3, 1.02)
     axs[2].set_title("(c) internal-energy drain at the surface", loc="left", fontsize=11)
     for ax in axs: ax.set_xlabel("rotations")
     h, l = axs[0].get_legend_handles_labels()
