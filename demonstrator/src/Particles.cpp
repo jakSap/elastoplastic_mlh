@@ -3545,6 +3545,24 @@ void Particles::compPsijTilde(Helper &helper){
         }
 #endif
 #endif // SURFACE_GRAD_BLEND
+#if RECON_HESSIAN
+        // quadratic Taylor weights (basis u^2, uv, v^2 of buildGradBasis) from the same inverse moment
+        // matrix, as in the periodic compPsijTilde; zero on the first-order fallback
+        for (int j=0; j<noi[i]; ++j){
+            for (int c=0; c<3; ++c) psijTildeHess_xi[j+i*MAX_NUM_INTERACTIONS][c] = 0.;
+            if (!useSecond) continue;
+            iP = nnl[j+i*MAX_NUM_INTERACTIONS];
+            const double r = sqrt(pow(x[i]-x[iP],2) + pow(y[i]-y[iP],2));
+            const double psij_xi = kernel(r, hi)/omega[i];
+            buildGradBasis((x[iP]-x[i])*sInv, (y[iP]-y[i])*sInv, pbasis);
+            for (int c=0; c<3; ++c){
+                double val = 0.;
+                for (int k=0; k<GRAD_MAT_DIM; ++k)
+                    val += Mmat[(DIM+c)*GRAD_MAT_DIM+k]*pbasis[k];
+                psijTildeHess_xi[j+i*MAX_NUM_INTERACTIONS][c] = sInv*sInv*val*psij_xi;
+            }
+        }
+#endif
 #endif
     }
 }
@@ -6542,6 +6560,60 @@ void Particles::rkBlend(double a, double b, const Domain &domain){
 }
 #endif // TIME_RK3
 
+#if RECON_HESSIAN
+void Particles::compHessians(Particles *ghostP){
+    // Quadratic Taylor coefficients c (f(x_i + d) ~ f_i + grad.d + c0 dx^2 + c1 dx dy + c2 dy^2) of rho, P,
+    // v (and S under ELASTIC) from the same least-squares fit as the gradient (see RECON_HESSIAN). Periodic:
+    // ghost neighbours included and the result copied to the ghosts (ghostP). Free surface (ghostP null):
+    // under SURFACE_GRAD_BLEND the coefficients are faded with the particle's blend weight gradBlend, like
+    // the gradients, so a surface particle drops to the linear reconstruction together with them.
+#if ELASTIC
+    constexpr int NQ = 7;
+    double *f[NQ] = { rho, P, vx, vy, Sxx, Sxy, Syy };
+    double (*H[NQ])[3] = { rhoHess, PHess, vxHess, vyHess, SxxHess, SxyHess, SyyHess };
+#else
+    constexpr int NQ = 4;
+    double *f[NQ] = { rho, P, vx, vy };
+    double (*H[NQ])[3] = { rhoHess, PHess, vxHess, vyHess };
+#endif
+    for (int q=0; q<NQ; ++q){
+        for (int i=0; i<N; ++i){
+            double c[3] = {0., 0., 0.};
+            for (int j=0; j<noi[i]; ++j){
+                const int jj = nnl[j+i*MAX_NUM_INTERACTIONS];
+                const double df = f[q][jj] - f[q][i];
+                for (int k=0; k<3; ++k) c[k] += psijTildeHess_xi[j+i*MAX_NUM_INTERACTIONS][k]*df;
+            }
+#if PERIODIC_BOUNDARIES
+            double *fg[NQ] = { ghostP->rho, ghostP->P, ghostP->vx, ghostP->vy
+#if ELASTIC
+                               , ghostP->Sxx, ghostP->Sxy, ghostP->Syy
+#endif
+                             };
+            for (int j=0; j<noiGhosts[i]; ++j){
+                const int g = nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS];
+                const double df = fg[q][g] - f[q][i];
+                for (int k=0; k<3; ++k) c[k] += psijTildeHess_xiGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS][k]*df;
+            }
+#elif SURFACE_GRAD_BLEND
+            for (int k=0; k<3; ++k) c[k] *= gradBlend[i];
+#endif
+            for (int k=0; k<3; ++k) H[q][i][k] = c[k];
+        }
+#if PERIODIC_BOUNDARIES
+        double (*Hg[NQ])[3] = { ghostP->rhoHess, ghostP->PHess, ghostP->vxHess, ghostP->vyHess
+#if ELASTIC
+                                , ghostP->SxxHess, ghostP->SxyHess, ghostP->SyyHess
+#endif
+                              };
+        for (int i=0; i<N*(DIM+1); ++i)
+            if (ghostMap[i] >= 0)
+                for (int k=0; k<3; ++k) Hg[q][ghostMap[i]][k] = H[q][i/(DIM+1)][k];
+#endif
+    }
+}
+#endif
+
 #if PERIODIC_BOUNDARIES
 void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
                                      const double &kernelSize){
@@ -6677,48 +6749,6 @@ void Particles::updateGhostState(Particles &ghostParticles){
         }
     }
 }
-
-#if RECON_HESSIAN
-void Particles::compHessians(Particles &ghostParticles){
-    // Quadratic Taylor coefficients c (f(x_i + d) ~ f_i + grad.d + c0 dx^2 + c1 dx dy + c2 dy^2) of rho, P,
-    // v (and S under ELASTIC) from the same least-squares fit as the gradient (see RECON_HESSIAN), then copied
-    // to the ghosts.
-#if ELASTIC
-    constexpr int NQ = 7;
-    double *f[NQ] = { rho, P, vx, vy, Sxx, Sxy, Syy };
-    double *fg[NQ] = { ghostParticles.rho, ghostParticles.P, ghostParticles.vx, ghostParticles.vy,
-                       ghostParticles.Sxx, ghostParticles.Sxy, ghostParticles.Syy };
-    double (*H[NQ])[3] = { rhoHess, PHess, vxHess, vyHess, SxxHess, SxyHess, SyyHess };
-    double (*Hg[NQ])[3] = { ghostParticles.rhoHess, ghostParticles.PHess, ghostParticles.vxHess, ghostParticles.vyHess,
-                            ghostParticles.SxxHess, ghostParticles.SxyHess, ghostParticles.SyyHess };
-#else
-    constexpr int NQ = 4;
-    double *f[NQ] = { rho, P, vx, vy };
-    double *fg[NQ] = { ghostParticles.rho, ghostParticles.P, ghostParticles.vx, ghostParticles.vy };
-    double (*H[NQ])[3] = { rhoHess, PHess, vxHess, vyHess };
-    double (*Hg[NQ])[3] = { ghostParticles.rhoHess, ghostParticles.PHess, ghostParticles.vxHess, ghostParticles.vyHess };
-#endif
-    for (int q=0; q<NQ; ++q){
-        for (int i=0; i<N; ++i){
-            double c[3] = {0., 0., 0.};
-            for (int j=0; j<noi[i]; ++j){
-                const int jj = nnl[j+i*MAX_NUM_INTERACTIONS];
-                const double df = f[q][jj] - f[q][i];
-                for (int k=0; k<3; ++k) c[k] += psijTildeHess_xi[j+i*MAX_NUM_INTERACTIONS][k]*df;
-            }
-            for (int j=0; j<noiGhosts[i]; ++j){
-                const int g = nnlGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS];
-                const double df = fg[q][g] - f[q][i];
-                for (int k=0; k<3; ++k) c[k] += psijTildeHess_xiGhosts[j+i*MAX_NUM_GHOST_INTERACTIONS][k]*df;
-            }
-            for (int k=0; k<3; ++k) H[q][i][k] = c[k];
-        }
-        for (int i=0; i<N*(DIM+1); ++i)
-            if (ghostMap[i] >= 0)
-                for (int k=0; k<3; ++k) Hg[q][ghostMap[i]][k] = H[q][i/(DIM+1)][k];
-    }
-}
-#endif
 
 void Particles::updateGhostGradients(Particles &ghostParticles){
     for (int i=0; i<N*(DIM+1); ++i){

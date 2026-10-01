@@ -507,7 +507,7 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
 #if ELASTIC
     double (*SxxHess)[3], (*SxyHess)[3], (*SyyHess)[3];
 #endif
-    void compHessians(Particles &ghostParticles);
+    void compHessians(Particles *ghostP = nullptr);
 #endif
 #if MOMENTUM_PREF
     /// reference pressure removed from the momentum flux in collectFluxes (see MOMENTUM_PREF)

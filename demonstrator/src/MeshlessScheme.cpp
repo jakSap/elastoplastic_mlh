@@ -191,7 +191,7 @@ void MeshlessScheme::run(){
         particles->updateGhostGradients(ghostParticles);
 #endif // SLOPE_LIMITING
 #if RECON_HESSIAN
-        particles->compHessians(ghostParticles);
+        particles->compHessians(&ghostParticles);
 #endif
 #else // PERIODIC_BOUNDARIES
         particles->compPsijTilde(helper);
@@ -223,6 +223,9 @@ void MeshlessScheme::run(){
 #endif
 #if POLY_RECONSTRUCTION_ACTIVE
         particles->compPolyCoefficients();
+#endif
+#if RECON_HESSIAN
+        particles->compHessians();
 #endif
 #endif // PERIODIC_BOUNDARIES
         particles->compEffectiveFace();
@@ -585,7 +588,7 @@ void MeshlessScheme::run(){
         particles->updateGhostGradients(ghostParticles);
 #endif // SLOPE_LIMITING
 #if RECON_HESSIAN
-        particles->compHessians(ghostParticles);
+        particles->compHessians(&ghostParticles);
 #endif
 #else // PERIODIC_BOUNDARIES
         particles->compPsijTilde(helper);
@@ -662,6 +665,9 @@ void MeshlessScheme::run(){
         // face reconstruction (fields are final for this step's flux pass).
         Logger(DEBUG) << "      > Computing higher-order Taylor coefficients";
         particles->compPolyCoefficients();
+#endif
+#if RECON_HESSIAN
+        particles->compHessians();
 #endif
 #endif
 #if !TIME_KDK

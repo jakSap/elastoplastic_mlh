@@ -1264,7 +1264,8 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   1 = P_ref = volume-weighted mean pressure
 #define MOMENTUM_PREF 0
 
-/// Quadratic face reconstruction on the periodic path: W_face = W_i + grad W.d + RECON_HESSIAN_FAC *
+/// Quadratic face reconstruction (2D; periodic, and since 2026-10-01 also with free surfaces, where the
+/// coefficients fade with SURFACE_GRAD_BLEND's gradBlend like the gradients): W_face = W_i + grad W.d + RECON_HESSIAN_FAC *
 /// (c0 dx^2 + c1 dx dy + c2 dy^2), d = x_ij - x_i, with the quadratic Taylor coefficients c of the same
 /// least-squares fit (GRADIENT_ORDER >= 2). Fields rho, P, v and, under ELASTIC, the face stress S that
 /// xSplitElasticHLLC receives (added 2026-10-01 for the mu > 0 wave; S = 0 adds exact zeros, so mu = 0 runs are
@@ -1356,8 +1357,11 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #if FACE_GRAD_WEIGHTS && (!USE_HLLC || FRAGMENTATION || OUTPUT_ENERGY_BUDGET)
 #error "FACE_GRAD_WEIGHTS: the backward-face swap is wired into the HLLC solves only (no damage, no energy budget)."
 #endif
-#if RECON_HESSIAN && !(SECOND_ORDER_GRADIENTS && DIM == 2 && PERIODIC_BOUNDARIES && !POLY_RECONSTRUCTION_ACTIVE)
-#error "RECON_HESSIAN is wired for the 2D periodic path with GRADIENT_ORDER >= 2 (and without POLY_RECONSTRUCTION)."
+#if RECON_HESSIAN && !(SECOND_ORDER_GRADIENTS && DIM == 2 && !POLY_RECONSTRUCTION_ACTIVE)
+#error "RECON_HESSIAN is wired for 2D with GRADIENT_ORDER >= 2 (and without POLY_RECONSTRUCTION)."
+#endif
+#if MOMENTUM_PREF && !PERIODIC_BOUNDARIES
+#error "MOMENTUM_PREF assumes a periodic box: at a free surface sum_j A_ij is the missing boundary face, so P_ref would act as an ambient pressure on the body (the free-surface P_ref is 0, i.e. the flag off)."
 #endif
 #if FACE_GRAD_WEIGHTS && !SECOND_ORDER_GRADIENTS
 #error "FACE_GRAD_WEIGHTS builds the faces from the higher-order gradient weights: set GRADIENT_ORDER >= 2."
