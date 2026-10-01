@@ -7888,6 +7888,14 @@ double Particles::sumMomentumY(){
     return momY;
 }
 
+double Particles::sumAngularMomentumZ(){
+    double Lz = 0.;
+    for (int i=0; i<N; ++i){
+        Lz += m[i]*(x[i]*vy[i] - y[i]*vx[i]);
+    }
+    return Lz;
+}
+
 #if DIM == 3
 double Particles::sumMomentumZ(){
     double momZ = 0.;

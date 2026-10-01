@@ -1008,6 +1008,14 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///       i.e. the upwind shear-wave dissipation the x-split fan lacks; flux -S*_nt, energy -v*_t S*_nt.
 #define XSPLIT_SHEAR_STAR 0
 
+/// Per-step log of the conserved quantities (diagnostic only, numerics unchanged): every step, at the
+/// synchronised state t^n (the snapshot point: top of the step, after the closing half kick under TIME_KDK,
+/// stage 0 under TIME_RK3/RK4), one line "t step M E px py Lz" (%.17g) is appended to <outDir>/conservation.txt.
+/// Lz = sum m (x v_y - y v_x) about the origin (meaningless in a periodic box). Lets the analysis accumulate the
+/// total variation sum_n |Q(t_{n+1}) - Q(t_n)| over every step, which snapshots (dump cadence) cannot resolve.
+///   0 = off, 1 = on
+#define CONSERVATION_LOG 0
+
 /// Second-order (trapezoidal) drift of the particle positions.
 ///
 /// The step is kick-then-drift: updateState() applies the full-dt kick from

@@ -12,7 +12,7 @@ set_flag() { grep -qE "^#define $2 " "$1" || { echo "missing $2" >&2; exit 1; }
              sed -i -E "s|^#define $2 .*$|#define $2 $3|" "$1"; }
 COMMON="PERIODIC_BOUNDARIES:1 ADAPTIVE_TIMESTEP:0 DIM:2 EOS:0 GIZMO_ELASTIC_FLUX:0 RECON_FACE_DV:0 RECON_FACE_DV_SPATIAL:0
  ELASTIC_FACE_MODE:0 TENSILE_CORRECTION_TRACTION_GATE:0 TENSILE_CORRECTION_PARTICLE:0 TENSILE_CORRECTION_DAMP_LIMIT:0
- POLY_RECONSTRUCTION:0"
+ POLY_RECONSTRUCTION:0 CONSERVATION_LOG:1"
 declare -A V
 V[b1]="GRADIENT_ORDER:1"
 V[b1chk]="GRADIENT_ORDER:1"                   # = b1 rebuilt from the thirdorder tree (bit-identity check)                       # baseline = today's defaults (TIME_KDK) on the GEF 0 path
@@ -76,7 +76,7 @@ V[t3pmchk]="$FULL EOS:1"                             # t3pm rebuilt from the new
 # MOMENTUM_PREF (guarded: at a free surface P_ref would be an ambient pressure; the free-surface value is 0).
 # NOCOMMON = demonstrator defaults without the periodic COMMON block.
 DSK="PERIODIC_BOUNDARIES:0 EOS:2"
-V[dstd]="NOCOMMON PERIODIC_BOUNDARIES:0 ADAPTIVE_TIMESTEP:0"          # standard scheme (GEF 1, defaults), fixed dt
+V[dstd]="NOCOMMON PERIODIC_BOUNDARIES:0 ADAPTIVE_TIMESTEP:0 CONSERVATION_LOG:1"          # standard scheme (GEF 1, defaults), fixed dt
 V[dxs]="GRADIENT_ORDER:1 $DSK"                                         # today's GEF 0 scheme (2nd order)
 V[d3]="${FULL/MOMENTUM_PREF:1/} $DSK XSPLIT_SHEAR_STAR:2 SURFACE_GRAD_BLEND:1"   # third order + surface fade
 V[d3n]="${FULL/MOMENTUM_PREF:1/} $DSK XSPLIT_SHEAR_STAR:2"                      # third order, hard fallback only

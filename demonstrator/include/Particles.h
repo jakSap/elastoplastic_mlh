@@ -586,6 +586,8 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     double sumEnergy();
     double sumMomentumX();
     double sumMomentumY();
+    /// sum m (x v_y - y v_x) about the origin (CONSERVATION_LOG)
+    double sumAngularMomentumZ();
 #if DIM==3
     double sumMomentumZ();
 #endif

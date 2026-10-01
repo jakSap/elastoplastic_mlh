@@ -3,6 +3,7 @@
 //
 
 #include <chrono>
+#include <fstream>
 
 #include "../include/MeshlessScheme.h"
 
@@ -54,6 +55,19 @@ void MeshlessScheme::run(){
 #endif // ADAPTIVE_TIMESTEP
 
 
+#if CONSERVATION_LOG
+    // per-step conserved quantities at the synchronised state (see CONSERVATION_LOG)
+    std::ofstream consLog(config.outDir + "/conservation.txt");
+    consLog << "# t step M E px py Lz   (CONSERVATION_LOG: synchronised state t^n, every step)\n";
+    consLog << std::setprecision(17);
+    long consStep = 0;
+    auto logConservation = [&](){
+        consLog << t << ' ' << consStep++ << ' ' << particles->sumMass() << ' ' << particles->sumEnergy() << ' '
+                << particles->sumMomentumX() << ' ' << particles->sumMomentumY() << ' '
+                << particles->sumAngularMomentumZ() << '\n';
+        consLog.flush();   // runs ending in exit() skip the stream's destructor
+    };
+#endif
     // Snapshot writer. Called at the top of the step (baseline, the state there
     // is the solution at t^n) or after the closing half kick (TIME_KDK, where the
     // state at the top is only a prediction).
@@ -272,6 +286,9 @@ void MeshlessScheme::run(){
             Logger(INFO) << "    > RK4 stage " << s+1;
             rk3Rates();
             if (s == 0){
+#if CONSERVATION_LOG
+                logConservation();
+#endif
                 writeDumpIfDue();
                 if (t >= config.timeEnd){
                     Logger(INFO) << "    > t = " << t << " -> FINISHED!";
@@ -308,6 +325,9 @@ void MeshlessScheme::run(){
                 // the rates pass only derives (rho, P, gradients, fluxes) from the
                 // state, so the store and the snapshot see the solution at t^n
                 particles->rkSave();
+#if CONSERVATION_LOG
+                logConservation();
+#endif
                 writeDumpIfDue();
                 if (t >= config.timeEnd){
                     Logger(INFO) << "    > t = " << t << " -> FINISHED!";
@@ -501,6 +521,9 @@ void MeshlessScheme::run(){
         // k c_l dt/2 to 0.2% at two different CFL numbers. It was an output
         // artifact, not a splitting error -- the scheme is second order.
 #if !TIME_KDK
+#if CONSERVATION_LOG
+        logConservation();
+#endif
         writeDumpIfDue();
         if (t>=config.timeEnd){
             Logger(INFO) << "    > t = " << t << " -> FINISHED!";
@@ -829,6 +852,9 @@ void MeshlessScheme::run(){
 #endif
 #endif // !TIME_KDK_FIELD_DRIFT
         }
+#if CONSERVATION_LOG
+        logConservation();
+#endif
         writeDumpIfDue();   // synchronised x, v, u, S, rhoExplicit at t^n
         if (t>=config.timeEnd){
             Logger(INFO) << "    > t = " << t << " -> FINISHED!";

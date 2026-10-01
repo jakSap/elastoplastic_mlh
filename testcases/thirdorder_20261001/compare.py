@@ -10,7 +10,9 @@ Per run, after one period (wave parameters given explicitly, see RUNS):
   harm   L1 of the y-averaged error with the fitted fundamental removed (= harmonics / non-smooth part)
   ydep   L1 of the y-dependent part of the error (lattice noise)
   vy     max |transverse velocity| / (c A)  (longitudinal: v_y, shear: v_x)
-  dE     |E(T) - E(0)|/E(0);  dp = |sum m v(T) - sum m v(0)| / (M c A)
+  TVE    sum_n |E(t_{n+1}) - E(t_n)| / E(0) over every step up to T (CONSERVATION_LOG, <run>/output/conservation.txt;
+         nan for runs without the log) -- the total variation, not the drift (user, 2026-10-01)
+  TVp    sum_n |P(t_{n+1}) - P(t_n)| / (M c A), same log
   wall   wall-clock minutes (run.log)
 Usage: ./compare.py [long|shear|big]   -> prints a table and writes compare_<set>.txt"""
 import os, sys, glob, re, numpy as np, h5py
@@ -76,12 +78,16 @@ def metrics(run, n, A, c, c1, mu, T, mode):
     (pe, qe), *_ = np.linalg.lstsq(B, eprof, rcond=None)
     harm = np.mean(np.abs(eprof - B @ np.array([pe, qe])))
     ydep = np.mean(np.abs(e - eprof[col]))
-    E = lambda s: np.sum(s["m"]*(s["u"] + .5*np.sum(s["v"]**2, 1)))
-    dE = abs(E(s1) - E(s0))/abs(E(s0))
-    P = lambda s: np.sum(s["m"][:, None]*s["v"], 0)
-    dp = np.max(np.abs(P(s1) - P(s0)))/(np.sum(m)*c*A)
+    TVE = TVp = np.nan
+    fn = os.path.join(run, "output", "conservation.txt")
+    if os.path.exists(fn):
+        d = np.loadtxt(fn, comments="#", ndmin=2)
+        d = d[d[:, 0] <= T + 1e-9]
+        if len(d) > 1:
+            TVE = np.sum(np.abs(np.diff(d[:, 3])))/abs(d[0, 3])
+            TVp = np.sum(np.hypot(np.diff(d[:, 4]), np.diff(d[:, 5])))/(np.sum(m)*c*A)
     return dict(L1=L1, L1nl=L1nl, L1S=L1S, damp=1 - np.hypot(p, q), phase=abs(np.arctan2(-q, p)), harm=harm,
-                ydep=ydep, vy=np.abs(vt).max()/(c*A), dE=dE, dp=dp, wall=wall(run))
+                ydep=ydep, vy=np.abs(vt).max()/(c*A), TVE=TVE, TVp=TVp, wall=wall(run))
 
 
 def R(tag, n, eos, mode="long", A=1e-6, base=HERE, name=None):
@@ -104,7 +110,7 @@ SETS = {
 
 if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "long"
-    keys = ("L1", "L1nl", "L1S", "damp", "phase", "harm", "ydep", "vy", "dE", "dp", "wall")
+    keys = ("L1", "L1nl", "L1S", "damp", "phase", "harm", "ydep", "vy", "TVE", "TVp", "wall")
     out = ["%-12s %4s " % ("run", "n") + " ".join("%9s" % kk for kk in keys)]
     for tag, n, run, A, c, c1, mu, T, mode in SETS[which]:
         if not os.path.exists(os.path.join(run, "output")): continue
