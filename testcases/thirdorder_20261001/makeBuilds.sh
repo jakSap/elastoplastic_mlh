@@ -70,6 +70,7 @@ for e in m:1 t:2; do
     V[q23r4${s}x2]="${V[q23r4]} $E XSPLIT_SHEAR_STAR:2"
 done
 V[t3pchk]="$FULL"                                    # t3p rebuilt after the elastic changes (bit-identity check)
+V[t3pmchk]="$FULL EOS:1"                             # t3pm rebuilt from the new tree (RK Euler stress stage, flag 0)
 [ -f "$HERE/variants.sh" ] && source "$HERE/variants.sh"
 for t in "$@"; do
     [ -n "${V[$t]+x}" ] || { echo "unknown variant $t" >&2; exit 1; }
