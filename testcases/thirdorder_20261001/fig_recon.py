@@ -18,12 +18,10 @@ def series(tag, k=0):
         if r is None: continue
         ns.append(n); e.append(r[k])
     return np.array(ns), np.array(e)
-S = [("t3p_A7", "cubic faces, linear recon", C[0], "-"),
-     ("q23_A7", "cubic faces, quadratic recon x 2/3", C[1], "-"),
-     ("f1q23_A7", "first-order faces, quadratic recon x 2/3", C[2], "-"),
-     ("qT", "cubic faces, Taylor quadratic recon (A = 1e-6)", C[3], "-"),
-     ("q23_A7c12", "cubic faces, quadratic x 2/3, dt/4", C[1], ":"),
-     ("f1q23_A7c12", "first-order faces, quadratic x 2/3, dt/4", C[2], ":")]
+S = [("t3p", "cubic faces, linear recon, RK3", C[0], "-"),
+     ("qT", "cubic faces, Taylor quadratic recon, RK3", C[3], "-"),
+     ("q23r4", "cubic faces, quadratic recon x 2/3, RK4", C[1], "-"),
+     ("f1q23r4", "first-order faces, quadratic recon x 2/3, RK4", C[2], "-")]
 plt.rcParams.update({"font.size": 10, "axes.edgecolor": INK2, "axes.labelcolor": INK, "xtick.color": INK2,
                      "ytick.color": INK2, "text.color": INK})
 fig, axs = plt.subplots(1, 2, figsize=(11, 4.6), facecolor=SURF)
@@ -31,10 +29,11 @@ for ax, k, title, ylab in ((axs[0], 6, "(a) L1(rho) / A vs weakly nonlinear refe
                            (axs[1], 2, "(b) damping 1 - a (filled: > 0, open: < 0, amplitude grows)", "|1 - a|")):
     ax.set_facecolor(SURF); ax.grid(True, color=GRID, lw=0.8); ax.set_axisbelow(True)
     for s in ("top", "right"): ax.spines[s].set_visible(False)
-    n0 = np.array([32, 512])
-    for p, y0, lab in ((3, 2e-3, "p = 3"), (4, 6e-5, "p = 4")):
+    guides = ((3, 2e-3, 512), (4, 6e-5, 512)) if k == 6 else ((3, 2e-3, 512), (5, 3e-5, 256))
+    for p, y0, nend in guides:
+        n0 = np.array([32, nend])
         ax.plot(n0, y0*(n0/32.)**(-p), ls=(0, (4, 3)), color=INK2, lw=1)
-        ax.text(n0[1]*1.05, y0*(n0[1]/32.)**(-p), lab, color=INK2, va="center", fontsize=9)
+        ax.text(n0[1]*1.05, y0*(n0[1]/32.)**(-p), "p = %d" % p, color=INK2, va="center", fontsize=9)
     for tag, lab, col, ls in S:
         ns, e = series(tag, k)
         if len(ns) == 0: continue
@@ -48,7 +47,7 @@ for ax, k, title, ylab in ((axs[0], 6, "(a) L1(rho) / A vs weakly nonlinear refe
     ax.set_xlabel("particles per wavelength n"); ax.set_ylabel(ylab)
     ax.set_title(title, loc="left", color=INK, fontsize=11)
 axs[0].legend(frameon=False, fontsize=8, loc="lower left")
-fig.suptitle("Face reconstruction (all with P_ref, exact IC density, SSP-RK3, GO 3; CFL 1/3 unless dt/4)",
+fig.suptitle("Face reconstruction and time integration (all: P_ref, exact IC density, GO 3, CFL 1/3, A = 1e-6)",
              x=0.01, ha="left", color=INK, fontsize=11)
 fig.tight_layout()
 out = os.path.join(HERE, "fig_recon.png"); fig.savefig(out, dpi=150, facecolor=SURF); print(out)

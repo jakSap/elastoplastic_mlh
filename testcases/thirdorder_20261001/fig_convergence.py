@@ -16,7 +16,7 @@ def series(tag):
         if not os.path.isdir(d): continue
         r = metrics(d, n, 1.0)
         if r is None: continue
-        ns.append(n); e.append(r[0])
+        ns.append(n); e.append(r[6])   # L1 against the weakly nonlinear O(A^2) reference
     return np.array(ns), np.array(e)
 A = [("t3p", "full third-order scheme", C[0]), ("b1", "today's scheme (GEF 0, KDK, limiters)", C[1]),
      ("hop", "gradient order 3 only", C[2])]
@@ -48,7 +48,7 @@ for ax, S, title in ((axs[0], A, "(a) scheme"), (axs[1], B, "(b) full scheme, on
     ax.set_xlabel("particles per wavelength n")
     ax.set_title(title, loc="left", color=INK, fontsize=11)
     ax.legend(frameon=False, fontsize=8.5, loc="lower left")
-axs[0].set_ylabel("L1(rho) / A   at t = 1")
+axs[0].set_ylabel("L1(rho) / A   at t = 1  (vs O(A^2) reference)")
 fig.suptitle("Ideal-gas soundwave, xSplitElasticHLLC, mu = 0, fixed CFL (dt = dx/3c)", x=0.01, ha="left",
              color=INK, fontsize=11)
 fig.tight_layout()
