@@ -510,6 +510,14 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     /// reference pressure removed from the momentum flux in collectFluxes (see MOMENTUM_PREF)
     double momentumPref { 0. };
 #endif
+#if TIME_RK4
+    /// RK4 stage stores U0..U3 (same quantities as the RK3 store) and their linear combination
+    struct RkSlot { std::vector<double> x, y, z, vx, vy, vz, e, lnRho, Sxx, Sxy, Syy, Sxz, Syz, Szz; };
+    RkSlot rkSlot[4];
+    void rkSaveSlot(int s);
+    /// U <- sum_m c[m] U_m + cCur U (sum = 1), positions by minimum image relative to U_0
+    void rkCombine(const double *c, int ns, double cCur, const Domain &domain);
+#endif
 #if TIME_RK3
     /// SSP-RK3 stage store U0 (see TIME_RK3): positions, velocity, specific total energy
     /// e = u + v^2/2, ln rhoExplicit and S at the start of the step.

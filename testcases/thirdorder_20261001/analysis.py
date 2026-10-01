@@ -37,22 +37,33 @@ def metrics(d, n, T):
     (p, q), *_ = np.linalg.lstsq(np.column_stack([np.sin(k*(xc-c*t)), np.cos(k*(xc-c*t))]), y, rcond=None)
     E = lambda s: np.sum(s["m"]*(s["u"] + .5*np.sum(s["v"]**2, 1)))
     dE = (E(s1) - E(s0))/abs(E(s0))
-    ok = all(np.isfinite(s1[q]).all() for q in ("rho", "v", "u"))
-    return L1r, L1v, 1 - np.hypot(p, q), abs(np.arctan2(-q, p)), dE, ok
+    ok = all(np.isfinite(s1[q_]).all() for q_ in ("rho", "v", "u"))
+    # Weakly nonlinear reference to O(A^2) via the Riemann invariants J+- = v +- 2c/(gamma-1): the forward part
+    # a = J+ - J+bar steepens, a = a0(xi) - (gamma+1)/4 t a0 a0'(xi), xi = x - c t; the IC (linear eigenmode, not
+    # an exact simple wave) launches a backward O(A^2) wave b0 = c (3-gamma)/4 A^2 sin^2(kx), moving with -c.
+    # rho/rhobar = 1 + (a-b)/(2c) + (3-gamma) a^2/(16 c^2), v = (a+b)/2; rhobar = total mass / total volume.
+    g = 5/3; s_ = np.sin(k*(x - c*t)); c_ = np.cos(k*(x - c*t))
+    a = 2*c*A*s_ + c*(g - 3)/4*A**2*s_**2 - (g + 1)/4*t*(2*c*A*s_)*(2*c*A*k*c_)
+    b = c*(3 - g)/4*A**2*np.sin(k*(x + c*t))**2
+    rbar = np.sum(s1["m"])/np.sum(s1["m"]/rho)
+    rho_nl = rbar*(1 + (a - b)/(2*c) + (3 - g)*a**2/(16*c*c))
+    L1nl = np.mean(np.abs(rho - rho_nl))/A
+    L1vnl = np.mean(np.abs(s1["v"][:, 0] - (a + b)/2))/(c*A)
+    return L1r, L1v, 1 - np.hypot(p, q), abs(np.arctan2(-q, p)), dE, ok, L1nl, L1vnl
 def main(args):
     T = 1.0
     if args and args[0] == "--t": T = float(args[1]); args = args[2:]
     out = ["t = %g; amplitudes / A; p = log2(err(n/2)/err(n))" % T,
-           "%-10s %4s  %10s %10s %11s %10s %9s   p: L1rho L1vx damp phase" % ("arm", "n", "L1(rho)", "L1(vx)", "1-a_rho", "|phase|", "dE/E")]
+           "%-12s %4s  %10s %10s %11s %10s %9s %10s   p: L1rho L1vx damp phase L1nl" % ("arm", "n", "L1(rho)", "L1(vx)", "1-a_rho", "|phase|", "dE/E", "L1nl(rho)")]
     for tag in args:
         prev = None
         for n in (16, 32, 64, 128, 256, 512, 1024):
             d = os.path.join(HERE, "run_%s_N%d/output" % (tag, n))
             if not os.path.isdir(d): continue
             r = metrics(d, n, T)
-            if r is None: out.append("%-10s %4d  (no t=%g snapshot)" % (tag, n, T)); prev = None; continue
-            s = "%-10s %4d  %.4e %.4e %+.4e %.4e %+.1e" % (tag, n, *r[:5]) + ("" if r[5] else " NaN!")
-            if prev: s += "   %5.2f %5.2f %5.2f %5.2f" % tuple(np.log2(abs(prev[j]/r[j])) for j in range(4))
+            if r is None: continue
+            s = "%-12s %4d  %.4e %.4e %+.4e %.4e %+.1e %.4e" % (tag, n, *r[:5], r[6]) + ("" if r[5] else " NaN!")
+            if prev: s += "   %5.2f %5.2f %5.2f %5.2f %5.2f" % tuple(np.log2(abs(prev[j]/r[j])) for j in (0, 1, 2, 3, 6))
             out.append(s); prev = r
         out.append("")
     print("\n".join(out))

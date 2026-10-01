@@ -6306,6 +6306,107 @@ void Particles::moveParticles(const double &dt, const Domain &domain){
     }
 #endif // MOVE_PARTICLES
 }
+#if TIME_RK4
+void Particles::rkSaveSlot(int s){
+    RkSlot &r = rkSlot[s];
+    r.x.assign(x, x + N); r.y.assign(y, y + N); r.vx.assign(vx, vx + N); r.vy.assign(vy, vy + N);
+#if DIM == 3
+    r.z.assign(z, z + N); r.vz.assign(vz, vz + N);
+#endif
+    r.e.resize(N);
+    for (int i=0; i<N; ++i){
+        double v2 = vx[i]*vx[i] + vy[i]*vy[i];
+#if DIM == 3
+        v2 += vz[i]*vz[i];
+#endif
+        r.e[i] = u[i] + .5*v2;
+    }
+#if EXPLICIT_VOL_INTEGRATION
+    r.lnRho.resize(N);
+    for (int i=0; i<N; ++i) r.lnRho[i] = explicitVolInitialized ? std::log(rhoExplicit[i]) : 0.;
+#endif
+#if ELASTIC
+    r.Sxx.assign(Sxx, Sxx + N); r.Sxy.assign(Sxy, Sxy + N); r.Syy.assign(Syy, Syy + N);
+#if DIM == 3
+    r.Sxz.assign(Sxz, Sxz + N); r.Syz.assign(Syz, Syz + N); r.Szz.assign(Szz, Szz + N);
+#endif
+#endif
+}
+
+void Particles::rkCombine(const double *c, int ns, double cCur, const Domain &domain){
+#if PERIODIC_BOUNDARIES
+    const double L[3] = { domain.bounds.maxX - domain.bounds.minX, domain.bounds.maxY - domain.bounds.minY,
+#if DIM == 3
+                          domain.bounds.maxZ - domain.bounds.minZ
+#else
+                          0.
+#endif
+    };
+    auto mi = [&](double d, int a){ return d - L[a]*std::round(d/L[a]); };
+#else
+    auto mi = [](double d, int){ return d; };
+#endif
+    const RkSlot &r0 = rkSlot[0];
+    for (int i=0; i<N; ++i){
+        double px = r0.x[i] + cCur*mi(x[i] - r0.x[i], 0), py = r0.y[i] + cCur*mi(y[i] - r0.y[i], 1);
+        for (int m=1; m<ns; ++m){
+            px += c[m]*mi(rkSlot[m].x[i] - r0.x[i], 0);
+            py += c[m]*mi(rkSlot[m].y[i] - r0.y[i], 1);
+        }
+        x[i] = px; y[i] = py;
+#if DIM == 3
+        double pz = r0.z[i] + cCur*mi(z[i] - r0.z[i], 2);
+        for (int m=1; m<ns; ++m) pz += c[m]*mi(rkSlot[m].z[i] - r0.z[i], 2);
+        z[i] = pz;
+#endif
+#if PERIODIC_BOUNDARIES
+        if (x[i] < domain.bounds.minX) x[i] += L[0]; else if (domain.bounds.maxX <= x[i]) x[i] -= L[0];
+        if (y[i] < domain.bounds.minY) y[i] += L[1]; else if (domain.bounds.maxY <= y[i]) y[i] -= L[1];
+#if DIM == 3
+        if (z[i] < domain.bounds.minZ) z[i] += L[2]; else if (domain.bounds.maxZ <= z[i]) z[i] -= L[2];
+#endif
+#endif
+        double v2 = vx[i]*vx[i] + vy[i]*vy[i];
+#if DIM == 3
+        v2 += vz[i]*vz[i];
+#endif
+        double e = cCur*(u[i] + .5*v2), nvx = cCur*vx[i], nvy = cCur*vy[i];
+#if DIM == 3
+        double nvz = cCur*vz[i];
+#endif
+        for (int m=0; m<ns; ++m){
+            e += c[m]*rkSlot[m].e[i]; nvx += c[m]*rkSlot[m].vx[i]; nvy += c[m]*rkSlot[m].vy[i];
+#if DIM == 3
+            nvz += c[m]*rkSlot[m].vz[i];
+#endif
+        }
+        vx[i] = nvx; vy[i] = nvy; v2 = nvx*nvx + nvy*nvy;
+#if DIM == 3
+        vz[i] = nvz; v2 += nvz*nvz;
+#endif
+        u[i] = e - .5*v2;
+#if EXPLICIT_VOL_INTEGRATION
+        if (explicitVolInitialized){
+            double lr = cCur*std::log(rhoExplicit[i]);
+            for (int m=0; m<ns; ++m) lr += c[m]*rkSlot[m].lnRho[i];
+            rhoExplicit[i] = std::exp(lr);
+            rho[i] = rhoExplicit[i];
+        }
+#endif
+#if ELASTIC
+        double sxx = cCur*Sxx[i], sxy = cCur*Sxy[i], syy = cCur*Syy[i];
+        for (int m=0; m<ns; ++m){ sxx += c[m]*rkSlot[m].Sxx[i]; sxy += c[m]*rkSlot[m].Sxy[i]; syy += c[m]*rkSlot[m].Syy[i]; }
+        Sxx[i] = sxx; Sxy[i] = sxy; Syy[i] = syy;
+#if DIM == 3
+        double sxz = cCur*Sxz[i], syz = cCur*Syz[i], szz = cCur*Szz[i];
+        for (int m=0; m<ns; ++m){ sxz += c[m]*rkSlot[m].Sxz[i]; syz += c[m]*rkSlot[m].Syz[i]; szz += c[m]*rkSlot[m].Szz[i]; }
+        Sxz[i] = sxz; Syz[i] = syz; Szz[i] = szz;
+#endif
+#endif
+    }
+}
+#endif // TIME_RK4
+
 #if TIME_RK3
 void Particles::rkSave(){
     rkX.assign(x, x + N); rkY.assign(y, y + N);

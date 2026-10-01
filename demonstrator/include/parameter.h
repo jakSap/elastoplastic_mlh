@@ -1272,6 +1272,14 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   1 = SSP-RK3
 #define TIME_RK3 0
 
+/// Classical fourth-order Runge-Kutta in the low-storage combination form
+///   U1 = U0 + dt/2 L(U0), U2 = U0 + dt/2 L(U1), U3 = U0 + dt L(U2),
+///   U^{n+1} = (-U0 + U1 + 2 U2 + U3)/3 + dt/6 L(U3),
+/// built from the same Euler stages and linear combinations as TIME_RK3 (x by minimum image, v, specific
+/// total energy, ln rhoExplicit, S). Not SSP; for smooth problems (the order study). Four flux passes per step.
+///   0 = off, 1 = RK4
+#define TIME_RK4 0
+
 /// |S_M|/c_s above which the face is treated as doing shock work and the
 /// Godunov energy flux is kept unchanged. GIZMO: epsilon_entropic_eos_big,
 /// "can be anything from (small number = more diffusive, less accurate entropy
@@ -1332,6 +1340,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #endif
 #if FACE_GRAD_WEIGHTS && !SECOND_ORDER_GRADIENTS
 #error "FACE_GRAD_WEIGHTS builds the faces from the higher-order gradient weights: set GRADIENT_ORDER >= 2."
+#endif
+#if TIME_RK3 && TIME_RK4
+#error "TIME_RK3 and TIME_RK4 are alternatives."
+#endif
+#if TIME_RK4 && (TIME_KDK || DRIFT_KDK || TIME_DKD || RECON_TIME_PRED || FRAME_HALFSTEP || ADAPTIVE_TIMESTEP || !ELASTIC)
+#error "TIME_RK4: set TIME_KDK, DRIFT_KDK, TIME_DKD, RECON_TIME_PRED, FRAME_HALFSTEP, ADAPTIVE_TIMESTEP to 0 (ELASTIC path)."
 #endif
 #if TIME_RK3 && (TIME_KDK || DRIFT_KDK || TIME_DKD || RECON_TIME_PRED || FRAME_HALFSTEP)
 #error "TIME_RK3 is its own time integrator: set TIME_KDK, DRIFT_KDK, TIME_DKD, RECON_TIME_PRED and FRAME_HALFSTEP to 0."
@@ -1686,7 +1700,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #if TIME_KDK && (FRAGMENTATION || AM_TORQUE_TRACK || RUNSPH)
 #error "TIME_KDK: damage, the AM_METHOD 4-6 repairs and SPH are not wired into the half-kick store."
 #endif
-#if TIME_RK3 && (!MOVE_PARTICLES || FRAGMENTATION || AM_TORQUE_TRACK || RUNSPH || TORQUE_DIAG || AM_SELFTEST \
+#if (TIME_RK3 || TIME_RK4) && (!MOVE_PARTICLES || FRAGMENTATION || AM_TORQUE_TRACK || RUNSPH || TORQUE_DIAG || AM_SELFTEST \
                  || TENSILE_CORRECTION_DAMP_LIMIT || OUTPUT_DAMP_DIAG || OUTPUT_ENERGY_BUDGET)
 #error "TIME_RK3: moving particles only; damage, AM repairs/diagnostics, SPH, the damping limiter and the energy budget are not wired into the stages."
 #endif

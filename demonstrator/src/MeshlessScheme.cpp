@@ -103,8 +103,8 @@ void MeshlessScheme::run(){
     double kdkDtPrev = 0.;      // dt of the step the next closing half kick belongs to
 #endif
 
-#if TIME_RK3
-    // ---- SSP-RK3 (see TIME_RK3 in parameter.h) ------------------------------
+#if TIME_RK3 || TIME_RK4
+    // ---- SSP-RK3 / RK4 (see TIME_RK3, TIME_RK4 in parameter.h) --------------
     // One full rates pass at the current state: geometry, density, gradients,
     // faces, fluxes. Leaves vF/eF (updateState), grad v (explicit volume, S)
     // and the working rho/P at this stage's state.
@@ -254,9 +254,47 @@ void MeshlessScheme::run(){
 #if EXPLICIT_VOL_INTEGRATION
     particles->explicitVolSeedSkip = 0;
 #endif
+    bool rkFinished = false;
+#if TIME_RK4
+    // Euler fractions of the four stages and the combinations (see TIME_RK4)
+    const double rk4Tau[4] = { .5, .5, 1., 1./6. };
+    const double rk4C[4][4] = { { 0., 0., 0., 0. },          // U1 = E(U0, dt/2)
+                                { 1., -1., 0., 0. },         // U2 = U0 - U1 + E(U1, dt/2)
+                                { 1., 0., -1., 0. },         // U3 = U0 - U2 + E(U2, dt)
+                                { -1./3., 1./3., 2./3., -2./3. } }; // U^{n+1} = (-U0 + U1 + 2U2)/3 - 2U3/3 + E(U3, dt/6)
+    do {
+        Logger(INFO) << "  > TIME: " << t << ", STEP: " << step;
+        timeStep = config.timeStep;
+        for (int s = 0; s < 4; ++s){
+            Logger(INFO) << "    > RK4 stage " << s+1;
+            rk3Rates();
+            if (s == 0){
+                writeDumpIfDue();
+                if (t >= config.timeEnd){
+                    Logger(INFO) << "    > t = " << t << " -> FINISHED!";
+                    rkFinished = true;
+                    break;
+                }
+            }
+            particles->rkSaveSlot(s);        // U_s (the state this stage's rates belong to)
+            const double tau = rk4Tau[s]*timeStep;
+            particles->moveParticles(tau, domain);
+            particles->updateState(tau);
+#if ELASTIC
+            particles->integrateStressTensor(tau);
+#endif
+#if EXPLICIT_VOL_INTEGRATION
+            particles->integrateExplicitVolumeHalfStep(tau, /*finalize=*/true);
+#endif
+            if (s > 0) particles->rkCombine(rk4C[s], s + 1, 1., domain);
+        }
+        if (rkFinished) break;
+        t += timeStep;
+        ++step;
+    } while (t < config.timeEnd + timeStep);
+#else // TIME_RK4
     const double rkA[3] = { 0., .75, 1./3. };
     const double rkB[3] = { 1., .25, 2./3. };
-    bool rkFinished = false;
     do {
         Logger(INFO) << "  > TIME: " << t << ", STEP: " << step;
         timeStep = config.timeStep;
@@ -289,7 +327,8 @@ void MeshlessScheme::run(){
         t += timeStep;
         ++step;
     } while (t < config.timeEnd + timeStep);
-#else // TIME_RK3
+#endif // TIME_RK4
+#else // TIME_RK3 || TIME_RK4
     do {
         Logger(INFO) << "  > TIME: " << t << ", STEP: " << step;
 
@@ -954,7 +993,7 @@ void MeshlessScheme::run(){
         // END DEBUGGING
 
     } while(t<config.timeEnd+timeStep);
-#endif // TIME_RK3
+#endif // TIME_RK3 || TIME_RK4
 
     double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - tStart).count() / 60.0;
     Logger(INFO) << "Total wall-clock time: " << elapsed << " min";

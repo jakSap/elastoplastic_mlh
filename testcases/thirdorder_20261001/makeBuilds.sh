@@ -52,6 +52,10 @@ V[hop]="GRADIENT_ORDER:3 SLOPE_LIMITING:0 PAIRWISE_LIMITER:0 SURFACE_GRAD_BLEND:
 V[q23]="$FULL RECON_HESSIAN:1"                                     # full + corrected quadratic recon
 V[qT]="$FULL RECON_HESSIAN:1 RECON_HESSIAN_FAC:1.0"                # full + Taylor quadratic recon
 V[f1q23]="${V[a_f1]} RECON_HESSIAN:1"                              # first-order faces + P_ref + corrected recon
+# fourth order in time (TIME_RK4) on top of the corrected quadratic reconstruction
+RK4="TIME_RK4:1 TIME_KDK:0 TIME_KDK_FIELD_DRIFT:0"
+V[q23r4]="${V[q23]/TIME_RK3:1 TIME_KDK:0 TIME_KDK_FIELD_DRIFT:0/$RK4}"
+V[f1q23r4]="${V[f1q23]/TIME_RK3:1 TIME_KDK:0 TIME_KDK_FIELD_DRIFT:0/$RK4}"
 [ -f "$HERE/variants.sh" ] && source "$HERE/variants.sh"
 for t in "$@"; do
     [ -n "${V[$t]+x}" ] || { echo "unknown variant $t" >&2; exit 1; }
