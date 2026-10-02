@@ -32,8 +32,10 @@ MURN = dict(matId=0, K0=1.0, n=2.0, rho0=1.0, mu=0.0)
 
 # variant -> flags forced on top of base + candidate (the testcase owns these)
 VARIANTS = {
-    "body":    dict(PERIODIC_BOUNDARIES=0, EOS=2, SURFACE_VOLCORR=1),
-    "plastic": dict(PERIODIC_BOUNDARIES=0, EOS=2, SURFACE_VOLCORR=1,
+    # SURFACE_VOLCORR is a scheme choice (base.flags = 1), not owned by the body tests;
+    # the periodic wave boxes have no free surface, where it is a no-op (09-25).
+    "body":    dict(PERIODIC_BOUNDARIES=0, EOS=2),
+    "plastic": dict(PERIODIC_BOUNDARIES=0, EOS=2,
                     VON_MISES_PLASTICITY=1, PLASTICITY_YIELD_GIZMO=1),
     "wave_e0": dict(PERIODIC_BOUNDARIES=1, EOS=0, SURFACE_VOLCORR=0),
     "wave_e1": dict(PERIODIC_BOUNDARIES=1, EOS=1, SURFACE_VOLCORR=0),

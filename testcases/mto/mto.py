@@ -332,7 +332,8 @@ def cmd_run(args):
         mp = os.path.join(D, "meta.json")
         if not args.force and os.path.exists(os.path.join(D, "exit_code")):
             m = json.load(open(mp))
-            if (m.get("stamp") == stamp and m.get("exit") == 0
+            same_build = m.get("stamp") == stamp or args.keep_finished
+            if (same_build and m.get("exit") == 0
                     and m.get("cfg") == cfg_hash(r, test, tag, D)):
                 continue
         N = make_ic(test, tag)
@@ -475,6 +476,10 @@ def main():
         p.add_argument("-j", "--jobs", type=int, default=4)
         p.add_argument("--force", action="store_true", help="rerun finished jobs")
         p.add_argument("--stop-on-fail", action="store_true")
+        p.add_argument("--keep-finished", action="store_true",
+                       help="skip finished runs with the same config even if the build stamp "
+                            "changed -- only after a source change that is default-off and "
+                            "verified bit-identical (e.g. candidate ref_chk)")
         p.set_defaults(fn=fn)
     p = sp.add_parser("status"); p.add_argument("cand", nargs="?"); p.set_defaults(fn=cmd_status)
     p = sp.add_parser("analyze"); p.add_argument("cand"); p.add_argument("--tests", nargs="+")

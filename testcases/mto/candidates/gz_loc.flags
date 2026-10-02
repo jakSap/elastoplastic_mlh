@@ -1,0 +1,4 @@
+# gz with our local tensile correction (LOCAL 1, PREFAC 4, POWER 1): does the TC form decide rebound?
+RECON_FACE_DV 0
+EXPLICIT_VOL_SPH_DIVV 1
+SURFACE_VOLCORR 0
