@@ -60,10 +60,35 @@ def read_flags(path):
         raise SystemExit("no such flag file: " + path)
     for line in open(path):
         line = line.split("#", 1)[0].strip()
-        if line:
+        if line and not line.startswith("@"):
             k, v = line.split(None, 1)
             out[k] = v.strip()
     return out
+
+
+BODY_TESTS = ("T1", "T2", "P1", "A1")
+
+
+def mat_overrides(cand):
+    """Runtime material overrides of a candidate: '@mat KEY VALUE [TEST ...]' lines in its
+    flag file (default tests: the body tests, never the waves, which stay inviscid/elastic).
+    They change the config text, hence the config hash, so affected rungs rerun."""
+    out = []
+    path = os.path.join(HERE, "candidates", cand + ".flags")
+    for line in open(path):
+        line = line.split("#", 1)[0].split()
+        if line and line[0] == "@mat":
+            out.append((line[1], line[2], tuple(line[3:]) or BODY_TESTS))
+    return out
+
+
+def rung_for(cand, test, tag):
+    """The rung as the candidate runs it: lib/tests.py + the candidate's @mat overrides."""
+    r = T.rung(test, tag)
+    ov = [(k, v) for k, v, tests in mat_overrides(cand) if test in tests]
+    if ov:
+        r["materials"] = [dict(m, **{k: float(v) for k, v in ov}) for m in r["materials"]]
+    return r
 
 
 def cand_flags(cand, variant):
@@ -249,7 +274,7 @@ def last_time(log):
 
 def run_one(cand, test, tag, stamp, B, stop_flag):
     import analysis
-    r = T.rung(test, tag)
+    r = rung_for(cand, test, tag)
     D = run_dir(cand, test, tag)
     if stop_flag.is_set():
         return test, tag, "skipped", None
@@ -260,7 +285,7 @@ def run_one(cand, test, tag, stamp, B, stop_flag):
         config_text(r, ic_path(test, tag), os.path.join(D, "output")))
     meta = dict(cand=cand, test=test, tag=tag, stamp=stamp, source=source_hash(), N=N,
                 t_end=r["t_end"], d=r["d"], variant=r["variant"], est_s=est_cost(r, N),
-                cfg=cfg_hash(r, test, tag, D),
+                cfg=cfg_hash(r, test, tag, D), materials=r["materials"],
                 start=time.time())
     json.dump(meta, open(os.path.join(D, "meta.json"), "w"), indent=1)
     log = os.path.join(D, "run.log")
@@ -301,7 +326,7 @@ def cmd_run(args):
     built = {v: build(args.cand, v) for v in variants}
     todo = []
     for test, tag in pairs:
-        r = T.rung(test, tag)
+        r = rung_for(args.cand, test, tag)
         B, stamp = built[r["variant"]]
         D = run_dir(args.cand, test, tag)
         mp = os.path.join(D, "meta.json")
@@ -338,7 +363,7 @@ def cmd_build(args):
 def cmd_plan(args):
     tot = 0
     for test, tag in jobs_for(args):
-        r = T.rung(test, tag)
+        r = rung_for(args.cand, test, tag)
         N = make_ic(test, tag)
         c = est_cost(r, N)
         tot += c

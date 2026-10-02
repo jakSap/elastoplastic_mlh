@@ -152,6 +152,7 @@ int main(int argc, char *argv[]){
         m.Y_M           = optD("Y_M");
         m.frictionAngle = optD("frictionAngle");
         m.u_melt        = optD("u_melt");
+        m.eta           = optD("eta");
         if ((int)mats.size() <= id) mats.resize(id + 1);
         mats[id] = m;
         Logger(INFO) << "    > Material " << id
@@ -163,7 +164,8 @@ int main(int argc, char *argv[]){
                      << ", weibullK=" << m.weibull_k << ", weibullM=" << m.weibull_m
                      << ", Y0=" << m.Y0 << ", Y_M=" << m.Y_M
                      << ", mu_i=" << m.mu_i << ", mu_d=" << m.mu_d
-                     << ", frictionAngle=" << m.frictionAngle << ", u_melt=" << m.u_melt;
+                     << ", frictionAngle=" << m.frictionAngle << ", u_melt=" << m.u_melt
+                     << ", eta=" << m.eta;
     }
     EquationOfState MeshlessEOS(std::move(mats));
 #endif // EOS

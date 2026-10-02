@@ -334,6 +334,9 @@ void MeshlessScheme::run(){
 #endif // ELASTIC
         Logger(DEBUG) << "      > Update ghost gradients";
         particles->updateGhostGradients(ghostParticles);
+#if MATERIAL_VISCOSITY
+        particles->storeRawVelocityGradients();
+#endif
 
 #if SLOPE_LIMITING
         // TODO: Check slope limiter
@@ -400,6 +403,9 @@ void MeshlessScheme::run(){
         particles->gradient(particles->Szz, particles->SzzGrad);
 #endif
 #endif // ELASTIC
+#if MATERIAL_VISCOSITY
+        particles->storeRawVelocityGradients();
+#endif
 #if SLOPE_LIMITING
         // TODO: check how to properly limit gradiens
         Logger(DEBUG) << "      > Limiting slopes";

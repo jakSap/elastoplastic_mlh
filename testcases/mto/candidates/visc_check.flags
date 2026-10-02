@@ -1,0 +1,4 @@
+# compile/behaviour check of MATERIAL_VISCOSITY + ELASTIC_WORK_SIGN_FIX (eta 0.003 on bodies)
+MATERIAL_VISCOSITY 1
+ELASTIC_WORK_SIGN_FIX 1
+@mat eta 0.003

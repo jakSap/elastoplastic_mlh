@@ -374,7 +374,10 @@ def analyse_rod(D, meta):
                outline=(shp["outline"] / W0).tolist(), rip=g["nfrag"] > 2 or g["main_frac"] < 0.995,
                KE_end=float(0.5 * np.sum(s["m"] * np.sum(s["v"] ** 2, axis=1))),
                stuck=bool(com[-1] < min(com) + 0.25 * (com[0] - min(com))), asym=asym)
-    ctrl = os.path.join(os.path.dirname(__file__), "..", "gizmo", "runs", meta["tag"], "conv")
+    eta = float((meta.get("materials") or [{}])[0].get("eta", 0.0))
+    ctrl_name = meta["tag"] + ("_eta{:g}".format(eta) if eta > 0 else "")
+    ctrl = os.path.join(os.path.dirname(__file__), "..", "gizmo", "runs", ctrl_name, "conv")
+    res["gizmo_control"] = ctrl_name
     if os.path.isdir(ctrl) and snapshots(ctrl):
         gs = snapshots(ctrl)
         tg, pg = min(gs, key=lambda a: abs(a[0] - snaps[-1][0]))

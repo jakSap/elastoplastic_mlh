@@ -49,6 +49,7 @@ struct TillotsonMaterial {
     double Y_M;           ///< von Mises limit / yield at high pressure
     double frictionAngle; ///< friction angle [rad] (Mohr-Coulomb / Drucker-Prager)
     double u_melt;        ///< melt specific energy (Collins melt degradation)
+    double eta;           ///< dynamic shear viscosity (MATERIAL_VISCOSITY), 0 = inviscid
 };
 #endif
 

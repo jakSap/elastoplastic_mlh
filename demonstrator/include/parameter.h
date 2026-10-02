@@ -511,6 +511,36 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //   1 = per-side reconstructed face stress
 #define RECON_FACE_TRACTION 0
 
+/// Physical (material) viscosity in the GIZMO elastic stress flux -- objective
+/// pair form (2026-10-02, mto). Per material, optional config key `eta` (dynamic
+/// shear viscosity, default 0 => off for that material; Tillotson only).
+///
+/// Pair force on i (Morris 1997 form, same FNormT area as the elastic traction):
+///     F_ij = -eta_ij * FNormT / r * ( (v_i - v_j) - W_ij (x_i - x_j) ),
+/// eta_ij = harmonic mean of the two materials (as GIZMO's viscosity.h), and
+/// W_ij = (W_i + W_j)/2 the mean SPIN (antisymmetric part of grad v) from the
+/// UNLIMITED velocity gradients. Removing W r makes the force vanish exactly for
+/// rigid rotation (objective, no angular-momentum drain on a spinning body),
+/// while 2dx pairing/zigzag modes -- invisible to a gradient-based viscosity,
+/// GIZMO's included -- are damped through the direct pair difference. That is
+/// what RECON_FACE_DV 0 provides in its transverse channel (with the impedance
+/// rho c_s instead of eta/r), minus the rigid-rotation braking.
+/// Energy: the force enters cmag, so the work term carries it (see
+/// ELASTIC_WORK_SIGN_FIX). Timestep: dt <= 0.25 rho L^2 / eta (GIZMO timestep.c).
+///   0 = off (baseline, bit-identical)
+///   1 = on (materials with eta > 0)
+#define MATERIAL_VISCOSITY 0
+
+/// Sign of the work term of the GIZMO elastic stress flux. The pair force on i
+/// is +cmag (Fout momentum -= cmag), so the energy exchange must be +cmag . v_bar;
+/// the port writes -cmag . v_bar (v_int = -(v_i+v_j)/2). Total energy is still
+/// conserved (antisymmetric), but the kinetic/internal split is wrong: u is not
+/// Galilean invariant and goes negative at moving surfaces (2026-09-26 report:
+/// the flipped sign makes u invariant to round-off, mechanics unchanged).
+///   0 = as ported (baseline)
+///   1 = v_int = +(v_i+v_j)/2
+#define ELASTIC_WORK_SIGN_FIX 0
+
 // Angular-momentum TORQUE BUDGET instrumentation (WP0 of the 20260727 plan).
 //
 // Splits the spurious pair torque that drives the L_z drain into the four

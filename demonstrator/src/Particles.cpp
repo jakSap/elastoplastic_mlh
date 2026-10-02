@@ -250,6 +250,10 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
 #endif // DRIFT_KDK
     rhoGrad = new double[numParticles][DIM];
     vxGrad = new double[numParticles][DIM];
+#if MATERIAL_VISCOSITY
+    vxGradRaw = new double[numParticles][DIM]();
+    vyGradRaw = new double[numParticles][DIM]();
+#endif
     vyGrad = new double[numParticles][DIM];
     PGrad = new double[numParticles][DIM];
 
@@ -484,6 +488,9 @@ Particles::~Particles() {
 #endif // DRIFT_KDK
     delete[] rhoGrad;
     delete[] vxGrad;
+#if MATERIAL_VISCOSITY
+    delete[] vxGradRaw; delete[] vyGradRaw;
+#endif
     delete[] vyGrad;
     delete[] PGrad;
     delete[] omega;
@@ -867,7 +874,11 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
 
     // mean-velocity interface (the -0.5 carries GIZMO's required sign)
+#if ELASTIC_WORK_SIGN_FIX
+    const double v_int[2] = { 0.5*(vx[i]+vxJ[jj]), 0.5*(vy[i]+vyJ[jj]) };
+#else
     const double v_int[2] = { -0.5*(vx[i]+vxJ[jj]), -0.5*(vy[i]+vyJ[jj]) };
+#endif
     const double dv[2] = { vx[i]-vxJ[jj], vy[i]-vyJ[jj] };
     const double vdotr = dv[0]*dx + dv[1]*dy;
 
@@ -1040,6 +1051,34 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         tqdAccum(tqWtR, cWtR);   // must come out at round-off: cWtR || r_ij
     }
 #endif
+#if MATERIAL_VISCOSITY && EOS == 2
+    // Objective pair viscosity (see MATERIAL_VISCOSITY): direct pair difference
+    // minus the rigid-rotation part W r, with the mean spin from the UNLIMITED
+    // gradients. A periodic image carries its parent's gradient.
+    {
+#if USE_MATID
+        const double etaI = MeshlessEOS->EOSGetMaterial(matId[i]).eta;
+        const double etaJ = MeshlessEOS->EOSGetMaterial(matIdJ[jj]).eta;
+#else
+        const double etaI = MeshlessEOS->EOSGetMaterial(0).eta, etaJ = etaI;
+#endif
+        if (etaI > 0. && etaJ > 0.){
+#if PERIODIC_BOUNDARIES
+            const int jG = gp ? gp->parent[jj] : jj;
+#else
+            const int jG = jj;
+#endif
+            const double eta = 2.*etaI*etaJ/(etaI + etaJ);
+            const double w = 0.25*(vyGradRaw[i][0] - vxGradRaw[i][1]
+                                   + vyGradRaw[jG][0] - vxGradRaw[jG][1]);
+            // r = x_i - x_j = (dx, dy); W r = w (-dy, dx)
+            const double vt[2] = { dv[0] + w*dy, dv[1] - w*dx };
+            const double cv = eta * FNormT * rinv;
+            cmag[0] -= cv*vt[0];
+            cmag[1] -= cv*vt[1];
+        }
+    }
+#endif
     const double cmag_E = cmag[0]*v_int[0] + cmag[1]*v_int[1];
 
     // demonstrator convention: dp_i/dt = -sum_j Fij, so add the negative of GIZMO's force
@@ -1060,7 +1099,11 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     const double FVec[3] = { FNormT*dx*rinv, FNormT*dy*rinv, FNormT*dz*rinv };
 
     // mean-velocity interface (the -0.5 carries GIZMO's required sign)
+#if ELASTIC_WORK_SIGN_FIX
+    const double v_int[3] = { 0.5*(vx[i]+vxJ[jj]), 0.5*(vy[i]+vyJ[jj]), 0.5*(vz[i]+vzJ[jj]) };
+#else
     const double v_int[3] = { -0.5*(vx[i]+vxJ[jj]), -0.5*(vy[i]+vyJ[jj]), -0.5*(vz[i]+vzJ[jj]) };
+#endif
     const double dv[3] = { vx[i]-vxJ[jj], vy[i]-vyJ[jj], vz[i]-vzJ[jj] };
     const double vdotr = dv[0]*dx + dv[1]*dy + dv[2]*dz;
 
@@ -3803,6 +3846,17 @@ void Particles::compEffectiveFace(){
     }
 }
 
+#if MATERIAL_VISCOSITY
+void Particles::storeRawVelocityGradients(){
+    for (int i=0; i<N; ++i){
+        for (int a=0; a<DIM; ++a){
+            vxGradRaw[i][a] = vxGrad[i][a];
+            vyGradRaw[i][a] = vyGrad[i][a];
+        }
+    }
+}
+#endif
+
 void Particles::slopeLimiter(Particles *ghostParticles){
     double *rhoGhost = nullptr, *vxGhost = nullptr, *vyGhost = nullptr,
 #if DIM==3
@@ -4064,6 +4118,16 @@ double Particles::compElasticTimestep(){
         }
 
         double dt = CFL*sml[i]/vSig;
+#if MATERIAL_VISCOSITY && EOS == 2
+        {   // explicit viscosity: dt <= 0.25 rho L^2 / eta (GIZMO timestep.c)
+            const double eta = MeshlessEOS->EOSGetMaterial(matId[i]).eta;
+            if (eta > 0.){
+                const double L = pow(m[i]/rho[i], 1./DIM);
+                const double dtv = 0.25*rho[i]*L*L/eta;
+                if (dtv < dt) dt = dtv;
+            }
+        }
+#endif
         dt_ = dt < dt_ ? dt : dt_;
     }
     return dt_;

@@ -29,6 +29,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 import tests as T   # noqa: E402
 
 GIZMO = os.path.expanduser("~/Documents/GIZMO/build_mto_elastic/GIZMO")
+# same + VISCOSITY (explicit Navier-Stokes: eta (grad v + grad v^T) + (zeta - 2/3 eta) div v I)
+GIZMO_VISC = os.path.expanduser("~/Documents/GIZMO/build_mto_elastic_visc/GIZMO")
 OFFSET = 5.0
 
 PARAMS = """\
@@ -99,7 +101,7 @@ Tillotson_EOS_params_Y0         {Y0}
 """
 
 
-def setup(tag, Y0=None, name=None):
+def setup(tag, Y0=None, name=None, eta=0.0):
     r = T.rung("P1", tag)
     src = os.path.join(HERE, "..", "ics", "P1_{}.h5".format(tag))
     if not os.path.exists(src):
@@ -132,8 +134,11 @@ def setup(tag, Y0=None, name=None):
         g.create_dataset("ParticleIDs", data=np.arange(1, N + 1, dtype=np.uint32))
         g.create_dataset("CompositionType", data=np.zeros(N, dtype=np.int32))
     mat = r["materials"][0]
-    open(os.path.join(D, "rod.params"), "w").write(PARAMS.format(
-        tag=tag, dump=r["dump"], t_end=r["t_end"], box=2 * OFFSET, mu=mat["mu"], Y0=Y0 if Y0 is not None else mat["Y0"]))
+    text = PARAMS.format(tag=tag, dump=r["dump"], t_end=r["t_end"], box=2 * OFFSET, mu=mat["mu"],
+                         Y0=Y0 if Y0 is not None else mat["Y0"])
+    if eta > 0:   # only the VISCOSITY build accepts these tags
+        text += "ShearViscosityCoeff             {:g}\nBulkViscosityCoeff              0\n".format(eta)
+    open(os.path.join(D, "rod.params"), "w").write(text)
     return D
 
 
@@ -161,10 +166,11 @@ def convert(D):
     return out
 
 
-def run(tag, Y0=None, name=None):
-    D = setup(tag, Y0, name)
+def run(tag, Y0=None, name=None, eta=0.0):
+    D = setup(tag, Y0, name, eta)
     with open(os.path.join(D, "run.log"), "w") as lf:
-        rc = subprocess.run([GIZMO, "rod.params"], cwd=D, stdout=lf, stderr=subprocess.STDOUT).returncode
+        rc = subprocess.run([GIZMO_VISC if eta > 0 else GIZMO, "rod.params"], cwd=D,
+                            stdout=lf, stderr=subprocess.STDOUT).returncode
     out = convert(D)
     return name or tag, rc, len(glob.glob(os.path.join(out, "*.h5")))
 
@@ -176,13 +182,20 @@ if __name__ == "__main__":
     ap.add_argument("-j", type=int, default=2)
     ap.add_argument("--convert-only", action="store_true")
     ap.add_argument("--Y0", type=float, nargs="+", help="scan: one run per value, runs/<tag>_Y<val>")
+    ap.add_argument("--eta", type=float, nargs="+",
+                    help="shear viscosity scan (VISCOSITY build): one run per value, runs/<tag>_eta<val> "
+                         "-- the name analysis.py looks for when a candidate sets @mat eta")
     a = ap.parse_args()
     if a.convert_only:
         for t in a.tags:
             print(convert(os.path.join(HERE, "runs", t)))
         sys.exit()
-    jobs = [(t, y, "{}_Y{:g}".format(t, y)) for t in a.tags for y in a.Y0] if a.Y0 \
-        else [(t, None, None) for t in a.tags]
+    if a.eta:
+        jobs = [(t, None, "{}_eta{:g}".format(t, e), e) for t in a.tags for e in a.eta]
+    elif a.Y0:
+        jobs = [(t, y, "{}_Y{:g}".format(t, y), 0.0) for t in a.tags for y in a.Y0]
+    else:
+        jobs = [(t, None, None, 0.0) for t in a.tags]
     with cf.ThreadPoolExecutor(a.j) as ex:
         for tag, rc, n in ex.map(lambda j: run(*j), jobs):
             print("{}: exit {}, {} snapshots".format(tag, rc, n))

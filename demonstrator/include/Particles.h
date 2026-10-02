@@ -54,6 +54,12 @@ public:
     /// VARIABLE_SML is 0; in that case it is just a copy of config.kernelSize.
     double *sml;
     double (*rhoGrad)[DIM], (*vxGrad)[DIM], (*vyGrad)[DIM], (*vzGrad)[DIM], (*PGrad)[DIM];
+#if MATERIAL_VISCOSITY
+    /// Unlimited velocity gradients of this step (copied before the slope limiter),
+    /// for the spin of MATERIAL_VISCOSITY: exact for any linear field incl. rotation.
+    double (*vxGradRaw)[DIM], (*vyGradRaw)[DIM];
+    void storeRawVelocityGradients();
+#endif
 
 #if OUTPUT_CONDITION_NUMBER
     double *conditionNumber;
