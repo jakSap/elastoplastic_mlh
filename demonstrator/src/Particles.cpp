@@ -272,6 +272,10 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
 #endif // TIME_KDK
     rhoGrad = new double[numParticles][DIM];
     vxGrad = new double[numParticles][DIM];
+#if STRESS_RATE_UNLIMITED_GRAD || RECON_FACE_DV_UNLIMITED
+    vxGradUL = new double[numParticles][DIM]();
+    vyGradUL = new double[numParticles][DIM]();
+#endif
     vyGrad = new double[numParticles][DIM];
     PGrad = new double[numParticles][DIM];
 
@@ -281,9 +285,15 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     // velocity gradient exists to wash out the garbage.
 #if TENSILE_CORRECTION
     fabMonaghan = new double[numParticles*MAX_NUM_INTERACTIONS]();
+#if TENSILE_CORRECTION_REP_MONAGHAN
+    fabRep = new double[numParticles*MAX_NUM_INTERACTIONS]();
+#endif
 #endif
 #if TENSILE_CORRECTION_PARTICLE
     fTCpart = new double[numParticles]();
+#if TENSILE_CORRECTION_PARTICLE >= 4
+    fTCpart2 = new double[numParticles]();
+#endif
 #endif
 #if TENSILE_CORRECTION_DAMP_LIMIT == 3
     dampScale = new double[numParticles]();
@@ -467,9 +477,10 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         tqDev     = new double[numParticles];
         tqWtT     = new double[numParticles];
         tqWtR     = new double[numParticles];
+        tqRep     = new double[numParticles];
         consResid = new double[numParticles];
         for (int i=0; i<numParticles; ++i){
-            tqHLLC[i] = tqDev[i] = tqWtT[i] = tqWtR[i] = consResid[i] = 0.;
+            tqHLLC[i] = tqDev[i] = tqWtT[i] = tqWtR[i] = tqRep[i] = consResid[i] = 0.;
         }
 #endif
 #if AM_SPIN
@@ -553,6 +564,9 @@ Particles::~Particles() {
 #endif // TIME_KDK
     delete[] rhoGrad;
     delete[] vxGrad;
+#if STRESS_RATE_UNLIMITED_GRAD || RECON_FACE_DV_UNLIMITED
+    delete[] vxGradUL; delete[] vyGradUL;
+#endif
     delete[] vyGrad;
     delete[] PGrad;
     delete[] omega;
@@ -594,9 +608,15 @@ Particles::~Particles() {
 #if ELASTIC
 #if TENSILE_CORRECTION
     delete[] fabMonaghan;
+#if TENSILE_CORRECTION_REP_MONAGHAN
+    delete[] fabRep;
+#endif
 #endif
 #if TENSILE_CORRECTION_PARTICLE
     delete[] fTCpart;
+#if TENSILE_CORRECTION_PARTICLE >= 4
+    delete[] fTCpart2;
+#endif
 #endif
 #if TENSILE_CORRECTION_DAMP_LIMIT == 3
     delete[] dampScale;
@@ -705,6 +725,7 @@ Particles::~Particles() {
         delete[] tqDev;
         delete[] tqWtT;
         delete[] tqWtR;
+        delete[] tqRep;
         delete[] consResid;
 #endif
 #if AM_SPIN
@@ -757,6 +778,22 @@ Particles::~Particles() {
 
 #if ELASTIC
 #if TENSILE_CORRECTION
+#if TENSILE_CORRECTION_PARTICLE >= 4
+// Principal axes of the symmetric 2x2 tensor (a, b; b, c), e1 for the larger eigenvalue --
+// the same arithmetic as the 2D GIZMO stress flux, so mode 4's factors refer to exactly
+// the axes the flux damps.
+static inline void principalAxes2D(double a, double b, double c, double e1[2], double e2[2]){
+    const double mean = 0.5*(a + c);
+    const double dev  = sqrt(0.25*(a - c)*(a - c) + b*b);
+    const double l1 = mean + dev;
+    if (dev <= 1e-12*std::fabs(mean)){ e1[0]=1.; e1[1]=0.; e2[0]=0.; e2[1]=1.; return; }
+    double v1x = b, v1y = l1 - a; const double wx = l1 - c, wy = b;
+    if (wx*wx + wy*wy > v1x*v1x + v1y*v1y){ v1x = wx; v1y = wy; }
+    const double nv = sqrt(v1x*v1x + v1y*v1y);
+    e1[0] = v1x/nv; e1[1] = v1y/nv; e2[0] = -e1[1]; e2[1] = e1[0];
+}
+#endif
+
 void Particles::computeFabMonaghan(
 #if PERIODIC_BOUNDARIES
     const Particles *gp
@@ -782,6 +819,47 @@ void Particles::computeFabMonaghan(
     double kernelDeltaP = Kernel::W(deltaP, 1.);
 #endif
 
+#if TENSILE_CORRECTION_LOCAL >= 2
+    // distance from particle p to its nearest neighbour on the side opposite to the direction
+    // (dx, dy) (cone of 45 deg around -(dx, dy)); dpP if there is none (free surface).
+    // LOCAL 3: that neighbour's distance projected on the pair axis.
+    auto oppositeDistance = [&](int p, double dx, double dy, double dpP){
+        const double rr = sqrt(dx*dx + dy*dy);
+        double oMin = -1.;
+        for(int kn = 0; kn < noi[p]; ++kn){
+            const int k = nnl[p*MAX_NUM_INTERACTIONS+kn];
+            const double ex = x[k] - x[p], ey = y[k] - y[p];
+            const double rk = sqrt(ex*ex + ey*ey);
+            if (!(rk > 0.)) continue;
+#if TENSILE_CORRECTION_LOCAL == 3
+            const double ok = -(dx*ex + dy*ey) / rr;       // projection on -n
+#else
+            const double ok = rk;
+#endif
+            if (dx*ex + dy*ey < -0.7071067811865476 * rr * rk && (oMin < 0. || ok < oMin)) oMin = ok;
+        }
+        return (oMin > 0.) ? oMin : dpP;
+    };
+#endif
+#if TENSILE_CORRECTION_PLASTIC_GATE
+#if !OUTPUT_PLASTIC_STRAIN || !PLASTICITY_ANY
+#error "TENSILE_CORRECTION_PLASTIC_GATE needs OUTPUT_PLASTIC_STRAIN and a plasticity model"
+#endif
+    auto plasticGate = [](double ep){
+        double b = (ep - TENSILE_CORRECTION_PLASTIC_EPS0)
+                 / (TENSILE_CORRECTION_PLASTIC_EPS1 - TENSILE_CORRECTION_PLASTIC_EPS0);
+        b = (b <= 0.) ? 0. : (b >= 1.) ? 1. : b*b*(3. - 2.*b);
+        return 1. - b;
+    };
+#endif
+#if TENSILE_CORRECTION_REP_MONAGHAN
+#if VARIABLE_SML
+    const double deltaPRep = sqrt(3.14159 / smlNNNTarget);
+#else
+    const double deltaPRep = sqrt(3.14159 / (double)NNN_TARGET);
+#endif
+    const double kernelDeltaPRep = Kernel::W(deltaPRep, 1.);
+#endif
     // Now loop through the interaction pairs:
     for(int i = 0; i < N; ++i){
         double hi = noi[i];
@@ -800,8 +878,23 @@ void Particles::computeFabMonaghan(
             // under uniform stretching, because r and dp_i grow together.
             const double dpA = pow(m[i] / rho[i], invDim);
             const double dpB = pow(m[j] / rho[j], invDim);
-            const double sAB = r / (0.5 * (dpA + dpB));
+            double sAB = r / (0.5 * (dpA + dpB));
+#if TENSILE_CORRECTION_LOCAL >= 2
+            // shape-free: also closer than the opposite neighbours of both ends (parameter.h)
+            if (sAB < 1.){
+                const double oA = oppositeDistance(i, x[j] - x[i], y[j] - y[i], dpA);
+                const double oB = oppositeDistance(j, x[i] - x[j], y[i] - y[j], dpB);
+                // collapse floor: plain test below S0, shape-free above S1 (parameter.h)
+                double b = (sAB - TENSILE_CORRECTION_SHAPEFREE_S0)
+                         / (TENSILE_CORRECTION_SHAPEFREE_S1 - TENSILE_CORRECTION_SHAPEFREE_S0);
+                b = (b <= 0.) ? 0. : (b >= 1.) ? 1. : b*b*(3. - 2.*b);
+                sAB += b * (std::max(sAB, r / (0.5 * (oA + oB))) - sAB);
+            }
+#endif
             fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = (sAB < 1.) ? (1. - sAB) : 0.;
+#if TENSILE_CORRECTION_REP_MONAGHAN
+            fabRep[i*MAX_NUM_INTERACTIONS+jn] = Kernel::W(r / std::max(sml[i], sml[j]), 1.) / kernelDeltaPRep;
+#endif
 #else
             // q = r_ab / max(h_a, h_b) following Monaghan and GIZMO
             double q = r / std::max(sml[i], sml[j]);
@@ -809,6 +902,14 @@ void Particles::computeFabMonaghan(
             double kernelQ = Kernel::W(q, 1.);
             // To be consistent with Monaghan, dont apply the power of n here.
             fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = kernelQ / kernelDeltaP;
+#endif
+#if TENSILE_CORRECTION_PLASTIC_GATE
+            // plastic-history gate (parameter.h): symmetric in (i, j)
+            const double gPl = std::min(plasticGate(plasticStrain[i]), plasticGate(plasticStrain[j]));
+            fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] *= gPl;
+#if TENSILE_CORRECTION_REP_MONAGHAN
+            fabRep[i*MAX_NUM_INTERACTIONS+jn] *= gPl;
+#endif
 #endif
         }
     }
@@ -840,6 +941,9 @@ void Particles::computeFabMonaghan(
                 fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn]
                         = Kernel::W(q, 1.) / kernelDeltaP;
 #endif
+#if TENSILE_CORRECTION_PLASTIC_GATE
+                fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn] *= plasticGate(plasticStrain[i]);
+#endif
             }
         }
     }
@@ -855,6 +959,59 @@ void Particles::computeFabMonaghan(
 #endif
         return fp;
     };
+#if TENSILE_CORRECTION_PARTICLE == 4
+    // Directional: a pair only damps the principal component it is aligned with,
+    // weight (n_ij . e_k)^2, so a pair closing along the compressive axis (sheared
+    // arrangement in plastic flow) leaves the tensile component alone.
+    for(int i = 0; i < N; ++i){
+        double e1[2], e2[2];
+        principalAxes2D(Sxx[i], Sxy[i], Syy[i], e1, e2);
+        double f1 = 0., f2 = 0.;
+        auto acc = [&](double dx, double dy, double fab){
+            const double fp = fPair(fab);
+            if (!(fp > 0.)) return;
+            const double r2 = dx*dx + dy*dy;
+            if (!(r2 > 0.)){ f1 = std::max(f1, fp); f2 = std::max(f2, fp); return; }
+            const double c1 = dx*e1[0] + dy*e1[1], c2 = dx*e2[0] + dy*e2[1];
+            f1 = std::max(f1, fp*c1*c1/r2); f2 = std::max(f2, fp*c2*c2/r2);
+        };
+        for(int jn = 0; jn < noi[i]; ++jn){
+            const int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
+            acc(x[j] - x[i], y[j] - y[i], fabMonaghan[i*MAX_NUM_INTERACTIONS+jn]);
+        }
+#if PERIODIC_BOUNDARIES
+        if (gp){
+            for(int jn = 0; jn < noiGhosts[i]; ++jn){
+                const int j = nnlGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn];
+                acc(gp->x[j] - x[i], gp->y[j] - y[i], fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn]);
+            }
+        }
+#endif
+        fTCpart[i] = f1; fTCpart2[i] = f2;
+    }
+#elif TENSILE_CORRECTION_PARTICLE == 5
+    // Face-weighted directional: the per-pair damping (mode 0) of component k, averaged over i's
+    // faces with the weight (A_ij . e_k)^2 of how much of component k each face carries.
+    for(int i = 0; i < N; ++i){
+        double e1[2], e2[2];
+        principalAxes2D(Sxx[i], Sxy[i], Syy[i], e1, e2);
+        double n1 = 0., d1 = 0., n2 = 0., d2 = 0.;
+        auto acc = [&](const double *A, double fab){
+            const double fp = fPair(fab);
+            const double c1 = A[0]*e1[0] + A[1]*e1[1], c2 = A[0]*e2[0] + A[1]*e2[1];
+            n1 += fp*c1*c1; d1 += c1*c1; n2 += fp*c2*c2; d2 += c2*c2;
+        };
+        for(int jn = 0; jn < noi[i]; ++jn)
+            acc(Aij[i*MAX_NUM_INTERACTIONS+jn], fabMonaghan[i*MAX_NUM_INTERACTIONS+jn]);
+#if PERIODIC_BOUNDARIES
+        if (gp){
+            for(int jn = 0; jn < noiGhosts[i]; ++jn)
+                acc(AijGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn], fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn]);
+        }
+#endif
+        fTCpart[i] = (d1 > 0.) ? n1/d1 : 0.; fTCpart2[i] = (d2 > 0.) ? n2/d2 : 0.;
+    }
+#else
     for(int i = 0; i < N; ++i){
         double fMax = 0., fSum = 0.; int nn = noi[i];
         for(int jn = 0; jn < noi[i]; ++jn){
@@ -878,6 +1035,7 @@ void Particles::computeFabMonaghan(
         fTCpart[i] = (nn > 0) ? fSum / nn : 0.; (void)fMax;
 #endif
     }
+#endif // TENSILE_CORRECTION_PARTICLE >= 4
 #endif // TENSILE_CORRECTION_PARTICLE
 }
 #endif // TENSILE_CORRECTION
@@ -1148,6 +1306,9 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #if OUTPUT_ENERGY_BUDGET
     const double wtR0 = wt_r;   // before the DAMP boost
 #endif
+#if TENSILE_CORRECTION_DAMP_RAW
+    const double wtUnb = wt_r;  // before the DAMP boost (TENSILE_CORRECTION_DAMP_RAW)
+#endif
 #if TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL
     // Anti-clumping approach damping: boost the radial dissipation for pairs
     // that are closer than the local spacing (f > 0) AND closing (vdotr < 0).
@@ -1211,6 +1372,22 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #else
         wt_r *= (1. + TENSILE_CORRECTION_DAMP * f);
 #endif
+    }
+#endif
+#if TENSILE_CORRECTION_DAMP_RAW
+    // the DAMP boost acts on the RAW radial velocity difference, the unboosted wt_r keeps the face jump (parameter.h)
+    const double wtBoost = wt_r - wtUnb;
+    wt_r = wtUnb;
+#endif
+#if TENSILE_CORRECTION_CREP
+    // central tension repulsion (parameter.h): a pair closer than the local spacing (f > 0) whose material is in
+    // effective tension (mean sigma_1 > 0) is pushed apart along r_ij by CREP_FAC f sigma_1 FNormT
+    double crepF = 0.;
+    {
+        auto sig1 = [](double sxx, double sxy, double syy, double p){
+            return 0.5*(sxx + syy) + sqrt(0.25*(sxx - syy)*(sxx - syy) + sxy*sxy) - p; };
+        const double s1 = 0.5*(sig1(Sxx[i], Sxy[i], Syy[i], P[i]) + sig1(SxxJ[jj], SxyJ[jj], SyyJ[jj], PJ[jj]));
+        if (f > 0. && s1 > 0.) crepF = TENSILE_CORRECTION_CREP_FAC * f * s1 * FNormT;
     }
 #endif
     const double denT = rhoi*cTi + rhoj*cTj;
@@ -1287,7 +1464,10 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #else
             const double lGate = 0.;
 #endif
-#if TENSILE_CORRECTION_PARTICLE
+#if TENSILE_CORRECTION_PARTICLE >= 4
+            // this side's own factor ALONG this principal axis (modes 4/5, parameter.h)
+            if (l[kk] > lGate) prefac *= 1. - ((kk == 0) ? fTCpart : fTCpart2)[(side == 0) ? i : jTC];
+#elif TENSILE_CORRECTION_PARTICLE
             // this side's OWN factor (see parameter.h): one damped S per particle
             if (l[kk] > lGate) prefac *= 1. - fTCpart[(side == 0) ? i : jTC];
 #else
@@ -1333,6 +1513,11 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
         cmag[0] -= wt_r*projR*dx + wt_t*(dvF[0] - projF*dx);
         cmag[1] -= wt_r*projR*dy + wt_t*(dvF[1] - projF*dy);
+#if TENSILE_CORRECTION_DAMP_RAW
+        // approach-damping boost on the raw radial velocity difference (central, pairwise antisymmetric)
+        cmag[0] -= wtBoost*vdotr*rinv*rinv*dx;
+        cmag[1] -= wtBoost*vdotr*rinv*rinv*dy;
+#endif
 #if OUTPUT_ENERGY_BUDGET
         ebProjR = projR;
 #endif
@@ -1370,6 +1555,10 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
         cWtR[0] = -wt_r*projRd*dx;
         cWtR[1] = -wt_r*projRd*dy;
+#if TENSILE_CORRECTION_DAMP_RAW
+        cWtR[0] -= wtBoost*vdotr*rinv*rinv*dx;
+        cWtR[1] -= wtBoost*vdotr*rinv*rinv*dy;
+#endif
         cWtT[0] = -wt_t*(dvFd[0] - projFd*dx);
         cWtT[1] = -wt_t*(dvFd[1] - projFd*dy);
 #else
@@ -1406,11 +1595,20 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         tqdAccum(tqWtR, cWtR);   // must come out at round-off: cWtR || r_ij
     }
 #endif
+#if TENSILE_CORRECTION_CREP
+    // repulsive for both partners: cmag along +r_ij (from j to i) pushes i away from j (demonstrator sign below)
+    cmag[0] += crepF*dx*rinv;
+    cmag[1] += crepF*dy*rinv;
+#endif
     const double cmag_E = cmag[0]*v_int[0] + cmag[1]*v_int[1];
 #if OUTPUT_ENERGY_BUDGET
     {
         // channel c contributes the flux (E, p) = -(c . v_int, c), like cmag below
+#if TENSILE_CORRECTION_DAMP_RAW
+        const double cD[2]  = { -wtBoost*vdotr*rinv*rinv*dx, -wtBoost*vdotr*rinv*rinv*dy };
+#else
         const double cD[2]  = { -(wt_r - wtR0)*ebProjR*dx, -(wt_r - wtR0)*ebProjR*dy };
+#endif
         const double cS[2]  = { cDev0[0], cDev0[1] };
         const double cSD[2] = { cDevD[0] - cDev0[0], cDevD[1] - cDev0[1] };
         const double cV[2]  = { cmag[0] - cDevD[0] - cD[0], cmag[1] - cDevD[1] - cD[1] };
@@ -1554,10 +1752,20 @@ void Particles::integrateStressTensor(const double &dt) {
         const double mu = 0.;
 #endif
         // Velocity gradients
+#if STRESS_RATE_UNLIMITED_GRAD
+#if DIM == 3 || TIME_KDK_FIELD_DRIFT
+#error "STRESS_RATE_UNLIMITED_GRAD: 2D and TIME_KDK_FIELD_DRIFT 0 only"
+#endif
+        const double dvx_dx = vxGradUL[i][0];
+        const double dvx_dy = vxGradUL[i][1];
+        const double dvy_dx = vyGradUL[i][0];
+        const double dvy_dy = vyGradUL[i][1];
+#else
         const double dvx_dx = vxGrad[i][0];
         const double dvx_dy = vxGrad[i][1];
         const double dvy_dx = vyGrad[i][0];
         const double dvy_dy = vyGrad[i][1];
+#endif
 #if DIM == 3
         const double dvx_dz = vxGrad[i][2];
         const double dvy_dz = vyGrad[i][2];
@@ -1615,7 +1823,11 @@ void Particles::integrateStressTensor(const double &dt) {
 #endif
 
         // Rotation rate components (fixed during integration)
+#if JAUMANN_SIGN_GIZMO
+        const double R_xy = -(dvy_dx - dvx_dy); // GIZMO's (reversed) rotation sign, diagnostic (parameter.h)
+#else
         const double R_xy = dvy_dx - dvx_dy; // d_x v_y - d_y v_x
+#endif
 #if DIM == 3
         const double R_xz = dvz_dx - dvx_dz; // d_x v_z - d_z v_x
         const double R_yz = dvz_dy - dvy_dz; // d_y v_z - d_z v_y
@@ -2854,12 +3066,36 @@ void Particles::applyExplicitVolumeOverride(){
 }
 
 #if EXPLICIT_VOL_SPH_DIVV
-double Particles::sphDivV(int i){
+double Particles::sphDivV(int i, const Particles *gp){
     // GIZMO Particle_DivVel (density.c:334,514): -sum_j dW/dr (dp.dv)/r normalized
     // by the kernel-sum neighbour number (= omega, which includes the self term).
-    // The kernel normalization cancels between numerator and omega. No ghosts:
-    // EXPLICIT_VOL_INTEGRATION is guarded to the non-periodic path.
+    // The kernel normalization cancels between numerator and omega. Periodic images
+    // (gp) are summed too (2026-10-02: omega includes them, the sum used to skip them,
+    // which biased the divergence of every particle near a periodic seam).
     double acc = 0.;
+    double mom = 0.;   // sum_j W'(r) r (EXPLICIT_VOL_SPH_DIVV 2)
+#if PERIODIC_BOUNDARIES
+    if (gp){
+        for (int jn = 0; jn < noiGhosts[i]; ++jn){
+            const int j = nnlGhosts[i*MAX_NUM_GHOST_INTERACTIONS + jn];
+            const double dpx = x[i]-gp->x[j], dpy = y[i]-gp->y[j];
+            const double dvx = vx[i]-gp->vx[j], dvy = vy[i]-gp->vy[j];
+            double r2 = dpx*dpx + dpy*dpy;
+            double dpdv = dpx*dvx + dpy*dvy;
+#if DIM == 3
+            const double dpz = z[i]-gp->z[j], dvz = vz[i]-gp->vz[j];
+            r2 += dpz*dpz; dpdv += dpz*dvz;
+#endif
+            if (r2 <= 0.) continue;
+            const double r = std::sqrt(r2);
+            const double wd = Kernel::WDr(r, sml[i]);
+            acc -= wd * dpdv / r;
+            mom += wd * r;
+        }
+    }
+#else
+    (void)gp;
+#endif
     for (int jn = 0; jn < noi[i]; ++jn){
         const int j = nnl[i*MAX_NUM_INTERACTIONS + jn];
         const double dpx = x[i]-x[j], dpy = y[i]-y[j];
@@ -2872,13 +3108,22 @@ double Particles::sphDivV(int i){
 #endif
         if (r2 <= 0.) continue;
         const double r = std::sqrt(r2);
-        acc -= Kernel::WDr(r, sml[i]) * dpdv / r;
+        const double wd = Kernel::WDr(r, sml[i]);
+        acc -= wd * dpdv / r;
+        mom += wd * r;
     }
+#if EXPLICIT_VOL_SPH_DIVV == 2
+    // moment-normalised (parameter.h): exact for a linear field on any stencil whose second moment
+    // sum_j W' r x^ x^ is isotropic; -mom/DIM replaces the kernel-sum neighbour number omega
+    return (mom < 0.) ? -DIM * acc / mom : 0.;
+#else
+    (void)mom;
     return (omega[i] > 0.) ? acc / omega[i] : 0.;
+#endif
 }
 #endif
 
-void Particles::integrateExplicitVolumeHalfStep(const double &dt, bool finalize){
+void Particles::integrateExplicitVolumeHalfStep(const double &dt, bool finalize, const Particles *gp){
     // Mirror of GIZMO master/kicks.c:308-318. Called twice per outer step
     // with dt = full_step / 2 to bracket the flux/updateState block.
     // No-op until the advected density has been seeded (see applyExplicitVolumeOverride):
@@ -2887,7 +3132,7 @@ void Particles::integrateExplicitVolumeHalfStep(const double &dt, bool finalize)
     for (int i = 0; i < N; ++i){
         // Advection step: d ln rho / dt = -div v.
 #if EXPLICIT_VOL_SPH_DIVV
-        double divV = sphDivV(i);
+        double divV = sphDivV(i, gp);
 #else
         double divV = vxGrad[i][0] + vyGrad[i][1];
 #if DIM == 3
@@ -4205,6 +4450,9 @@ void Particles::slopeLimiter(Particles *ghostParticles){
 #endif
     PGhost = ghostParticles->P;
 #endif
+#if STRESS_RATE_UNLIMITED_GRAD || RECON_FACE_DV_UNLIMITED
+    for (int i=0; i<N; ++i) for (int a=0; a<DIM; ++a){ vxGradUL[i][a] = vxGrad[i][a]; vyGradUL[i][a] = vyGrad[i][a]; }
+#endif
     slopeLimiter(rho, rhoGrad, ghostParticles, rhoGhost);
     slopeLimiter(vx, vxGrad, ghostParticles, vxGhost);
     slopeLimiter(vy, vyGrad, ghostParticles, vyGhost);
@@ -4315,6 +4563,21 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM],
             double fij = f[i] + Helper::dotProduct(grad[i], xijxi);
             if (psiMaxMid < fij) psiMaxMid = fij;
             if (psiMinMid > fij) psiMinMid = fij;
+        }
+#endif
+#if GIZMO_CELL_LIMITER
+        {
+            // GIZMO local_slopelimiter (see parameter.h); the deviations include 0 like GIZMO's Maxima/Minima
+            const double stol = (f == rho) ? 0. : 0.1;
+            const double dMax = std::max(psiMaxNgb - f[i], 0.), dMin = std::max(f[i] - psiMinNgb, 0.);
+            const double absMax = std::max(dMax, dMin), absMin = std::min(dMax, dMin);
+            const double fCorr = std::min(absMin + stol*absMax, absMax);
+            const double gAbs = sqrt(Helper::dotProduct(grad[i], grad[i]));
+            if (gAbs > 0.){
+                const double cfac = fCorr / (0.25 * sml[i] * gAbs);
+                if (cfac < 1.) for (int a=0; a<DIM; ++a) grad[i][a] *= cfac;
+            }
+            continue;
         }
 #endif
         // update gradients if necessary
@@ -4669,6 +4932,13 @@ void Particles::compRiemannStatesLR(const double &dt){
                 WijL[iW][nu] = pairwiseLimiter(WijL[iW][nu], WijL_buf[nu], WijR_buf[nu], xijxj_abs, xjxi_abs);
             }
 #endif // PAIRWISE_LIMITER
+#if FACE_RECON_ORDER0
+#if PERIODIC_BOUNDARIES
+#error "FACE_RECON_ORDER0: non-periodic builds only"
+#endif
+            // zeroth-order faces (parameter.h): drop the extrapolation and the pairwise limiter
+            for (int nu = 0; nu < DIM+2; ++nu){ WijR[iW][nu] = WijR_raw[nu]; WijL[iW][nu] = WijL_raw[nu]; }
+#endif
 
             // Post-pairwise-limiter snapshot for diagnostics.
             double WijR_pwl[DIM+2], WijL_pwl[DIM+2];
@@ -4708,9 +4978,50 @@ void Particles::compRiemannStatesLR(const double &dt){
             //}
 
 #if RECON_FACE_DV_SPATIAL == 1
+#if RECON_FACE_DV_UNLIMITED
+            // RECON_FACE_DV jump from the UNLIMITED linear reconstruction (parameter.h): the pre-limiter
+            // velocity gradients, no pairwise limiter; zero for every linear field, rigid rotation included
+            {
+                const double juX = (WijR_raw[2] + vxGradUL[i][0]*xijxi[0] + vxGradUL[i][1]*xijxi[1])
+                                 - (WijL_raw[2] + vxGradUL[j][0]*xijxj[0] + vxGradUL[j][1]*xijxj[1]);
+                const double juY = (WijR_raw[3] + vyGradUL[i][0]*xijxi[0] + vyGradUL[i][1]*xijxi[1])
+                                 - (WijL_raw[3] + vyGradUL[j][0]*xijxj[0] + vyGradUL[j][1]*xijxj[1]);
+#if RECON_FACE_DV_UNLIMITED == 4
+                // spin unlimited, strain limited: G = alpha sym(G_u) + antisym(G_u), alpha = min of the two velocity
+                // components' limiter factors |G_l|/|G_u|; a rigid rotation (sym = 0) reconstructs exactly (parameter.h)
+                auto gJump = [&](int p, const double *xx, double &ox, double &oy){
+                    const double gx0 = vxGradUL[p][0], gx1 = vxGradUL[p][1], gy0 = vyGradUL[p][0], gy1 = vyGradUL[p][1];
+                    const double nux = std::hypot(gx0, gx1), nuy = std::hypot(gy0, gy1);
+                    const double ax = (nux > 0.) ? std::min(1., std::hypot(vxGrad[p][0], vxGrad[p][1]) / nux) : 1.;
+                    const double ay = (nuy > 0.) ? std::min(1., std::hypot(vyGrad[p][0], vyGrad[p][1]) / nuy) : 1.;
+                    const double al = std::min(ax, ay);
+                    const double s01 = 0.5*(gx1 + gy0), w01 = 0.5*(gx1 - gy0);   // sym / antisym off-diagonal
+                    // row x: (d vx/dx, d vx/dy) = (al gx0, al s01 + w01); row y: (al s01 - w01, al gy1)
+                    ox = al*gx0*xx[0] + (al*s01 + w01)*xx[1];
+                    oy = (al*s01 - w01)*xx[0] + al*gy1*xx[1];
+                };
+                double oRx, oRy, oLx, oLy;
+                gJump(i, xijxi, oRx, oRy); gJump(j, xijxj, oLx, oLy);
+                dvJumpSp[iW][0] = (WijR_raw[2] + oRx) - (WijL_raw[2] + oLx);
+                dvJumpSp[iW][1] = (WijR_raw[3] + oRy) - (WijL_raw[3] + oLy);
+                (void)juX; (void)juY;
+#elif RECON_FACE_DV_UNLIMITED == 2
+                // only at a free surface: weight from the stencil asymmetry xi of the more one-sided partner
+                // (0 in the bulk, 1 at a surface; SURFACE_BLEND_XI_LO/HI), limited jump elsewhere
+                const double xs = std::max(xiAsym[i], xiAsym[j]);
+                const double tS = std::min(1., std::max(0., (xs - SURFACE_BLEND_XI_LO) / (SURFACE_BLEND_XI_HI - SURFACE_BLEND_XI_LO)));
+                const double ws = tS*tS*(3. - 2.*tS);
+                dvJumpSp[iW][0] = ws*juX + (1. - ws)*(WijR[iW][2] - WijL[iW][2]);
+                dvJumpSp[iW][1] = ws*juY + (1. - ws)*(WijR[iW][3] - WijL[iW][3]);
+#else
+                dvJumpSp[iW][0] = juX; dvJumpSp[iW][1] = juY;
+#endif
+            }
+#else
             // RECON_FACE_DV jump from the limited spatial reconstruction, before
             // the half-step predictor below touches the states.
             for (int k = 0; k < DIM; ++k) dvJumpSp[iW][k] = WijR[iW][2+k] - WijL[iW][2+k];
+#endif
 #endif
             // predict half a timestep
             double viDiv = vxGrad[i][0] + vyGrad[i][1];
@@ -5115,7 +5426,7 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
     // other direction), so they must be cleared here rather than in
     // collectFluxes, which runs afterwards.
     for (int i=0; i<N; ++i){
-        tqHLLC[i] = 0.; tqDev[i] = 0.; tqWtT[i] = 0.; tqWtR[i] = 0.;
+        tqHLLC[i] = 0.; tqDev[i] = 0.; tqWtT[i] = 0.; tqWtR[i] = 0.; tqRep[i] = 0.;
     }
 #endif
 #if OUTPUT_DAMP_DIAG
@@ -5283,7 +5594,9 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i,
                                 matIdL_ii, matIdR_ii, *MeshlessEOS
 #if ELASTIC
-#if TENSILE_CORRECTION
+#if TENSILE_CORRECTION && TENSILE_CORRECTION_REP_MONAGHAN
+                                , fabRep[ii]
+#elif TENSILE_CORRECTION
                                 , fabMonaghan[ii]
 #endif
                                 , fSxxL, fSxyL, fSyyL
@@ -5305,6 +5618,13 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #if OUTPUT_ENERGY_BUDGET
                 ebAddPair(i, jj, 0, FH[1], FH[2], FH[3]);
                 ebAddPair(i, jj, 1, Fij[ii][1] - FH[1], Fij[ii][2] - FH[2], Fij[ii][3] - FH[3]);
+#if TORQUE_DIAG
+                {
+                    const int jt = nnl[ii];
+                    const double tqPair = (x[i]-x[jt])*(Fij[ii][3] - FH[3]) - (y[i]-y[jt])*(Fij[ii][2] - FH[2]);
+                    tqRep[i] += 0.5*tqPair; tqRep[jt] += 0.5*tqPair;
+                }
+#endif
 #endif
 #if TORQUE_DIAG
                 // Pressure/Riemann channel: snapshot the torque of the pure HLLC
@@ -7412,6 +7732,23 @@ double Particles::sumMomentumY(){
         momY += m[i]*vy[i];
     }
     return momY;
+}
+
+#if TORQUE_DIAG
+void Particles::sumTorqueChannels(double s[5]){
+    for (int k = 0; k < 5; ++k) s[k] = 0.;
+    for (int i = 0; i < N; ++i){
+        s[0] += tqHLLC[i]; s[1] += tqDev[i]; s[2] += tqWtT[i]; s[3] += tqWtR[i]; s[4] += tqRep[i];
+    }
+}
+#endif
+
+double Particles::sumAngularMomentumZ(){
+    double Lz = 0.;
+    for (int i=0; i<N; ++i){
+        Lz += m[i]*(x[i]*vy[i] - y[i]*vx[i]);
+    }
+    return Lz;
 }
 
 #if DIM == 3

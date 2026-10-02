@@ -82,11 +82,17 @@ Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
 
 #if USE_HLLC && ELASTIC && TENSILE_CORRECTION
     // Monaghan tensile-correction factor, only computed when TENSILE_CORRECTION is set
+#if TENSILE_CORRECTION_REP_MONAGHAN
+    // separate GIZMO-form repulsion factor (parameter.h), unclamped as in GIZMO
+    tensileCorrectionFactor = TENSILE_CORRECTION_REP_PREFAC
+                    * pow(fabMonaghan, TENSILE_CORRECTION_REP_POWER);
+#else
     tensileCorrectionFactor = TENSILE_CORRECTION_PREFAC
                     * pow(fabMonaghan, TENSILE_CORRECTION_POWER);
 #if TENSILE_CORRECTION_LOCAL
     if (tensileCorrectionFactor > TENSILE_CORRECTION_FMAX_HLLC)
         tensileCorrectionFactor = TENSILE_CORRECTION_FMAX_HLLC;
+#endif
 #endif
 #endif
     // compute norm of effective face
@@ -364,6 +370,16 @@ WL[1] += pDummy;
 
     double Sstar = 0.;
     HLLC::xSplitElasticHLLC(matIdL, matIdR, WR, WL, SijRotR, SijRotL, Fij, MeshlessEOS, Sstar);
+#if GIZMO_PM_FALLBACK
+    // GIZMO (hydro_core_meshless.h) does not accept a negative face pressure from the shifted Riemann problem; its
+    // last fallback re-solves with zero velocities, which is positive by construction (parameter.h).
+    if (!(Fij[2] >= 0.)){
+        double WR0[DIM+2], WL0[DIM+2];
+        for (int nu = 0; nu < DIM+2; ++nu){ WR0[nu] = WR[nu]; WL0[nu] = WL[nu]; }
+        for (int nu = 2; nu < DIM+2; ++nu){ WR0[nu] = 0.; WL0[nu] = 0.; }
+        HLLC::xSplitElasticHLLC(matIdL, matIdR, WR0, WL0, SijRotR, SijRotL, Fij, MeshlessEOS, Sstar);
+    }
+#endif
 
 // #if TENSILE_CORRECTION && TENSILE_CORRECTION_1
 #if USE_DUMMY_PRESSURE

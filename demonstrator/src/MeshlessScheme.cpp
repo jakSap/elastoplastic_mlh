@@ -3,8 +3,17 @@
 //
 
 #include <chrono>
+#include <fstream>
+#include <iomanip>
 
 #include "../include/MeshlessScheme.h"
+
+// periodic images for the SPH divergence of the explicit volume (Particles::sphDivV)
+#if PERIODIC_BOUNDARIES && EXPLICIT_VOL_INTEGRATION
+#define EV_GHOSTS , &ghostParticles
+#else
+#define EV_GHOSTS
+#endif
 
 
 MeshlessScheme::MeshlessScheme(Configuration config, Particles *particles,
@@ -54,6 +63,29 @@ void MeshlessScheme::run(){
 #endif // ADAPTIVE_TIMESTEP
 
 
+#if CONSERVATION_LOG
+    // per-step conserved quantities at the synchronised state (see CONSERVATION_LOG)
+    std::ofstream consLog(config.outDir + "/conservation.txt");
+    consLog << "# t step M E px py Lz   (CONSERVATION_LOG: synchronised state t^n, every step)\n";
+    consLog << std::setprecision(17);
+    long consStep = 0;
+    auto logConservation = [&](){
+        consLog << t << ' ' << consStep++ << ' ' << particles->sumMass() << ' ' << particles->sumEnergy() << ' '
+                << particles->sumMomentumX() << ' ' << particles->sumMomentumY() << ' '
+                << particles->sumAngularMomentumZ();
+#if TORQUE_DIAG
+        // channel torques of the last flux pass (TORQUE_DIAG; rates, not increments): HLLC (incl. the TC_1
+        // repulsion), deviator, transverse HLL, longitudinal HLL (self-check, ~0), repulsion part of HLLC
+        {
+            double s[5];
+            particles->sumTorqueChannels(s);
+            for (double q : s) consLog << ' ' << q;
+        }
+#endif
+        consLog << '\n';
+        consLog.flush();   // runs ending in exit() skip the stream's destructor
+    };
+#endif
     // Snapshot writer. Called at the top of the step (baseline, the state there
     // is the solution at t^n) or after the closing half kick (TIME_KDK, where the
     // state at the top is only a prediction).
@@ -78,12 +110,11 @@ void MeshlessScheme::run(){
 
             Logger(INFO) << "      > Dump particles to file";
             particles->dump2file(config.outDir + "/" + stepss.str() + std::string(".h5"), t);
-// ???
 #if ADAPTIVE_TIMESTEP
             ++dumpStep;
-#else
-            ++ step;
 #endif // ADAPTIVE_TIMESTEP
+            // (fixed timestep: the step counter is advanced once per step at the end of the loop; it used to be
+            // incremented here as well, so every dump after the first came h5DumpInterval - 1 steps early)
 
 #if DEBUG_LVL > 1
 #if PERIODIC_BOUNDARIES
@@ -272,6 +303,9 @@ void MeshlessScheme::run(){
         // k c_l dt/2 to 0.2% at two different CFL numbers. It was an output
         // artifact, not a splitting error -- the scheme is second order.
 #if !TIME_KDK
+#if CONSERVATION_LOG
+        logConservation();
+#endif
         writeDumpIfDue();
         if (t>=config.timeEnd){
             Logger(INFO) << "    > t = " << t << " -> FINISHED!";
@@ -452,7 +486,7 @@ void MeshlessScheme::run(){
         // finalize=false: under EXPLICIT_VOL_FREEZE_RHO the working rho is left
         // frozen for the flux pass (GIZMO mode==0).
         Logger(DEBUG) << "      > Explicit-volume half-step kick A";
-        particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/false);
+        particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/false EV_GHOSTS);
 #endif
 #endif // !TIME_KDK (the KDK half kicks follow the flux pass)
 // #ifdef FIRST_ORDER_DEBUG
@@ -590,10 +624,13 @@ void MeshlessScheme::run(){
             // skipped once, right after the seed: rhoExplicit is then already the
             // sync value (see Particles::rhoExplicitHValid)
             if (particles->rhoExplicitHValid)
-                particles->integrateExplicitVolumeHalfStep(kdkDtPrev/2., /*finalize=*/true);
+                particles->integrateExplicitVolumeHalfStep(kdkDtPrev/2., /*finalize=*/true EV_GHOSTS);
 #endif
 #endif // !TIME_KDK_FIELD_DRIFT
         }
+#if CONSERVATION_LOG
+        logConservation();
+#endif
         writeDumpIfDue();   // synchronised x, v, u, S, rhoExplicit at t^n
         if (t>=config.timeEnd){
             Logger(INFO) << "    > t = " << t << " -> FINISHED!";
@@ -604,7 +641,7 @@ void MeshlessScheme::run(){
 #if !TIME_KDK_FIELD_DRIFT
         particles->integrateStressTensor(timeStep/2.);
 #if EXPLICIT_VOL_INTEGRATION
-        particles->integrateExplicitVolumeHalfStep(timeStep/2., /*finalize=*/true);
+        particles->integrateExplicitVolumeHalfStep(timeStep/2., /*finalize=*/true EV_GHOSTS);
 #endif
 #endif // !TIME_KDK_FIELD_DRIFT
         particles->saveKickState();
@@ -639,7 +676,7 @@ void MeshlessScheme::run(){
 #endif
         particles->integrateStressTensor(timeStep);
 #if EXPLICIT_VOL_INTEGRATION
-        particles->integrateExplicitVolumeHalfStep(timeStep, /*finalize=*/true);
+        particles->integrateExplicitVolumeHalfStep(timeStep, /*finalize=*/true EV_GHOSTS);
 #endif
 #endif // TIME_KDK_FIELD_DRIFT
         Logger(INFO) << "    > Moving particles with v^{n+1/2}";
@@ -657,7 +694,7 @@ void MeshlessScheme::run(){
 #if !TIME_KDK_FIELD_DRIFT
         particles->integrateStressTensor(timeStep/2.);
 #if EXPLICIT_VOL_INTEGRATION
-        particles->integrateExplicitVolumeHalfStep(timeStep/2., /*finalize=*/true);
+        particles->integrateExplicitVolumeHalfStep(timeStep/2., /*finalize=*/true EV_GHOSTS);
 #endif
 #endif // !TIME_KDK_FIELD_DRIFT
 #elif !ELASTIC
@@ -726,7 +763,7 @@ void MeshlessScheme::run(){
         // Half-step kick B: advance rhoExplicit by dt/2 using post-update gradients.
         // finalize=true: end-of-step swap rho <- rhoExplicit (GIZMO mode==1).
         Logger(DEBUG) << "      > Explicit-volume half-step kick B";
-        particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/true);
+        particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/true EV_GHOSTS);
 #endif
 
         Logger(INFO) << "    > Moving particles";

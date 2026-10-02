@@ -295,6 +295,10 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///       state lands inside the surface by the fraction it overshot (the Benz &
 ///       Asphaug / miluphcuda form); the difference vanishes as dt -> 0.
 #define YIELD_RETURN 0
+/// Diagnostic: use GIZMO's rotation sign in the Jaumann term of the stress update (2D R_xy only).
+/// GIZMO (elastic_physics.c) has dS += S.R - R.S, the opposite of the corotational rate; simple shear
+/// v_x = y gives S_xx / S_xx,Jaumann = -0.997 there (2026-09-30). 0 = correct sign, 1 = GIZMO's.
+#define JAUMANN_SIGN_GIZMO 0
 /// Accumulate the plastic shear strain gamma_p = sum (1 - f) sqrt(J2)/mu per
 /// particle and write it as /plasticStrain (diagnostic only).
 #define OUTPUT_PLASTIC_STRAIN 0
@@ -372,7 +376,50 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // the 27-run baseline, against 0.33-0.56 for the Monaghan form). It also stays
 // 1 under uniform stretching -- r and dp_i grow together -- so the correction
 // no longer fires on mere expansion, only on genuine pair collapse.
+//
+// TENSILE_CORRECTION_LOCAL 2 (2026-09-30, diagnostic, 2D, non-periodic): shape-free pairing test.
+// s_ab above is NOT invariant under an isochoric (shearing) deformation of the arrangement: a
+// square lattice stretched by e^eps along one axis has s = e^-eps along the other, f ~ 4 eps, and
+// plastic flow builds such arrangement strain without bound (f saturates in the yielding bulk of the
+// P4 Taylor bars; MA-Obsidian tcplast report). Mode 2 additionally compares r_ab with the distance
+// to the nearest neighbour on the OPPOSITE side, seen from each end (o_a, o_b: neighbours k with
+// n_ak . n_ab < -cos 45 deg; none -> dp), and uses s = max(s_ab, r_ab / (0.5 (o_a + o_b))):
+// any affine map of a centrosymmetric arrangement keeps the second ratio at 1, so f fires only for a
+// pair that is closer than both the local spacing AND its own opposite neighbours (pairing).
+// Collapse floor (2026-10-01): a cluster of 3+ collapsed particles, or a uniformly compressed row,
+// has close neighbours on both sides, so the opposite-neighbour ratio stays ~1 exactly where the
+// collapse is worst (P4 contact plane: interface pairs at P ~ -0.9, blow-up). Below s_ab = S0 the
+// plain scale-free test is used, above S1 the shape-free one, smoothstep in between.
+// TENSILE_CORRECTION_LOCAL 3 (2026-10-01): as 2, but the opposite neighbour's distance is PROJECTED on the
+// pair axis (o = min over the opposite 45-deg cone of x_ik . (-n_ij)). Lateral offsets of the opposite
+// neighbour (staggered / non-centrosymmetric layouts, e.g. concentric particle rings) no longer look
+// like pairing: offline benchmark (tcplast analysis/shapefree_bench.py) false positives in the
+// expanding-ring flow 0.09 -> 0.03 (LOCAL 1: 0.175), tensile clumping pairs of the elastic rings
+// still caught 100 %.
 #define TENSILE_CORRECTION_LOCAL 1
+#define TENSILE_CORRECTION_SHAPEFREE_S0 0.4
+#define TENSILE_CORRECTION_SHAPEFREE_S1 0.6
+// Separate form of the factor for TENSILE_CORRECTION_1's HLLC repulsion (2026-10-01, diagnostic, non-periodic):
+// 1 = the repulsion uses Monaghan's/GIZMO's kernel ratio f = REP_PREFAC (W(q)/W(dp_ref))^REP_POWER per pair,
+// unclamped as in GIZMO, while the stress-flux damping keeps the TENSILE_CORRECTION_LOCAL form above.
+// Why: in the P4 Taylor bars every LOCAL-form repulsion leaves a noisy, partly collapsed contact plane
+// (interface std(sigma_xx) 0.10-0.18 at t = 12), every GIZMO-form one a quiet one (0.03-0.07); in the
+// colliding rings the GIZMO form alone is too weak (tensile clumping at d0.2 without stress damping).
+// 0 = off (one factor for all channels, the behaviour before).
+#define TENSILE_CORRECTION_REP_MONAGHAN 0
+#define TENSILE_CORRECTION_REP_PREFAC 0.2
+#define TENSILE_CORRECTION_REP_POWER 4.
+// Plastic-history gate (2026-10-01, diagnostic): fade the whole tensile correction of a pair -- the
+// trigger f_ab and, with REP_MONAGHAN, the repulsion factor -- with the accumulated plastic shear
+// strain eps_p (OUTPUT_PLASTIC_STRAIN) of its two particles: g_ab = min(g_a, g_b),
+// g = 1 - smoothstep(eps_p; EPS0, EPS1). Ghost pairs use the own particle's g.
+// Why: in plastic flow the particle arrangement is strained (isochorically, O(1)) and every trigger
+// fires on it (tcplast report); GIZMO runs the P4 Taylor bars with no correction at all. Purely
+// elastic material (rings, blocks) never yields, so g = 1 and the elastic tests are bit-identical.
+// 0 = off, 1 = on (needs OUTPUT_PLASTIC_STRAIN).
+#define TENSILE_CORRECTION_PLASTIC_GATE 0
+#define TENSILE_CORRECTION_PLASTIC_EPS0 0.01
+#define TENSILE_CORRECTION_PLASTIC_EPS1 0.05
 
 // Upper clamp on the correction factor (TENSILE_CORRECTION_LOCAL only).
 // Without it the (1 - s) profile keeps growing as a pair collapses and turns
@@ -453,6 +500,26 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define TENSILE_CORRECTION_DAMP_LIMIT 1
 // C of modes 1 and 3 (fraction of the relative normal velocity removed per step at most)
 #define TENSILE_CORRECTION_DAMP_LIMIT_C 0.5
+// Central tension repulsion (2026-10-02, sphtc_20261001): in the 2D GIZMO stress flux, a pair with f > 0 (closer than
+// the local spacing, TENSILE_CORRECTION_LOCAL form, FMAX-clamped) whose material is in effective tension (mean sigma_1
+// of i and j > 0, the traction gate) is pushed apart along r_ij with CREP_FAC f sigma_1 FNormT (FNormT = the SPH
+// effective area of the pair, so at f = 1 the push equals the tensile traction itself).
+// Why: TENSILE_CORRECTION_1's Riemann repulsion acts only at P < 0 and along the MFM face A_ij (not central, an L_z
+// source); with EXPLICIT_VOL_SEED_RHO0 1 the T.1 rings at d0.2 pair across the contact tips at P > 0 under deviatoric
+// tension (sigma_1 ~ 0.02, q 0.22), which no channel touched. Central and pairwise antisymmetric: L and p exact.
+// 0 = off, 1 = on (in addition to TENSILE_CORRECTION_1; set TENSILE_CORRECTION_1 0 for an all-central TC).
+#define TENSILE_CORRECTION_CREP 0
+#define TENSILE_CORRECTION_CREP_FAC 1.0
+// Apply the DAMP boost (the part of the radial dissipation coefficient above wt_r) to the RAW radial velocity
+// difference (v_i - v_j).r_ij instead of the RECON_FACE_DV face jump; the unboosted wt_r keeps the face jump.
+// Why (2026-10-02, sphtc_20261001): with RECON_FACE_DV 2 the boost multiplies the reconstructed jump, which is small
+// for a closing pair inside a smooth flow, so the approach damping barely acts (P4 Taylor bars: contact clumps, long
+// cross-shaped head L/L0 0.66, W95/W0 3.6); with RECON_FACE_DV 1 (raw longitudinal channel) the same DAMP gives a
+// GIZMO-like contact layer, but the raw unboosted channel makes every compressive wave first order (W.1/W.2).
+// The boost is nonzero only for pairs closer than the local spacing, closing, in tension (f > 0, gate), so smooth
+// waves keep the second-order jump everywhere. Still central and pairwise antisymmetric (L and p exact).
+// 2D GIZMO-flux path with RECON_FACE_DV only. 0 = boost on the same dv as wt_r (before), 1 = boost on the raw dv.
+#define TENSILE_CORRECTION_DAMP_RAW 0
 
 // Traction gate for EVERY tensile-correction channel (user decision 2026-09-30,
 // MA-Obsidian/2026-09-30.md): a correction may act only where the material is in
@@ -499,6 +566,16 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // Check: u(t) - u(0) = ebH + ebR + ebS + ebSD + ebV + ebD to round-off.
 #define OUTPUT_ENERGY_BUDGET 0
 
+/// Per-step log of the conserved quantities (diagnostic only, numerics unchanged; ported from thirdorder 6954648):
+/// every step, at the synchronised state t^n (the snapshot point: top of the step, after the closing half kick under
+/// TIME_KDK), one line "t step M E px py Lz" (%.17g) is appended to <outDir>/conservation.txt.
+/// Lz = sum m (x v_y - y v_x) about the origin (meaningless in a periodic box). With TORQUE_DIAG five more columns:
+/// the summed channel torque RATES of the last flux pass, tqHLLC tqDev tqWtT tqWtR tqRep (tqRep = TC_1 repulsion
+/// part of tqHLLC, needs OUTPUT_ENERGY_BUDGET for the repulsion-free reference solve, else 0). Lets the analysis accumulate the
+/// total variation sum_n |Q(t_{n+1}) - Q(t_n)| over every step, which snapshots (dump cadence) cannot resolve.
+///   0 = off, 1 = on
+#define CONSERVATION_LOG 0
+
 // Two Parameters for the tensile correction facor, as in Monaghan, 2000
 // (TENSILE_CORRECTION_LOCAL reuses both: PREFAC scales f, POWER sharpens the
 // (1 - s) profile. Because f == 0 on a good lattice, PREFAC may be raised well
@@ -530,6 +607,21 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //   3 = ablation: f_i = 0, i.e. NO tensile damping in the stress flux at all
 //       (DAMP and the HLLC repulsion still act); separates what the damping
 //       itself does to clumping from what removing the per-pair form does
+//   4 = per particle, DIRECTIONAL (2026-09-30, diagnostic, 2D only): principal
+//       component k of S_i is damped by f_i^(k) = max_j f_ij (n_ij . e_k)^2, with
+//       n_ij the pair direction and e_k the principal axes of S_i. Why: in plastic
+//       (isochoric) flow the arrangement is sheared, so the pairs closer than the
+//       local spacing lie along the COMPRESSIVE axis -- kinematics, not clumping --
+//       and mode 1 transfers their f to the tensile component on every face
+//       (measured in P4 Taylor bars: f_i ~ 0.3-0.6 in the yielding bulk, set by pairs
+//       with (n.e1)^2 ~ 0.01; the per-pair form removes ~1 % there). Mode 4 only
+//       damps a component along which a pair is actually collapsing. Still one
+//       symmetric tensor per particle, so FACE 3 stays torque-free.
+//   5 = per particle, FACE-WEIGHTED directional (2026-10-01, diagnostic, 2D only): component k of
+//       S_i is damped by phi_i^(k) = sum_j f_ij (A_ij . e_k)^2 / sum_j (A_ij . e_k)^2, the fraction of
+//       component k that the per-PAIR form (mode 0) removes from particle i's faces, weighted by how
+//       much of that component each face carries -- mode 0 folded into one symmetric tensor per
+//       particle, so FACE 3 stays torque-free (mode 0 is not).
 // Default since 2026-09-29 (test plan §1): 1 with DAMP 18, FMAX 1.0 (tuning MA-Obsidian/2026-09-29-tc-per-particle-tuning).
 #define TENSILE_CORRECTION_PARTICLE 1
 // Output per-particle average f_ab to h5 dump (requires TENSILE_CORRECTION)
@@ -687,6 +779,40 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //   1 = spatial-only jump, lab frame (the predicted states still feed the HLLC solve)
 //   2 = predicted jump, lab frame (mode 0 without the frame bug; diagnostic)
 #define RECON_FACE_DV_SPATIAL 1
+
+// Take the RECON_FACE_DV jump (the transverse channel; with RECON_FACE_DV 2 also the longitudinal one) from the
+// UNLIMITED linear reconstruction: velocity gradients before the cell slope limiter, no pairwise limiter. The
+// HLLC face states keep the limited reconstruction.
+// Why (2026-10-02, sphtc_20261001, CONSERVATION_LOG + TORQUE_DIAG on the rotating disc): ~90 % of the disc's L_z
+// change is the transverse dissipation channel, and switching both limiters off removes 95 % of it (d0.05: 8.2e-5 ->
+// 4.0e-6 per 20 time units, net drift -7.6e-5 -> +6e-8). The limiters clip vx and vy of a near-rigid rotation by
+// different factors, so the limited jump of a linear field is not zero and the transverse term brakes / spins the
+// body; the unlimited linear jump is zero for every linear field. Limiters are for the Riemann states, not for
+// deciding whether a velocity field is linear.
+// Risk: at a genuine shear discontinuity the unlimited extrapolations can overshoot, the jump can be smaller or flip
+// sign (less / anti-dissipation in the transverse channel). Non-periodic 2D path only (the periodic path keeps the
+// limited jump); needs RECON_FACE_DV_SPATIAL 1. 0 = limited jump (before), 1 = unlimited jump,
+// 2 = unlimited only at a free surface (2026-10-02): the limiters' damage is extremum clipping of one-sided surface
+// stencils (the rotating disc's surface is a velocity maximum); mode 1 also unlimits sliding contacts inside a body and
+// made the P4 contact layer clump again (d0.025 close pairs 178 -> 690). Weight = smoothstep of the stencil asymmetry
+// xi (SURFACE_BLEND_XI_LO/HI) of the more one-sided partner; needs SURFACE_GRAD_BLEND (xi).
+// 4 = spin unlimited, strain limited (2026-10-02): the jump uses alpha sym(G) + antisym(G) of the UNLIMITED velocity
+// gradient G, alpha = min of the two components' slope-limiter factors |G_lim|/|G| (the cell limiter scales each
+// component's gradient by one scalar). A rigid rotation (sym G = 0) then reconstructs exactly, while a shear or
+// compression jump keeps the limiter's strength in its strain part. No pairwise limiter.
+#define RECON_FACE_DV_UNLIMITED 0
+#if TENSILE_CORRECTION_DAMP_RAW && !(RECON_FACE_DV && DIM == 2 && TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL)
+#error "TENSILE_CORRECTION_DAMP_RAW needs RECON_FACE_DV, DIM 2 and the LOCAL tensile correction (DAMP)."
+#endif
+#if TENSILE_CORRECTION_CREP && !(TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL && GIZMO_ELASTIC_FLUX && DIM == 2)
+#error "TENSILE_CORRECTION_CREP needs the LOCAL tensile correction on the 2D GIZMO stress-flux path."
+#endif
+#if RECON_FACE_DV_UNLIMITED == 2 && !SURFACE_GRAD_BLEND
+#error "RECON_FACE_DV_UNLIMITED 2 needs SURFACE_GRAD_BLEND (stencil asymmetry xi)."
+#endif
+#if RECON_FACE_DV_UNLIMITED && !(RECON_FACE_DV && RECON_FACE_DV_SPATIAL == 1 && DIM == 2)
+#error "RECON_FACE_DV_UNLIMITED needs RECON_FACE_DV, RECON_FACE_DV_SPATIAL 1 and DIM 2."
+#endif
 
 // Minmod-limit the RADIAL part of the RECON_FACE_DV jump against the raw
 // difference v_i - v_j: same sign -> the smaller of the two, opposite sign -> 0.
@@ -869,6 +995,20 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define PAIRWISE_LIMITER 1
 #define PSI_1 .5            // TODO: move to config
 #define PSI_2 .25           // TODO: move to config
+
+// GIZMO-matching diagnostics (2026-10-01, gzsys study; all 0 = unchanged code paths):
+/// GIZMO_CELL_LIMITER 1: replace the cell slope limiter of rho, P, v by GIZMO's local_slopelimiter (gradients.c,
+/// SELFGRAVITY_OFF branch): |grad| a h <= min(abs_min + stol abs_max, abs_max) over the neighbour deviations,
+/// a = 0.25, h = sml, stol = 0 for rho and 0.1 for P and v.
+#define GIZMO_CELL_LIMITER 0
+/// FACE_RECON_ORDER0 1: zeroth-order face states (rho, P, v = particle values), GIZMO's recon_mode 0.
+#define FACE_RECON_ORDER0 0
+/// STRESS_RATE_UNLIMITED_GRAD 1: with TIME_KDK_FIELD_DRIFT 0 the kicked stress rate uses the velocity gradient from
+/// before the cell slope limiter, as GIZMO (gradients.c computes Dt_Elastic_Stress_Tensor before limiting).
+#define STRESS_RATE_UNLIMITED_GRAD 0
+/// GIZMO_PM_FALLBACK 1: a negative face pressure of the (dummy-shifted) Riemann problem is re-solved with zero
+/// velocities, GIZMO's last fallback (hydro_core_meshless.h); its intermediate zeroth-order retry is skipped.
+#define GIZMO_PM_FALLBACK 0
 
 /// meshless finite mass method instead of meshless finite volume
 #define MESHLESS_FINITE_MASS 1
@@ -1250,8 +1390,20 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #if TENSILE_CORRECTION_PARTICLE && !(TENSILE_CORRECTION && GIZMO_ELASTIC_FLUX)
 #error "TENSILE_CORRECTION_PARTICLE replaces the per-pair damping of the GIZMO stress flux: needs TENSILE_CORRECTION 1 and GIZMO_ELASTIC_FLUX 1."
 #endif
-#if TENSILE_CORRECTION_PARTICLE > 3
-#error "TENSILE_CORRECTION_PARTICLE must be 0 (per pair), 1 (per particle, max), 2 (per particle, mean) or 3 (none)."
+#if TENSILE_CORRECTION_PARTICLE > 5
+#error "TENSILE_CORRECTION_PARTICLE must be 0 (per pair), 1 (per particle, max), 2 (per particle, mean), 3 (none), 4 (directional) or 5 (face-weighted directional)."
+#endif
+#if TENSILE_CORRECTION_REP_MONAGHAN && !(TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL && !PERIODIC_BOUNDARIES && USE_HLLC)
+#error "TENSILE_CORRECTION_REP_MONAGHAN: separate GIZMO-form repulsion factor for a LOCAL-form TC on the non-periodic HLLC path."
+#endif
+#if TENSILE_CORRECTION_LOCAL >= 2 && (DIM != 2 || PERIODIC_BOUNDARIES)
+#error "TENSILE_CORRECTION_LOCAL 2/3 (shape-free pairing test) is 2D and non-periodic only."
+#endif
+#if TENSILE_CORRECTION_LOCAL > 3
+#error "TENSILE_CORRECTION_LOCAL must be 0 (Monaghan), 1 (scale-free), 2 (+ shape-free) or 3 (+ shape-free, projected)."
+#endif
+#if TENSILE_CORRECTION_PARTICLE >= 4 && (DIM != 2 || RECON_FACE_TRACTION)
+#error "TENSILE_CORRECTION_PARTICLE 4/5 are 2D only and need the particle's own S in the flux (RECON_FACE_TRACTION 0)."
 #endif
 
 // ADIABATIC_FACE_CORRECTION consistency guards (same reason: needs USE_HLLC)
@@ -1503,6 +1655,13 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// Earlier note: at the rings' free surface the SPH estimator was slightly noisier than
 /// the MFM trace and did not improve the rings -- re-check the rings with this default.
 /// 1 = GIZMO SPH estimator (DEFAULT); 0 = MFM gradient trace (previous default).
+/// 2 = SPH pair sum normalised by its own kernel-gradient moment instead of omega (2026-10-02):
+///     div v_i = -DIM sum_j W'_ij (x_ij . v_ij)/r_ij / sum_j W'_ij r_ij. The omega normalisation of mode 1 is
+///     only zeroth-order consistent: on a lattice sum_j W' r != -DIM omega by a resolution-independent fraction,
+///     so the explicit density follows a compression at the wrong rate. Measured on W.2 (P-wave, Tillotson
+///     mu 6/13, n 64 -> 128): mode 1 L1 3.4e-2 at n 128, order 0.5, c_num/c_l - 1 = -2.9e-3 (order 0.46);
+///     mode 0 5.8e-3, order 1.86. The moment normalisation is exact for linear fields on isotropic stencils
+///     and keeps the per-pair weighting that resists pairing (the reason for mode 1).
 #define EXPLICIT_VOL_SPH_DIVV 1
 /// Number of initial steps to run on the kernel density before seeding the advected
 /// density. The demonstrator's t=0 kernel density is truncated by the incomplete

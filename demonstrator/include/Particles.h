@@ -79,6 +79,10 @@ public:
     /// VARIABLE_SML is 0; in that case it is just a copy of config.kernelSize.
     double *sml;
     double (*rhoGrad)[DIM], (*vxGrad)[DIM], (*vyGrad)[DIM], (*vzGrad)[DIM], (*PGrad)[DIM];
+#if STRESS_RATE_UNLIMITED_GRAD || RECON_FACE_DV_UNLIMITED
+    /// velocity gradient before the cell slope limiter (STRESS_RATE_UNLIMITED_GRAD, RECON_FACE_DV_UNLIMITED)
+    double (*vxGradUL)[DIM], (*vyGradUL)[DIM];
+#endif
 
 #if OUTPUT_CONDITION_NUMBER
     double *conditionNumber;
@@ -177,12 +181,13 @@ public:
     /// `finalize` marks the end-of-step kick (GIZMO kicks.c:395, mode==1): under
     /// EXPLICIT_VOL_FREEZE_RHO only the finalize kick writes rho <- rhoExplicit, so
     /// the working density stays frozen through the hydro pass.
-    void integrateExplicitVolumeHalfStep(const double &dt, bool finalize = false);
+    /// gp: periodic images (PERIODIC_BOUNDARIES), needed by the SPH divergence (EXPLICIT_VOL_SPH_DIVV)
+    void integrateExplicitVolumeHalfStep(const double &dt, bool finalize = false, const Particles *gp = nullptr);
 #if EXPLICIT_VOL_SPH_DIVV
     /// GIZMO's robust SPH kernel-weighted velocity divergence (Particle_DivVel,
     /// density.c:334/514): -sum_j dW/dr (dp.dv)/r normalized by omega (kernel-sum
     /// neighbour number). Surface-stable, unlike the MFM gradient trace.
-    double sphDivV(int i);
+    double sphDivV(int i, const Particles *gp = nullptr);
 #endif
 #endif
 
@@ -195,6 +200,10 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
 #endif // DIM == 3
 #if TENSILE_CORRECTION
     double *fabMonaghan;    //f_ab berechnet nach Monaghan et al, 2000
+#if TENSILE_CORRECTION_REP_MONAGHAN
+    /// Monaghan/GIZMO kernel ratio W(q)/W(dp_ref) per pair, used only by the HLLC repulsion.
+    double *fabRep;
+#endif
 #if PERIODIC_BOUNDARIES
     /// Monaghan f_ab for the ghost (periodic image) pairs, indexed
     /// i*MAX_NUM_GHOST_INTERACTIONS + jn to mirror nnlGhosts. Without it the
@@ -207,6 +216,10 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     /// for the deviatoric damping of the GIZMO stress flux; filled at the end of
     /// computeFabMonaghan from the pair values (normal + periodic pairs).
     double *fTCpart;
+#if TENSILE_CORRECTION_PARTICLE >= 4
+    /// Modes 4/5: fTCpart = factor along the major principal axis e1 of S, fTCpart2 along e2.
+    double *fTCpart2;
+#endif
 #endif
 #if TENSILE_CORRECTION_DAMP_LIMIT || OUTPUT_DAMP_DIAG
     /// Velocity-change interval of one flux pass, set by the time loop before
@@ -553,6 +566,12 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     double sumEnergy();
     double sumMomentumX();
     double sumMomentumY();
+    /// sum m (x v_y - y v_x) about the origin (CONSERVATION_LOG)
+    double sumAngularMomentumZ();
+#if TORQUE_DIAG
+    /// summed channel torques of the last flux pass: tqHLLC, tqDev, tqWtT, tqWtR, tqRep (CONSERVATION_LOG)
+    void sumTorqueChannels(double s[5]);
+#endif
 #if DIM==3
     double sumMomentumZ();
 #endif
@@ -640,6 +659,9 @@ private:
     //            must land at round-off; it is the instrumentation self-check.
     // Invariant: tqHLLC + tqDev + tqWtT + tqWtR == tqF, particle by particle.
     double *tqHLLC, *tqDev, *tqWtT, *tqWtR;
+    /// TC_1 repulsion part of tqHLLC (Riemann flux minus the flux without the repulsion; needs OUTPUT_ENERGY_BUDGET,
+    /// else 0). Diagnostic, 2026-10-02.
+    double *tqRep;
     // Anisotropy of the elastic stress area:  || Ghat_i - I ||_F  with
     // Ghat_i = G_i / (tr G_i / DIM)  and  G_i = sum_j FNormT_ij r_ij rhat (x) rhat.
     // Zero on an isotropic stencil, O(1) where the stencil is one-sided. The
