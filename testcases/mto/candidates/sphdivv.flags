@@ -1,0 +1,3 @@
+# P1 2x2: does the SPH velocity divergence (GIZMO Particle_DivVel) in the explicit volume
+# integration stop the rods welding/clumping? (user: on Mars only DV 0 and SPH divv worked)
+EXPLICIT_VOL_SPH_DIVV 1

@@ -1,0 +1,3 @@
+# P1 2x2: RECON_FACE_DV 0 (raw jump in both HLL channels = first-order viscosity) + SPH divv
+RECON_FACE_DV 0
+EXPLICIT_VOL_SPH_DIVV 1

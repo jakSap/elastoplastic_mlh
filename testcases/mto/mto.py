@@ -27,6 +27,7 @@ Layout:
 
 import argparse
 import concurrent.futures as cf
+import glob
 import hashlib
 import json
 import math
@@ -346,8 +347,15 @@ def cmd_plan(args):
     print("total {:.0f} min serial".format(tot / 60))
 
 
+def candidates_with_runs():
+    """Candidate directories under runs/ (logs and other files living there are skipped)."""
+    if not os.path.isdir(RUNS):
+        return []
+    return sorted(d for d in os.listdir(RUNS) if os.path.isdir(os.path.join(RUNS, d)))
+
+
 def cmd_status(args):
-    cands = [args.cand] if args.cand else sorted(os.listdir(RUNS)) if os.path.isdir(RUNS) else []
+    cands = [args.cand] if args.cand else candidates_with_runs()
     for cand in cands:
         base = os.path.join(RUNS, cand)
         for test in sorted(os.listdir(base)):
@@ -392,7 +400,7 @@ def cmd_analyze(args):
 
 def cmd_score(args):
     import analysis
-    cands = args.cands or (sorted(os.listdir(RUNS)) if os.path.isdir(RUNS) else [])
+    cands = args.cands or candidates_with_runs()
     print(analysis.scoreboard(RUNS, cands))
 
 
@@ -407,10 +415,18 @@ def cmd_frames(args):
 
 
 def cmd_calib(args):
+    # runs/<cand>/calib_exclude.txt: "TEST RUNG" lines of runs whose wall time is not a
+    # clean measurement (e.g. paused with SIGSTOP while running)
+    excl = set()
+    for f in glob.glob(os.path.join(RUNS, "*", "calib_exclude.txt")):
+        cand = os.path.basename(os.path.dirname(f))
+        excl |= {(cand,) + tuple(l.split()) for l in open(f) if l.strip()}
     rates = {}
     for root, dirs, files in os.walk(RUNS):
         if "meta.json" in files:
             m = json.load(open(os.path.join(root, "meta.json")))
+            if (m.get("cand"), m.get("test"), m.get("tag")) in excl:
+                continue
             if m.get("exit") == 0 and m.get("steps") and m["wall_s"] > 20:
                 rates.setdefault(m["variant"], []).append(m["wall_s"] / (m["N"] * m["steps"]))
     out = {v: sorted(r)[len(r) // 2] for v, r in rates.items()}
