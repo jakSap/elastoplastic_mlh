@@ -1,0 +1,58 @@
+# Base configuration of the mto testplan: the 09-26 "standard" (GEF 1) + DRIFT_KDK 1
+# + GIZMO's internal-energy limiter. Every flag that matters for the scheme is pinned
+# here, so a build never depends on what demonstrator/include/parameter.h happens to
+# hold in the working tree. Candidate files (candidates/*.flags) override these;
+# testcase variants (lib/tests.py VARIANTS: periodicity, EOS, plasticity) override both.
+DIM 2
+ELASTIC 1
+GRADIENT_ORDER 1
+KERNEL_FUNCTION 6
+NNN_TARGET 32
+VARIABLE_SML 1
+ADAPTIVE_TIMESTEP 1
+CFL .2
+MESHLESS_FINITE_MASS 1
+SLOPE_LIMITING 1
+PAIRWISE_LIMITER 1
+USE_HLLC 1
+USE_DUMMY_PRESSURE 1
+# scheme: xSplitElasticHLLC isotropic on A_ij + GIZMO deviatoric stress flux
+GIZMO_ELASTIC_FLUX 1
+RECON_FACE_DV 1
+RECON_FACE_TRACTION 0
+ELASTIC_FACE_MODE 0
+ELASTIC_HLLC_EP 0
+AM_METHOD 0
+# time integration
+DRIFT_KDK 1
+RECON_TIME_PRED 1
+TIME_DKD 0
+FRAME_HALFSTEP 0
+# energy
+MFM_ENERGY_STARFIX 0
+ADIABATIC_FACE_CORRECTION 0
+ENERGY_FLOOR -1
+ENERGY_HALF_LIMIT 1
+# tensile correction (local, scale-free form)
+TENSILE_CORRECTION 1
+TENSILE_CORRECTION_1 1
+TENSILE_CORRECTION_2 0
+TENSILE_CORRECTION_3 0
+TENSILE_CORRECTION_LOCAL 1
+TENSILE_CORRECTION_FMAX 0.5
+TENSILE_CORRECTION_DAMP 8.0
+TENSILE_CORRECTION_PREFAC 4.0
+TENSILE_CORRECTION_POWER 1.
+# volume / surface
+EXPLICIT_VOL_INTEGRATION 1
+EXPLICIT_VOL_SPH_DIVV 0
+SURFACE_GRAD_BLEND 1
+POLY_RECONSTRUCTION 0
+# physics off unless a variant switches it on
+PLASTICITY 0
+VON_MISES_PLASTICITY 0
+PLASTICITY_YIELD_GIZMO 0
+FRAGMENTATION 0
+# diagnostics off
+TORQUE_DIAG 0
+AM_SELFTEST 0

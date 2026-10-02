@@ -259,6 +259,14 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// and fed to the same radial return as the legacy path.
 /// Constant von Mises yield strength (per-material Y0).
 #define VON_MISES_PLASTICITY 0
+/// Yield return of the von Mises models, GIZMO-compatible variant.
+/// GIZMO (solids/elastic_physics.c:106-112, applied after every kick AND drift of S)
+/// scales the deviator by f_Y = Y0^2/(NDim J2) with J2 = 1/2 S:S over the NDim x NDim
+/// components -- the ratio itself, not its square root. The 2D J2 here uses the same
+/// in-plane components, so with this flag the return is GIZMO's.
+///   0 = radial return f = sqrt(Y^2/(d J2)), lands on the yield surface (baseline)
+///   1 = GIZMO factor f = Y^2/(d J2)
+#define PLASTICITY_YIELD_GIZMO 0
 /// Mohr-Coulomb: Y = min(Y0 + mu_fric * P, Y_M).
 #define MOHR_COULOMB_PLASTICITY 0
 /// Drucker-Prager cone fitted to Mohr-Coulomb (cohesion + friction angle).
@@ -1019,6 +1027,15 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 
 // floor for internal energy u, set to negative value to disable
 #define ENERGY_FLOOR -1
+
+/// GIZMO's internal-energy limiter (kicks.c:333, predict.c:226): a kick may at most
+/// halve u, `if (u_new < 0.5 u_old) u = 0.5 u_old`. Keeps u > 0 without a floor, at
+/// the price of exact energy conservation: the energy added is accumulated and logged
+/// once per step (WARN, only on steps where the limiter fired), so a run's energy
+/// error can be split into scheme error and limiter injection.
+///   0 = off (baseline, bit-identical)
+///   1 = on
+#define ENERGY_HALF_LIMIT 0
 
 // Output per-particle condition number of the gradient estimation matrix E
 #define OUTPUT_CONDITION_NUMBER 1

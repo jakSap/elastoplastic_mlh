@@ -1,0 +1,7 @@
+runs/
+builds/
+ics/
+calib.json
+__pycache__/
+gizmo/runs/
+*.png

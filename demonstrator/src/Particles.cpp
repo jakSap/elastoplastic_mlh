@@ -1304,8 +1304,14 @@ void Particles::integrateStressTensor(const double &dt) {
 #endif
             // Radial return: scale S so that J2 -> Y2_over_d. Since J2 is
             // quadratic in S, the factor is the square root of the ratio.
+            // PLASTICITY_YIELD_GIZMO uses GIZMO's factor instead, the ratio itself
+            // (solids/elastic_physics.c:111), which lands inside the yield surface.
             if (J2 > Y2_over_d && J2 > 0.0) {
+#if PLASTICITY_YIELD_GIZMO
+                const double f = Y2_over_d / J2;
+#else
                 const double f = std::sqrt(Y2_over_d / J2);
+#endif
                 Sxx[i] *= f;  Syy[i] *= f;  Sxy[i] *= f;
 #if DIM == 3
                 Szz[i] *= f;  Sxz[i] *= f;  Syz[i] *= f;
@@ -5357,6 +5363,9 @@ void Particles::collectFluxes(Helper &helper){
 }
 
 void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
+#if ENERGY_HALF_LIMIT
+    energyLimitCount = 0;
+#endif
 
     for(int i=0; i<N; ++i){
 
@@ -5366,6 +5375,9 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
         double vzi = vz[i];
 #endif
 
+#if ENERGY_HALF_LIMIT
+        const double uOld = u[i];
+#endif
         // create state vector without mass
         double Q[DIM+1];
 #if DIM==3
@@ -5417,6 +5429,13 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
 
 #else
         u[i] = Q[0]/m[i]-.5*(vx[i]*vx[i]+vy[i]*vy[i]);
+#endif
+#if ENERGY_HALF_LIMIT
+        if (u[i] < .5*uOld){
+            energyLimitInjected += m[i]*(.5*uOld - u[i]);
+            ++energyLimitCount;
+            u[i] = .5*uOld;
+        }
 #endif
 #if EOS != 1 // For murnaghan this is ok
         if (u[i] <= 0.){
@@ -5472,9 +5491,18 @@ void Particles::updateStateAndPosition(const double &dt, const Domain &domain){
 #endif // PERIODIC_BOUNDARIES
 #endif // MOVE_PARTICLES
     }
+#if ENERGY_HALF_LIMIT
+    if (energyLimitCount > 0){
+        Logger(WARN) << "ENERGY_HALF_LIMIT fired on " << energyLimitCount
+                     << " particles, cumulative injected energy = " << energyLimitInjected;
+    }
+#endif
 }
 
 void Particles::updateState(const double &dt){
+#if ENERGY_HALF_LIMIT
+    energyLimitCount = 0;
+#endif
     for(int i=0; i<N; ++i){
         double vxi = vx[i], vyi = vy[i];
 #if DRIFT_KDK
@@ -5487,6 +5515,9 @@ void Particles::updateState(const double &dt){
 #endif // DRIFT_KDK
 #if DIM==3
         double vzi = vz[i];
+#endif
+#if ENERGY_HALF_LIMIT
+        const double uOld = u[i];
 #endif
         double Q[DIM+1];
 #if DIM==3
@@ -5524,6 +5555,13 @@ void Particles::updateState(const double &dt){
 #else
         u[i] = Q[0]/m[i]-.5*(vx[i]*vx[i]+vy[i]*vy[i]);
 #endif
+#if ENERGY_HALF_LIMIT
+        if (u[i] < .5*uOld){
+            energyLimitInjected += m[i]*(.5*uOld - u[i]);
+            ++energyLimitCount;
+            u[i] = .5*uOld;
+        }
+#endif
 #if EOS != 1 // Ok for murnaghan
         if (u[i] <= 0.){
             Logger(ERROR) << "Negative internal energy. u[" << i << "] =" << u[i] << ", eF = " << eF[i];
@@ -5535,6 +5573,12 @@ void Particles::updateState(const double &dt){
         }
 #endif
     }
+#if ENERGY_HALF_LIMIT
+    if (energyLimitCount > 0){
+        Logger(WARN) << "ENERGY_HALF_LIMIT fired on " << energyLimitCount
+                     << " particles, cumulative injected energy = " << energyLimitInjected;
+    }
+#endif
 
 #if AM_SPIN
     // Bookkeeping only: the spin ledger absorbs the residual pair torque, so

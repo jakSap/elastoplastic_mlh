@@ -25,6 +25,12 @@ public:
     ~Particles();
 
     int N;
+#if ENERGY_HALF_LIMIT
+    /// ENERGY_HALF_LIMIT bookkeeping: energy added by the limiter (cumulative)
+    /// and the number of particles it fired on in the current step.
+    double energyLimitInjected { 0. };
+    int energyLimitCount { 0 };
+#endif
     EquationOfState *MeshlessEOS = nullptr;
 #if USE_MATID
     int *matId;
