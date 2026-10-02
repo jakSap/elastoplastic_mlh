@@ -805,6 +805,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // limited the vx strain too (W.2 n 64: damping 1.2e-2 -> 3.4e-2, L1(S_xy) 3.7e-5 -> 8.9e-4); the weighted mean
 // reduces to the vx factor there and is still exact for a rigid rotation.
 #define RECON_FACE_DV_UNLIMITED 0
+// Apply the RECON_FACE_DV_UNLIMITED jump to the TRANSVERSE (shear-wave) channel only; the longitudinal channel keeps
+// the limited (+ pairwise-limited) jump. Why (2026-10-02): the torque that brakes / spins a rotating body is all in
+// the transverse channel (the longitudinal one is central), while the unlimited longitudinal jump under-dissipates
+// shocks: granite G.1 (5 km/s impact) 0 -> 16 000 negative-u lines with mode 5 on both channels.
+// 0 = both channels (as introduced), 1 = transverse only. Needs RECON_FACE_DV 2 to differ from 0 in the longitudinal.
+#define RECON_FACE_DV_UL_TRANSVERSE 0
 #if TENSILE_CORRECTION_DAMP_RAW && !(RECON_FACE_DV && DIM == 2 && TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL)
 #error "TENSILE_CORRECTION_DAMP_RAW needs RECON_FACE_DV, DIM 2 and the LOCAL tensile correction (DAMP)."
 #endif

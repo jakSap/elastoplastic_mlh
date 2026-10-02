@@ -635,6 +635,9 @@ private:
 #if RECON_FACE_DV_SPATIAL
     double (*dvJumpSp)[DIM]; // RECON_FACE_DV jump, spatial reconstruction only (i-side minus j-side)
 #endif
+#if RECON_FACE_DV_UNLIMITED && RECON_FACE_DV_UL_TRANSVERSE
+    double (*dvJumpUL)[DIM]; // unlimited jump for the transverse channel (RECON_FACE_DV_UL_TRANSVERSE)
+#endif
 
     double (*kernel)(const double&, const double&){ &Kernel::W };
 
@@ -706,6 +709,9 @@ private:
     double (*vFrameGhosts)[DIM];
 #if RECON_FACE_DV_SPATIAL
     double (*dvJumpSpGhosts)[DIM];
+#endif
+#if RECON_FACE_DV_UNLIMITED && RECON_FACE_DV_UL_TRANSVERSE
+    double (*dvJumpULGhosts)[DIM];
 #endif
     int *ghostMap;
     int *parent; // if class holds ghost particles the parent node is stored

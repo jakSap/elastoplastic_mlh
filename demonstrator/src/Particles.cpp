@@ -462,6 +462,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
 #if RECON_FACE_DV_SPATIAL
         dvJumpSp = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
 #endif
+#if RECON_FACE_DV_UNLIMITED && RECON_FACE_DV_UL_TRANSVERSE
+        dvJumpUL = new double[numParticles*MAX_NUM_INTERACTIONS][DIM];
+#endif
 
         mF = new double[numParticles];
         vF = new double[numParticles][DIM];
@@ -512,6 +515,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         vFrameGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
 #if RECON_FACE_DV_SPATIAL
         dvJumpSpGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
+#endif
+#if RECON_FACE_DV_UNLIMITED && RECON_FACE_DV_UL_TRANSVERSE
+        dvJumpULGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
 #endif
     } else {
         parent = new int[numParticles]; // store index of original node
@@ -711,6 +717,9 @@ Particles::~Particles() {
 #if RECON_FACE_DV_SPATIAL
         delete[] dvJumpSp;
 #endif
+#if RECON_FACE_DV_UNLIMITED && RECON_FACE_DV_UL_TRANSVERSE
+        delete[] dvJumpUL;
+#endif
         delete[] mF;
         delete[] vF;
         delete[] eF;
@@ -763,6 +772,9 @@ Particles::~Particles() {
         delete[] vFrameGhosts;
 #if RECON_FACE_DV_SPATIAL
         delete[] dvJumpSpGhosts;
+#endif
+#if RECON_FACE_DV_UNLIMITED && RECON_FACE_DV_UL_TRANSVERSE
+        delete[] dvJumpULGhosts;
 #endif
     } else {
         delete[] parent;
@@ -1205,6 +1217,9 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #if RECON_FACE_DV_SPATIAL
     const double (*DJSel)[DIM] = dvJumpSp;
 #endif
+#if RECON_FACE_DV_UNLIMITED && RECON_FACE_DV_UL_TRANSVERSE
+    const double (*DJULSel)[DIM] = dvJumpUL;
+#endif
 #if PERIODIC_BOUNDARIES
     if (gp){
         xJ = gp->x; yJ = gp->y; smlJ = gp->sml; rhoJ = gp->rho; mJ = gp->m;
@@ -1228,6 +1243,9 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
 #if RECON_FACE_DV_SPATIAL
         DJSel = dvJumpSpGhosts;
+#endif
+#if RECON_FACE_DV_UNLIMITED && RECON_FACE_DV_UL_TRANSVERSE
+        DJULSel = dvJumpULGhosts;
 #endif
     }
 #endif // PERIODIC_BOUNDARIES
@@ -1511,8 +1529,16 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #else
         const double projR = vdotr * rinv * rinv;   // longitudinal keeps raw form
 #endif
+#if RECON_FACE_DV_UNLIMITED && RECON_FACE_DV_UL_TRANSVERSE
+        // transverse channel on the unlimited jump, longitudinal on the limited one (RECON_FACE_DV_UL_TRANSVERSE)
+        const double dvU[2] = { DJULSel[ii][0], DJULSel[ii][1] };
+        const double projU = (dvU[0]*dx + dvU[1]*dy) * rinv * rinv;
+        cmag[0] -= wt_r*projR*dx + wt_t*(dvU[0] - projU*dx);
+        cmag[1] -= wt_r*projR*dy + wt_t*(dvU[1] - projU*dy);
+#else
         cmag[0] -= wt_r*projR*dx + wt_t*(dvF[0] - projF*dx);
         cmag[1] -= wt_r*projR*dy + wt_t*(dvF[1] - projF*dy);
+#endif
 #if TENSILE_CORRECTION_DAMP_RAW
         // approach-damping boost on the raw radial velocity difference (central, pairwise antisymmetric)
         cmag[0] -= wtBoost*vdotr*rinv*rinv*dx;
@@ -1559,8 +1585,17 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         cWtR[0] -= wtBoost*vdotr*rinv*rinv*dx;
         cWtR[1] -= wtBoost*vdotr*rinv*rinv*dy;
 #endif
+#if RECON_FACE_DV_UNLIMITED && RECON_FACE_DV_UL_TRANSVERSE
+        {
+            const double dvU[2] = { DJULSel[ii][0], DJULSel[ii][1] };
+            const double projU = (dvU[0]*dx + dvU[1]*dy) * rinv * rinv;
+            cWtT[0] = -wt_t*(dvU[0] - projU*dx);
+            cWtT[1] = -wt_t*(dvU[1] - projU*dy);
+        }
+#else
         cWtT[0] = -wt_t*(dvFd[0] - projFd*dx);
         cWtT[1] = -wt_t*(dvFd[1] - projFd*dy);
+#endif
 #else
         // Raw path: wt_rt*(dx,dy) is already radial, and wt_t*dv splits into a
         // radial and a transverse part. Group everything parallel to r_ij into
@@ -5007,8 +5042,13 @@ void Particles::compRiemannStatesLR(const double &dt){
                 };
                 double oRx, oRy, oLx, oLy;
                 gJump(i, xijxi, oRx, oRy); gJump(j, xijxj, oLx, oLy);
-                dvJumpSp[iW][0] = (WijR_raw[2] + oRx) - (WijL_raw[2] + oLx);
-                dvJumpSp[iW][1] = (WijR_raw[3] + oRy) - (WijL_raw[3] + oLy);
+                double *JT = dvJumpSp[iW];
+#if RECON_FACE_DV_UL_TRANSVERSE
+                JT = dvJumpUL[iW];
+                dvJumpSp[iW][0] = WijR[iW][2] - WijL[iW][2]; dvJumpSp[iW][1] = WijR[iW][3] - WijL[iW][3];
+#endif
+                JT[0] = (WijR_raw[2] + oRx) - (WijL_raw[2] + oLx);
+                JT[1] = (WijR_raw[3] + oRy) - (WijL_raw[3] + oLy);
                 (void)juX; (void)juY;
 #elif RECON_FACE_DV_UNLIMITED == 2
                 // only at a free surface: weight from the stencil asymmetry xi of the more one-sided partner
@@ -5016,10 +5056,20 @@ void Particles::compRiemannStatesLR(const double &dt){
                 const double xs = std::max(xiAsym[i], xiAsym[j]);
                 const double tS = std::min(1., std::max(0., (xs - SURFACE_BLEND_XI_LO) / (SURFACE_BLEND_XI_HI - SURFACE_BLEND_XI_LO)));
                 const double ws = tS*tS*(3. - 2.*tS);
-                dvJumpSp[iW][0] = ws*juX + (1. - ws)*(WijR[iW][2] - WijL[iW][2]);
-                dvJumpSp[iW][1] = ws*juY + (1. - ws)*(WijR[iW][3] - WijL[iW][3]);
+                double *JT = dvJumpSp[iW];
+#if RECON_FACE_DV_UL_TRANSVERSE
+                JT = dvJumpUL[iW];
+                dvJumpSp[iW][0] = WijR[iW][2] - WijL[iW][2]; dvJumpSp[iW][1] = WijR[iW][3] - WijL[iW][3];
+#endif
+                JT[0] = ws*juX + (1. - ws)*(WijR[iW][2] - WijL[iW][2]);
+                JT[1] = ws*juY + (1. - ws)*(WijR[iW][3] - WijL[iW][3]);
 #else
-                dvJumpSp[iW][0] = juX; dvJumpSp[iW][1] = juY;
+                double *JT = dvJumpSp[iW];
+#if RECON_FACE_DV_UL_TRANSVERSE
+                JT = dvJumpUL[iW];
+                dvJumpSp[iW][0] = WijR[iW][2] - WijL[iW][2]; dvJumpSp[iW][1] = WijR[iW][3] - WijL[iW][3];
+#endif
+                JT[0] = juX; JT[1] = juY;
 #endif
             }
 #else
@@ -7404,13 +7454,21 @@ void Particles::compRiemannStatesLR(const double &dt,
                 side(vxGradUL[i], vyGradUL[i], vxGrad[i], vyGrad[i], xijxi, oRx, oRy);
                 side(ghostParticles.vxGradUL[j], ghostParticles.vyGradUL[j], ghostParticles.vxGrad[j], ghostParticles.vyGrad[j],
                      xijxj, oLx, oLy);
-                dvJumpSpGhosts[iW][0] = (vx[i] + oRx) - (ghostParticles.vx[j] + oLx);
-                dvJumpSpGhosts[iW][1] = (vy[i] + oRy) - (ghostParticles.vy[j] + oLy);
+                double *JT = dvJumpSpGhosts[iW];
+#if RECON_FACE_DV_UL_TRANSVERSE
+                JT = dvJumpULGhosts[iW];
+                for (int k = 0; k < DIM; ++k) dvJumpSpGhosts[iW][k] = WijRGhosts[iW][2+k] - WijLGhosts[iW][2+k];
+#endif
+                JT[0] = (vx[i] + oRx) - (ghostParticles.vx[j] + oLx);
+                JT[1] = (vy[i] + oRy) - (ghostParticles.vy[j] + oLy);
             }
 #else
             // RECON_FACE_DV jump from the limited spatial reconstruction, before
             // the half-step predictor below touches the states.
             for (int k = 0; k < DIM; ++k) dvJumpSpGhosts[iW][k] = WijRGhosts[iW][2+k] - WijLGhosts[iW][2+k];
+#if RECON_FACE_DV_UNLIMITED && RECON_FACE_DV_UL_TRANSVERSE
+            for (int k = 0; k < DIM; ++k) dvJumpULGhosts[iW][k] = dvJumpSpGhosts[iW][k];   // mode 2: limited on images
+#endif
 #endif
 #endif
             // predict half a timestep
