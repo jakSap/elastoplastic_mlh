@@ -20,7 +20,9 @@ Per-run verdicts
 
 The interior-line detector (T2): residual of a particle's value against the
 least-squares plane through its neighbours (r < 3 d0), on interior particles
-only (full lattice neighbourhood). Particles with |residual| > LINE_TOL are
+only (full lattice neighbourhood) AND inside the central circle of each block
+(radius = CORE_FRAC x edge length, around the block's current centre of mass;
+user 2026-10-02: surface-row bands are a pass). Particles with |residual| > LINE_TOL are
 clustered (link 1.5 d0); a cluster is a *line* when it has >= 4 particles, an
 extent >= 4 d0 and principal-axis elongation >= 3. Thresholds are a first guess,
 to be calibrated against the frames of ref (see the testplan).
@@ -43,6 +45,7 @@ CLUMP = 0.5                              # nearest neighbour < CLUMP * d0
 FRAG_MIN = 0.02                          # fragments >= 2 % of N count
 LINK = 1.5                               # connectivity link length / d0
 ORDER_PASS = 1.8
+CORE_FRAC = 0.25                         # T2 line region: circle r = CORE_FRAC * edge (see interior_lines)
 ASYM_TOL = 0.1                           # max mirror-partner mismatch / d0 (GIZMO: 1e-12..1e-5)
 P1_OUTLINE_TOL = 0.05                     # mean |outline - GIZMO outline| / W0
 
@@ -140,8 +143,14 @@ def geometry_metrics(x, d0, N, nbody):
                 nfrag=nfrag, main_frac=float(sizes[:nbody].sum() / N), tree=tree, nn=nn)
 
 
-def interior_lines(x, fields, d0, tree):
-    """Line-shaped clusters of outliers in each field, on interior particles."""
+def interior_lines(x, fields, d0, tree, core=None):
+    """Line-shaped clusters of outliers in each field, on interior particles.
+
+    core: optional mask; only flagged particles inside it count (T2: the central circle of
+    each block -- user, 2026-10-02: bands in the surface rows are a pass, only strips in the
+    middle count). The user's circle r = edge/2 touches the face midpoints, where the
+    third-row edge of the surface bands sits, and would fail ref, which the user judged
+    a strong pass; CORE_FRAC = 1/4 is used instead."""
     N = len(x)
     pairs = tree.query_pairs(3.0 * d0, output_type="ndarray")
     i = np.concatenate([pairs[:, 0], pairs[:, 1]])
@@ -165,6 +174,8 @@ def interior_lines(x, fields, d0, tree):
         coef = np.linalg.solve(M, rhs[:, :, None])[:, :, 0]
         resid = -coef[:, 0]                       # f_i minus the neighbours' plane at x_i
         flag = interior & (np.abs(resid) > LINE_TOL[name])
+        if core is not None:
+            flag &= core
         idx = np.flatnonzero(flag)
         longest = 0.0
         if len(idx) >= 4:
@@ -212,7 +223,11 @@ def analyse_body(D, meta, test):
         m, v = s["m"], s["v"]
         row["Lz"] = float(np.sum(m * (x[:, 0] * v[:, 1] - x[:, 1] * v[:, 0])))
         if test == "T2" and k % stride == 0:
-            li = interior_lines(x, {"rho": s["rho"], "u": s["u"]}, d0, g["tree"])
+            core = np.zeros(N, bool)
+            for blk in (slice(0, half), slice(half, N)):
+                core[blk] = (np.linalg.norm(x[blk] - x[blk].mean(0), axis=1)
+                             < CORE_FRAC * float(attrs["size"]))
+            li = interior_lines(x, {"rho": s["rho"], "u": s["u"]}, d0, g["tree"], core)
             row["line_rho"], row["line_u"] = li["rho"]["line"], li["u"]["line"]
             for f in lines:
                 lines[f] = max(lines[f], li[f]["line"])
