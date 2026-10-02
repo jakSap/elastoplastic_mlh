@@ -334,7 +334,7 @@ void MeshlessScheme::run(){
 #endif // ELASTIC
         Logger(DEBUG) << "      > Update ghost gradients";
         particles->updateGhostGradients(ghostParticles);
-#if MATERIAL_VISCOSITY
+#if STORE_RAW_VGRAD
         particles->storeRawVelocityGradients();
 #endif
 
@@ -403,7 +403,7 @@ void MeshlessScheme::run(){
         particles->gradient(particles->Szz, particles->SzzGrad);
 #endif
 #endif // ELASTIC
-#if MATERIAL_VISCOSITY
+#if STORE_RAW_VGRAD
         particles->storeRawVelocityGradients();
 #endif
 #if SLOPE_LIMITING
@@ -430,7 +430,7 @@ void MeshlessScheme::run(){
 #endif
 #if ELASTIC
 	Logger(INFO) << "    > Performing stress integration 1 / 2";
-        particles->integrateStressTensor(timeStep / 2.0);
+        particles->integrateStressTensor(timeStep / 2.0, STRESS_RATE_RAW_GRAD);
 #if FRAGMENTATION
         if (t >= DAMAGE_START_TIME) particles->integrateDamage(timeStep / 2.0);
 #endif
@@ -522,6 +522,9 @@ void MeshlessScheme::run(){
 #else
         Particles ghostParticlesDummy { 0, particles->MeshlessEOS, true };
         particles->solveRiemannProblems(ghostParticlesDummy);
+#endif
+#if CONTACT_FORCE_DIAG
+        particles->contactForceReport(t);
 #endif
 
 #if AM_SELFTEST

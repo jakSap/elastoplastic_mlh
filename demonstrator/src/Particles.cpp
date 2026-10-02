@@ -3,6 +3,10 @@
 //
 
 #include "../include/Particles.h"
+#if CONTACT_FORCE_DIAG
+#include <fstream>
+#include <iomanip>
+#endif
 
 // Kernel functions live in include/Kernel.h (selected via KERNEL_FUNCTION).
 
@@ -250,7 +254,7 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
 #endif // DRIFT_KDK
     rhoGrad = new double[numParticles][DIM];
     vxGrad = new double[numParticles][DIM];
-#if MATERIAL_VISCOSITY
+#if STORE_RAW_VGRAD
     vxGradRaw = new double[numParticles][DIM]();
     vyGradRaw = new double[numParticles][DIM]();
 #endif
@@ -466,6 +470,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
 
 Particles::~Particles() {
     // delete &MeshlessEOS;
+#if CONTACT_FORCE_DIAG
+    delete[] cfdSide;
+#endif
 #if USE_MATID
     delete[] matId;
 #endif
@@ -488,7 +495,7 @@ Particles::~Particles() {
 #endif // DRIFT_KDK
     delete[] rhoGrad;
     delete[] vxGrad;
-#if MATERIAL_VISCOSITY
+#if STORE_RAW_VGRAD
     delete[] vxGradRaw; delete[] vyGradRaw;
 #endif
     delete[] vyGrad;
@@ -834,6 +841,9 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     }
 #endif // PERIODIC_BOUNDARIES
 #if DIM == 2
+#if CONTACT_FORCE_DIAG
+    for (int k = 0; k < 8; ++k) cfdPair[k] = 0.;
+#endif
     const double dx = x[i] - xJ[jj], dy = y[i] - yJ[jj];
     const double r2 = dx*dx + dy*dy;
     if (r2 <= 0.) return;
@@ -893,9 +903,12 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     const double Kj = MeshlessEOS->EOSBulkModulus(rhoj, PJ[jj]);
     const double mui = 0., muj = 0.;
 #endif
-    const double ci  = sqrt((Ki + 4./3.*mui)/rhoi), cj  = sqrt((Kj + 4./3.*muj)/rhoj);
+    const double ci  = sqrt((Ki + PWAVE_MU_FAC*mui)/rhoi), cj  = sqrt((Kj + PWAVE_MU_FAC*muj)/rhoj);
     const double cTi = sqrt(mui/rhoi),               cTj = sqrt(muj/rhoj);
     double wt_r = rhoi*ci*rhoj*cj / (rhoi*ci + rhoj*cj) * FNormT;
+#if CONTACT_FORCE_DIAG
+    const double wt_r0 = wt_r;
+#endif
 #if TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL
     // Anti-clumping approach damping: boost the radial dissipation for pairs
     // that are closer than the local spacing (f > 0) AND closing (vdotr < 0).
@@ -961,11 +974,34 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         const double *e[2] = { e1, e2 };
         for (int kk = 0; kk < 2; ++kk){
             double prefac = -0.5 * l[kk] * (FVec[0]*e[kk][0] + FVec[1]*e[kk][1]);
-            if (l[kk] > 0.) prefac *= 1. - f;
+            double damp = 0.;   // fraction of this principal component removed
+#if TC_TOTAL_STRESS_GATE || CONTACT_FORCE_DIAG
+            const double sigK = l[kk] - ((side == 0) ? P[i] : PJ[jj]);   // total principal stress
+#endif
+            if (l[kk] > 0.){
+#if TC_TOTAL_STRESS_GATE
+                damp = (sigK > 0.) ? f*std::min(1., sigK/l[kk]) : 0.;
+#else
+                damp = f;
+#endif
+            }
+#if CONTACT_FORCE_DIAG
+            if (damp != 0.){
+                // TC changes cmag by -damp*prefac along e_k; the flux gets the negative.
+                const double fxTc = damp*prefac*e[kk][0], fyTc = damp*prefac*e[kk][1];
+                cfdPair[1] += fxTc;
+                const double mag = sqrt(fxTc*fxTc + fyTc*fyTc);
+                if (sigK > 0.) cfd[9] += mag; else cfd[10] += mag;
+            }
+#endif
+            if (l[kk] > 0.) prefac *= 1. - damp;
             cmag[0] += prefac * e[kk][0];
             cmag[1] += prefac * e[kk][1];
         }
     }
+#if CONTACT_FORCE_DIAG
+    cfdPair[0] = -cmag[0];   // deviatoric traction incl. TC, flux convention
+#endif
 #if TORQUE_DIAG
     // Deviatoric traction, captured before the dissipation terms touch cmag.
     const double cDev[2] = { cmag[0], cmag[1] };
@@ -995,6 +1031,43 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #else
     cmag[0] -= wt_rt*dx + wt_t*dv[0];
     cmag[1] -= wt_rt*dy + wt_t*dv[1];
+#endif
+#if CONTACT_FORCE_DIAG
+    {
+        // HLL split into longitudinal / transverse (recomputed as in TORQUE_DIAG)
+        // and the approach-damping share of the longitudinal channel.
+        double cR[2], cT[2], projL;
+#if RECON_FACE_DV
+        const double dvFc[2] = { WRSel[ii][2] - WLSel[ii][2],
+                                 WRSel[ii][3] - WLSel[ii][3] };
+        const double projFc = (dvFc[0]*dx + dvFc[1]*dy) * rinv * rinv;
+#if RECON_FACE_DV == 2
+        projL = projFc;
+#else
+        projL = vdotr * rinv * rinv;
+#endif
+        cR[0] = -wt_r*projL*dx; cR[1] = -wt_r*projL*dy;
+        cT[0] = -wt_t*(dvFc[0] - projFc*dx); cT[1] = -wt_t*(dvFc[1] - projFc*dy);
+#else
+        projL = vdotr * rinv * rinv;
+        cR[0] = -(wt_rt*dx + wt_t*projL*dx); cR[1] = -(wt_rt*dy + wt_t*projL*dy);
+        cT[0] = -wt_t*(dv[0] - projL*dx);     cT[1] = -wt_t*(dv[1] - projL*dy);
+#endif
+        (void)cR[1]; (void)cT[1];
+        cfdPair[2] = -cR[0];
+        cfdPair[3] = -cT[0];
+        const double dW = wt_r - wt_r0;
+        if (dW != 0.){
+            const double fx = dW*projL*dx, fy = dW*projL*dy;
+            cfdPair[4] = fx;
+            // pair normal total stress: mean over both sides of -P + n.S.n
+            const double nx = dx*rinv, ny = dy*rinv;
+            const double sn = 0.5*(-P[i]   + Sxx[i]*nx*nx   + 2.*Sxy[i]*nx*ny   + Syy[i]*ny*ny
+                                   -PJ[jj] + SxxJ[jj]*nx*nx + 2.*SxyJ[jj]*nx*ny + SyyJ[jj]*ny*ny);
+            const double mag = sqrt(fx*fx + fy*fy);
+            if (sn > 0.) cfd[11] += mag; else cfd[12] += mag;
+        }
+    }
 #endif
 #if TORQUE_DIAG
     // Channel torque budget. The three pieces are RECOMPUTED here rather than
@@ -1051,6 +1124,9 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         tqdAccum(tqWtR, cWtR);   // must come out at round-off: cWtR || r_ij
     }
 #endif
+#if CONTACT_FORCE_DIAG
+    const double cmagPreVisc0 = cmag[0];
+#endif
 #if MATERIAL_VISCOSITY && EOS == 2
     // Objective pair viscosity (see MATERIAL_VISCOSITY): direct pair difference
     // minus the rigid-rotation part W r, with the mean spin from the UNLIMITED
@@ -1078,6 +1154,9 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
             cmag[1] -= cv*vt[1];
         }
     }
+#endif
+#if CONTACT_FORCE_DIAG
+    cfdPair[5] = -(cmag[0] - cmagPreVisc0);
 #endif
     const double cmag_E = cmag[0]*v_int[0] + cmag[1]*v_int[1];
 
@@ -1198,7 +1277,15 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 }
 #endif // GIZMO_ELASTIC_FLUX
 
-void Particles::integrateStressTensor(const double &dt) {
+void Particles::integrateStressTensor(const double &dt, bool rawGrad) {
+#if STORE_RAW_VGRAD
+    const double (*gvx)[DIM] = rawGrad ? vxGradRaw : vxGrad;
+    const double (*gvy)[DIM] = rawGrad ? vyGradRaw : vyGrad;
+#else
+    (void)rawGrad;
+    const double (*gvx)[DIM] = vxGrad;
+    const double (*gvy)[DIM] = vyGrad;
+#endif
     for (int i = 0; i < N; ++i) {
 #if EOS == 1 || EOS == 2
         const double mu = MeshlessEOS->EOSShearModulus(matId[i]);
@@ -1206,10 +1293,10 @@ void Particles::integrateStressTensor(const double &dt) {
         const double mu = 0.;
 #endif
         // Velocity gradients
-        const double dvx_dx = vxGrad[i][0];
-        const double dvx_dy = vxGrad[i][1];
-        const double dvy_dx = vyGrad[i][0];
-        const double dvy_dy = vyGrad[i][1];
+        const double dvx_dx = gvx[i][0];
+        const double dvx_dy = gvx[i][1];
+        const double dvy_dx = gvy[i][0];
+        const double dvy_dy = gvy[i][1];
 #if DIM == 3
         const double dvx_dz = vxGrad[i][2];
         const double dvy_dz = vyGrad[i][2];
@@ -1239,8 +1326,14 @@ void Particles::integrateStressTensor(const double &dt) {
 
         // Traceless viscous strain rate (eq. 36-41, first line each)
 #if DIM == 2
+#if STRESS_2D_GIZMO
+        // GIZMO 2D: mu (grad v + grad v^T) - mu tr(grad v) I, traceless in 2D
+        const double visc_xx =  mu*(dvx_dx - dvy_dy);
+        const double visc_yy = -mu*(dvx_dx - dvy_dy);
+#else
         const double visc_xx =  (4./3.)*mu*dvx_dx - (2./3.)*mu*dvy_dy;
         const double visc_yy = -(2./3.)*mu*dvx_dx + (4./3.)*mu*dvy_dy;
+#endif
         const double visc_xy = mu * (dvy_dx + dvx_dy);
 #elif DIM == 3
         const double visc_xx =  (4./3.)*mu*dvx_dx - (2./3.)*mu*dvy_dy - (2./3.)*mu*dvz_dz;
@@ -1266,7 +1359,11 @@ void Particles::integrateStressTensor(const double &dt) {
 #endif
 
         // Rotation rate components (fixed during integration)
+#if JAUMANN_SIGN_GIZMO && DIM == 2
+        const double R_xy = -(dvy_dx - dvx_dy); // GIZMO's sign (comparison only)
+#else
         const double R_xy = dvy_dx - dvx_dy; // d_x v_y - d_y v_x
+#endif
 #if DIM == 3
         const double R_xz = dvz_dx - dvx_dz; // d_x v_z - d_z v_x
         const double R_yz = dvz_dy - dvy_dz; // d_y v_z - d_z v_y
@@ -3846,7 +3943,7 @@ void Particles::compEffectiveFace(){
     }
 }
 
-#if MATERIAL_VISCOSITY
+#if STORE_RAW_VGRAD
 void Particles::storeRawVelocityGradients(){
     for (int i=0; i<N; ++i){
         for (int a=0; a<DIM; ++a){
@@ -4087,7 +4184,7 @@ double Particles::compElasticTimestep(){
         double Ki  = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
         double mui = 0.;
 #endif
-        double ci = sqrt((Ki + 4.0/3.0 * mui) / rho[i]);
+        double ci = sqrt((Ki + PWAVE_MU_FAC * mui) / rho[i]);
 
         for (int jn=0; jn<noi[i]; ++jn){
             int j = nnl[i*MAX_NUM_INTERACTIONS+jn];
@@ -4099,7 +4196,7 @@ double Particles::compElasticTimestep(){
             double Kj  = MeshlessEOS->EOSBulkModulus(rho[j], P[j]);
             double muj = 0.;
 #endif
-            double cj = sqrt((Kj + 4.0/3.0 * muj) / rho[j]);
+            double cj = sqrt((Kj + PWAVE_MU_FAC * muj) / rho[j]);
 
             double xij[DIM], vij[DIM];
             xij[0] = x[i] - x[j];
@@ -4771,9 +4868,32 @@ void Particles::applyAdiabaticFaceCorrection(int i, int j, int ii,
 }
 #endif // ADIABATIC_FACE_CORRECTION
 
+#if CONTACT_FORCE_DIAG
+void Particles::contactForceReport(double simTime){
+    static std::ofstream out;
+    if (!out.is_open()){
+        out.open("contact_forces.csv");
+        out << "t,npairs,riem,riem_tc,riem_floor,dev,tc,hll_r,hll_t,damp,visc,"
+               "tcAllTens,tcAllComp,dampAllTens,dampAllComp\n" << std::setprecision(10);
+    }
+    out << simTime << ',' << cfd[0] << ',' << cfd[1] << ',' << cfd[2] << ',' << cfd[3]
+        << ',' << cfd[4] << ',' << cfd[5] << ',' << cfd[6] << ',' << cfd[7] << ','
+        << cfd[8] << ',' << cfd[13] << ',' << cfd[9] << ',' << cfd[10] << ','
+        << cfd[11] << ',' << cfd[12] << '\n';
+    out.flush();
+}
+#endif
+
 void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #if USE_HLLC
     double n_unit[DIM];
+#endif
+#if CONTACT_FORCE_DIAG
+    if (!cfdSide){
+        cfdSide = new int[N];
+        for (int i=0; i<N; ++i) cfdSide[i] = (x[i] > 0.) ? 1 : 0;
+    }
+    for (int k=0; k<16; ++k) cfd[k] = 0.;
 #endif
 #if TORQUE_DIAG
     // The channel accumulators are filled from inside the pair loop below (each
@@ -4945,6 +5065,15 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #if ADIABATIC_FACE_CORRECTION
                 applyAdiabaticFaceCorrection(i, jj, ii, solver.faceP_M(), solver.faceS_M(), Fij[ii]);
 #endif
+#if CONTACT_FORCE_DIAG
+                // lab-frame x momentum flux of the Riemann channel, its TC share,
+                // and what GIZMO's floor (shifted P_M >= 0) would add to it
+                const double cfdRiemX = Fij[ii][2];
+                const double cfdAn = solver.diagAijNorm(), cfdNx = solver.diagHatAij(0);
+                const double cfdRtcX = solver.diagTcRepulse * cfdAn * cfdNx;
+                const double cfdFloorX = (solver.diagPstarShifted < 0.)
+                                       ? -solver.diagPstarShifted * cfdAn * cfdNx : 0.;
+#endif
 #if TORQUE_DIAG
                 // Pressure/Riemann channel: snapshot the torque of the pure HLLC
                 // momentum flux BEFORE the elastic flux is added on top. Same
@@ -4979,6 +5108,22 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                                           , SfaceI_loc, SfaceJ_loc
 #endif
                                           );
+#if CONTACT_FORCE_DIAG
+                if (cfdSide[i] != cfdSide[jj]){
+                    // dp_i/dt = -F_ij, dp_jj/dt = +F_ij: sign for the right-body partner
+                    const double sgnR = (cfdSide[i] == 1) ? -1. : 1.;
+                    cfd[0] += 1.;
+                    cfd[1] += sgnR*cfdRiemX;
+                    cfd[2] += sgnR*cfdRtcX;
+                    cfd[3] += sgnR*cfdFloorX;
+                    cfd[4] += sgnR*cfdPair[0];
+                    cfd[5] += sgnR*cfdPair[1];
+                    cfd[6] += sgnR*cfdPair[2];
+                    cfd[7] += sgnR*cfdPair[3];
+                    cfd[8] += sgnR*cfdPair[4];
+                    cfd[13] += sgnR*cfdPair[5];
+                }
+#endif
 #endif
 #else
 #if USE_MATID

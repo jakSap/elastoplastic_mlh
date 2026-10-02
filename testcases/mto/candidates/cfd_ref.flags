@@ -1,0 +1,2 @@
+# diag: ref + contact-force budget (read-only, results must equal ref)
+CONTACT_FORCE_DIAG 1

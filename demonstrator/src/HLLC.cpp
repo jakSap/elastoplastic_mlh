@@ -821,8 +821,8 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
     const double muL = 0.;
     const double muR = 0.;
 #endif
-    const double aL = sqrt((KL + 4.0/3.0 * muL) / WL[0]);
-    const double aR = sqrt((KR + 4.0/3.0 * muR) / WR[0]);
+    const double aL = sqrt((KL + PWAVE_MU_FAC * muL) / WL[0]);
+    const double aR = sqrt((KR + PWAVE_MU_FAC * muR) / WR[0]);
 #else
 #if EOS == 1 || EOS == 2
     const double aL = MeshlessEOS.EOSAdiabaticSoundSpeed(matIdL, WL[0], WL[1]);
@@ -850,8 +850,15 @@ void HLLC::xSplitElasticHLLC(int matIdL, int matIdR,
     //     qR = sqrt(1.0 + 0.5 * hydro_gamma_plus_one * hydro_one_over_gamma
     //               * (tstar / tR - 1.0));
     // }
+#if HLLC_WAVESPEED_GIZMO
+    // GIZMO / Davis: one wave-speed pair for both sides (reimann.h:541-542)
+    (void)qL; (void)qR;
+    const double SLmvL = std::min(vL, vR) - std::max(aL, aR) - vL;   // SL - vL
+    const double SRmvR = std::max(vL, vR) + std::max(aL, aR) - vR;   // SR - vR
+#else
     const double SLmvL = -aL * qL;   // SL - vL
     const double SRmvR =  aR * qR;   // SR - vR
+#endif
 
     // Step 6: Elastic contact wave speed S* (eq. 58, traction continuity)
     // Written to the output reference so the caller can reuse the interface speed.

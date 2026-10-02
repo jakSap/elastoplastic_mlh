@@ -355,15 +355,32 @@ if (pEffR < 0 | pEffL < 0){
 }
 WR[1] += pDummy;
 WL[1] += pDummy;
+#if CONTACT_FORCE_DIAG
+    const double pDummyFull = pDummy;
+#endif
 #if TENSILE_CORRECTION && TENSILE_CORRECTION_1
     // SijRotR[0] += 2*pDummy;      // These two lines effectively cancel out the two lines before so dont use them!
     // SijRotL[0] += 2*pDummy;
     pDummy *= (1 - tensileCorrectionFactor);
 #endif
+#if CONTACT_FORCE_DIAG
+    diagTcRepulse = pDummyFull - pDummy;
+#endif
 #endif
 
     double Sstar = 0.;
     HLLC::xSplitElasticHLLC(matIdL, matIdR, WR, WL, SijRotR, SijRotL, Fij, MeshlessEOS, Sstar);
+#if CONTACT_FORCE_DIAG
+    diagPstarShifted = Fij[2];
+#endif
+#if RIEMANN_PSTAR_FLOOR
+    // GIZMO: P_M <= 0 in the shifted frame -> P_M = 0, S_M = 0 (reimann.h:547)
+    if (Fij[2] < 0.){
+        Fij[2] = 0.;
+        Fij[1] = 0.;
+        Sstar = 0.;
+    }
+#endif
 
 // #if TENSILE_CORRECTION && TENSILE_CORRECTION_1
 #if USE_DUMMY_PRESSURE

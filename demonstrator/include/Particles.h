@@ -54,9 +54,10 @@ public:
     /// VARIABLE_SML is 0; in that case it is just a copy of config.kernelSize.
     double *sml;
     double (*rhoGrad)[DIM], (*vxGrad)[DIM], (*vyGrad)[DIM], (*vzGrad)[DIM], (*PGrad)[DIM];
-#if MATERIAL_VISCOSITY
+#if STORE_RAW_VGRAD
     /// Unlimited velocity gradients of this step (copied before the slope limiter),
-    /// for the spin of MATERIAL_VISCOSITY: exact for any linear field incl. rotation.
+    /// for the spin of MATERIAL_VISCOSITY (exact for any linear field incl. rotation)
+    /// and the stress rate under STRESS_RATE_RAW_GRAD.
     double (*vxGradRaw)[DIM], (*vyGradRaw)[DIM];
     void storeRawVelocityGradients();
 #endif
@@ -191,7 +192,7 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
 #endif
     );
 #endif
-    void integrateStressTensor(const double &dt);
+    void integrateStressTensor(const double &dt, bool rawGrad = false);
 #if GIZMO_ELASTIC_FLUX
     // GIZMO-faithful deviatoric stress flux (solids/elastic_stress_tensor_force.h),
     // added to the pair flux Fout after the isotropic Riemann solve.
@@ -402,6 +403,16 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     /// Measure and log. Returns true when the run should stop after this step
     /// (T1/T2 are single-pass tests; T3 runs to completion).
     bool amSelfTestReport();
+#endif
+#if CONTACT_FORCE_DIAG
+    /// Body of each particle (0: x < 0, 1: x > 0 at the first force pass).
+    int *cfdSide { nullptr };
+    /// Per-step accumulators (see CONTACT_FORCE_DIAG in parameter.h) and the
+    /// channels of the pair currently in addGizmoElasticStressFlux.
+    double cfd[16] {};
+    double cfdPair[8] {};
+    /// Append this step's contact-force line to contact_forces.csv.
+    void contactForceReport(double simTime);
 #endif
 #if TORQUE_DIAG
     /// Fill consResid[] from the current positions/densities/smoothing lengths.

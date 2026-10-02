@@ -1,0 +1,5 @@
+# STRESS_2D_GIZMO on dv0_sphdivv: GIZMO 2D traceless deviator removes the isotropic S tension at the separating contact
+RECON_FACE_DV 0
+EXPLICIT_VOL_SPH_DIVV 1
+STRESS_2D_GIZMO 1
+CONTACT_FORCE_DIAG 1

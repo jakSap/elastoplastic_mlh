@@ -1,0 +1,4 @@
+# diag: dv0_sphdivv + contact-force budget
+RECON_FACE_DV 0
+EXPLICIT_VOL_SPH_DIVV 1
+CONTACT_FORCE_DIAG 1

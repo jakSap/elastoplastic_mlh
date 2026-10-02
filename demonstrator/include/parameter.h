@@ -541,6 +541,58 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   1 = v_int = +(v_i+v_j)/2
 #define ELASTIC_WORK_SIGN_FIX 0
 
+// 2D elastic material model (mto P1 GIZMO comparison, 2026-10-02).
+//   0 = plane strain without S_zz: dS = 2 mu (D - tr(D)/3 I) in the plane, P-wave
+//       modulus K + 4/3 mu. The in-plane deviator is NOT traceless, so an in-plane
+//       dilatation also loads S isotropically (tension under expansion, and it
+//       enters J2, i.e. yields under pure dilatation).
+//   1 = GIZMO's 2D model (solids/elastic_physics.c:131-132): dS = mu (grad v +
+//       grad v^T) - mu tr(grad v) I, traceless in 2D; P-wave modulus K + mu
+//       (eos.c:76 adds mu/rho to c^2), used for the HLL weights of the stress
+//       flux, the HLLC wave speeds and the timestep as well.
+#define STRESS_2D_GIZMO 0
+#if STRESS_2D_GIZMO && DIM == 2
+#define PWAVE_MU_FAC 1.0
+#else
+#define PWAVE_MU_FAC (4.0/3.0)
+#endif
+
+// GIZMO's star-pressure floor (hydro/reimann.h:547, get_wavespeeds_and_pressure_star):
+// in the dummy-shifted frame the HLLC star pressure is clipped at 0 (and S* set to
+// 0), so the Riemann channel never pulls harder than the dummy shift, i.e. than the
+// smaller of the two particle pressures: separating faces get no velocity-driven
+// tension. 0 = unclipped (default), 1 = GIZMO floor.
+#define RIEMANN_PSTAR_FLOOR 0
+
+// Velocity gradient for the stress rate in the first stress half-kick.
+//   0 = the slope-LIMITED gradient (it is computed after slopeLimiter)
+//   1 = the unlimited gradient, as GIZMO (gradients.c:1214: "needs to be done
+//       before slope-limiting to use full velocity gradient information")
+// The second half-kick uses freshly computed, unlimited gradients either way.
+#define STRESS_RATE_RAW_GRAD 0
+
+// Sign of the Jaumann rotation term in the stress rate (2D).
+//   0 = objective (co-rotational) rate dS/dt += W S - S W, W = (grad v - grad v^T)/2
+//   1 = GIZMO's sign (elastic_physics.c:133: dS += S R - R S with the same R),
+//       which rotates the stress against the material rotation. Comparison only.
+#define JAUMANN_SIGN_GIZMO 0
+
+// HLLC wave-speed estimate of the x-split elastic solver.
+//   0 = per side: S_L = v_L - a_L, S_R = v_R + a_R
+//   1 = GIZMO (reimann.h:541-542, Davis): S_L = min(v_L,v_R) - max(a_L,a_R),
+//       S_R = max(v_L,v_R) + max(a_L,a_R)
+#define HLLC_WAVESPEED_GIZMO 0
+
+#define STORE_RAW_VGRAD (MATERIAL_VISCOSITY || STRESS_RATE_RAW_GRAD)
+
+// Gate of the deviatoric tensile correction in the GIZMO stress flux (2D).
+//   0 = GIZMO: every positive eigenvalue l_k of the DEVIATORIC stress S is damped
+//       by (1 - f), also where the total principal stress -P + l_k is compressive
+//       (measured on P1: 6-16 % of the correction acts under compression)
+//   1 = damp only the part of l_k that is tensile in the TOTAL stress:
+//       l_k -> l_k - f min(l_k, max(0, l_k - P))
+#define TC_TOTAL_STRESS_GATE 0
+
 // Angular-momentum TORQUE BUDGET instrumentation (WP0 of the 20260727 plan).
 //
 // Splits the spurious pair torque that drives the L_z drain into the four
@@ -571,6 +623,28 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // tqF (per-particle residual torque accumulator) is needed by the AM_METHOD 4-6
 // repair strategies AND by the torque budget above.
 #define TORQUE_ACCUM (AM_TORQUE_TRACK || TORQUE_DIAG)
+
+// Contact-force budget (diagnostic, mto P1 welding study 2026-10-02).
+//
+// Splits the pair force that crosses between the two bodies of a two-body test
+// (body = sign of x at the first force evaluation; T1, T2 and P1 are all split
+// by x = 0) into channels and writes one line per step to contact_forces.csv in
+// the working directory, as the x-force on the RIGHT body:
+//   riem       isotropic HLLC momentum flux (incl. the dummy-pressure shift)
+//   riem_tc    of which the tensile-correction repulsion f*pDummy
+//   riem_floor what GIZMO's star-pressure floor (P_M >= 0 in the shifted frame,
+//              reimann.h get_wavespeeds_and_pressure_star) would ADD
+//   dev        deviatoric traction (with the tensile correction)
+//   tc         of which the tensile correction
+//   hll_r      longitudinal HLL dissipation (incl. the approach damping)
+//   hll_t      transverse HLL dissipation
+//   damp       of which the approach damping (TENSILE_CORRECTION_DAMP)
+//   visc       MATERIAL_VISCOSITY
+// plus, over ALL pairs, the summed magnitude of the tensile correction and of
+// the approach damping, split by whether the total stress is tensile or
+// compressive (does the tensile correction act only under tension?).
+// Read-only: the flux math is untouched. 0 = off.
+#define CONTACT_FORCE_DIAG 0
 
 // Variationally consistent face AREA for the GIZMO elastic stress flux
 // (WP2 of the 20260727 plan).
@@ -954,6 +1028,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #error "TORQUE_DIAG splits the HLLC + GIZMO elastic channels; both must be active."
 #endif
 // (the ENFORCE_FLUX_SYM guard for TORQUE_DIAG lives below, after that flag is defined)
+#if CONTACT_FORCE_DIAG && !(DIM == 2 && USE_HLLC && GIZMO_ELASTIC_FLUX && !PERIODIC_BOUNDARIES)
+#error "CONTACT_FORCE_DIAG: DIM 2, HLLC + GIZMO elastic flux, non-periodic only."
+#endif
 // ELASTIC_FACE_MODE consistency guards
 #if ELASTIC_FACE_MODE && !GIZMO_ELASTIC_FLUX
 #error "ELASTIC_FACE_MODE only affects the GIZMO elastic stress flux; enable GIZMO_ELASTIC_FLUX."
@@ -1021,6 +1098,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 
 #if TORQUE_DIAG && ENFORCE_FLUX_SYM != 1
 #error "TORQUE_DIAG accumulates each pair once at compute time; needs ENFORCE_FLUX_SYM 1."
+#endif
+#if CONTACT_FORCE_DIAG && ENFORCE_FLUX_SYM != 1
+#error "CONTACT_FORCE_DIAG accumulates each pair once at compute time; needs ENFORCE_FLUX_SYM 1."
 #endif
 
 /// define if particles should move, otherwise a fixed grid is used

@@ -73,6 +73,16 @@ public:
     double faceP_M() const { return PM_; }
     double faceS_M() const { return SM_; }
 #endif
+#if CONTACT_FORCE_DIAG
+    /// Normal star traction of the last HLLCFlux() solve in the dummy-shifted
+    /// frame (before the shift is taken back out) and the tensile-correction
+    /// repulsion f*pDummy that the incomplete re-shift leaves; both face-frame
+    /// normal momentum fluxes per unit area. Read by CONTACT_FORCE_DIAG.
+    double diagPstarShifted = 0.;
+    double diagTcRepulse = 0.;
+    double diagAijNorm() const { return AijNorm; }
+    double diagHatAij(int d) const { return hatAij[d]; }
+#endif
 
 private:
 #if ADIABATIC_FACE_CORRECTION
