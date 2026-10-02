@@ -4986,15 +4986,20 @@ void Particles::compRiemannStatesLR(const double &dt){
                                  - (WijL_raw[2] + vxGradUL[j][0]*xijxj[0] + vxGradUL[j][1]*xijxj[1]);
                 const double juY = (WijR_raw[3] + vyGradUL[i][0]*xijxi[0] + vyGradUL[i][1]*xijxi[1])
                                  - (WijL_raw[3] + vyGradUL[j][0]*xijxj[0] + vyGradUL[j][1]*xijxj[1]);
-#if RECON_FACE_DV_UNLIMITED == 4
-                // spin unlimited, strain limited: G = alpha sym(G_u) + antisym(G_u), alpha = min of the two velocity
-                // components' limiter factors |G_l|/|G_u|; a rigid rotation (sym = 0) reconstructs exactly (parameter.h)
+#if RECON_FACE_DV_UNLIMITED == 4 || RECON_FACE_DV_UNLIMITED == 5
+                // spin unlimited, strain limited: G = alpha sym(G_u) + antisym(G_u), alpha from the two velocity
+                // components' limiter factors |G_l|/|G_u| (4: min, 5: |G_u|-weighted mean); a rigid rotation
+                // (sym = 0) reconstructs exactly (parameter.h)
                 auto gJump = [&](int p, const double *xx, double &ox, double &oy){
                     const double gx0 = vxGradUL[p][0], gx1 = vxGradUL[p][1], gy0 = vyGradUL[p][0], gy1 = vyGradUL[p][1];
                     const double nux = std::hypot(gx0, gx1), nuy = std::hypot(gy0, gy1);
                     const double ax = (nux > 0.) ? std::min(1., std::hypot(vxGrad[p][0], vxGrad[p][1]) / nux) : 1.;
                     const double ay = (nuy > 0.) ? std::min(1., std::hypot(vyGrad[p][0], vyGrad[p][1]) / nuy) : 1.;
+#if RECON_FACE_DV_UNLIMITED == 5
+                    const double al = (nux + nuy > 0.) ? (ax*nux + ay*nuy) / (nux + nuy) : 1.;
+#else
                     const double al = std::min(ax, ay);
+#endif
                     const double s01 = 0.5*(gx1 + gy0), w01 = 0.5*(gx1 - gy0);   // sym / antisym off-diagonal
                     // row x: (d vx/dx, d vx/dy) = (al gx0, al s01 + w01); row y: (al s01 - w01, al gy1)
                     ox = al*gx0*xx[0] + (al*s01 + w01)*xx[1];
@@ -6657,6 +6662,10 @@ void Particles::updateGhostGradients(Particles &ghostParticles){
 #if DIM == 3
                 ghostParticles.vzGrad[ghostMap[i]][alpha] = vzGrad[i/(DIM+1)][alpha];
 #endif
+#if STRESS_RATE_UNLIMITED_GRAD || RECON_FACE_DV_UNLIMITED
+                ghostParticles.vxGradUL[ghostMap[i]][alpha] = vxGradUL[i/(DIM+1)][alpha];
+                ghostParticles.vyGradUL[ghostMap[i]][alpha] = vyGradUL[i/(DIM+1)][alpha];
+#endif
                 ghostParticles.PGrad[ghostMap[i]][alpha] = PGrad[i/(DIM+1)][alpha];
 #if ELASTIC
                 ghostParticles.SxxGrad[ghostMap[i]][alpha] = SxxGrad[i/(DIM+1)][alpha];
@@ -7367,9 +7376,42 @@ void Particles::compRiemannStatesLR(const double &dt,
             //}
 
 #if RECON_FACE_DV_SPATIAL == 1
+#if RECON_FACE_DV_UNLIMITED == 1 || RECON_FACE_DV_UNLIMITED == 4 || RECON_FACE_DV_UNLIMITED == 5
+            // periodic-image pairs: same unlimited / spin-unlimited jump as the real pairs (parameter.h); the ghost
+            // carries its parent's gradients (updateGhostGradients)
+            {
+                auto side = [](const double *gUx, const double *gUy, const double *gLx, const double *gLy,
+                               const double *xx, double &ox, double &oy){
+#if RECON_FACE_DV_UNLIMITED == 4 || RECON_FACE_DV_UNLIMITED == 5
+                    const double nux = std::hypot(gUx[0], gUx[1]), nuy = std::hypot(gUy[0], gUy[1]);
+                    const double ax = (nux > 0.) ? std::min(1., std::hypot(gLx[0], gLx[1]) / nux) : 1.;
+                    const double ay = (nuy > 0.) ? std::min(1., std::hypot(gLy[0], gLy[1]) / nuy) : 1.;
+#if RECON_FACE_DV_UNLIMITED == 5
+                    const double al = (nux + nuy > 0.) ? (ax*nux + ay*nuy) / (nux + nuy) : 1.;
+#else
+                    const double al = std::min(ax, ay);
+#endif
+                    const double s01 = 0.5*(gUx[1] + gUy[0]), w01 = 0.5*(gUx[1] - gUy[0]);
+                    ox = al*gUx[0]*xx[0] + (al*s01 + w01)*xx[1];
+                    oy = (al*s01 - w01)*xx[0] + al*gUy[1]*xx[1];
+#else
+                    (void)gLx; (void)gLy;
+                    ox = gUx[0]*xx[0] + gUx[1]*xx[1];
+                    oy = gUy[0]*xx[0] + gUy[1]*xx[1];
+#endif
+                };
+                double oRx, oRy, oLx, oLy;
+                side(vxGradUL[i], vyGradUL[i], vxGrad[i], vyGrad[i], xijxi, oRx, oRy);
+                side(ghostParticles.vxGradUL[j], ghostParticles.vyGradUL[j], ghostParticles.vxGrad[j], ghostParticles.vyGrad[j],
+                     xijxj, oLx, oLy);
+                dvJumpSpGhosts[iW][0] = (vx[i] + oRx) - (ghostParticles.vx[j] + oLx);
+                dvJumpSpGhosts[iW][1] = (vy[i] + oRy) - (ghostParticles.vy[j] + oLy);
+            }
+#else
             // RECON_FACE_DV jump from the limited spatial reconstruction, before
             // the half-step predictor below touches the states.
             for (int k = 0; k < DIM; ++k) dvJumpSpGhosts[iW][k] = WijRGhosts[iW][2+k] - WijLGhosts[iW][2+k];
+#endif
 #endif
             // predict half a timestep
             double viDiv = vxGrad[i][0] + vyGrad[i][1];

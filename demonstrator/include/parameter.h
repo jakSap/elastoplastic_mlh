@@ -800,6 +800,10 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // gradient G, alpha = min of the two components' slope-limiter factors |G_lim|/|G| (the cell limiter scales each
 // component's gradient by one scalar). A rigid rotation (sym G = 0) then reconstructs exactly, while a shear or
 // compression jump keeps the limiter's strength in its strain part. No pairwise limiter.
+// 5 = as 4 with alpha = the |G|-weighted mean of the two components' factors instead of their min. Why: in a
+// plane P-wave v_y == 0, its gradient is round-off and the limiter clips it at will, so the min made alpha ~ 0 and
+// limited the vx strain too (W.2 n 64: damping 1.2e-2 -> 3.4e-2, L1(S_xy) 3.7e-5 -> 8.9e-4); the weighted mean
+// reduces to the vx factor there and is still exact for a rigid rotation.
 #define RECON_FACE_DV_UNLIMITED 0
 #if TENSILE_CORRECTION_DAMP_RAW && !(RECON_FACE_DV && DIM == 2 && TENSILE_CORRECTION && TENSILE_CORRECTION_LOCAL)
 #error "TENSILE_CORRECTION_DAMP_RAW needs RECON_FACE_DV, DIM 2 and the LOCAL tensile correction (DAMP)."
