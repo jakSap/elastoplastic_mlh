@@ -13,7 +13,8 @@ Per-run verdicts
              the GIZMO control's own count (+10 %), buried surface particles (fold),
              outline differing from GIZMO's by more than P1_OUTLINE_TOL * W0.
   T1/T2/P1 also FAIL on symmetry breaking: the ICs are mirror- (T1, P1) or point-
-  (T2) symmetric, so max |x_i - S x_partner(i)| > ASYM_TOL d0 is a numerical defect.
+  (T2) symmetric, so a 99th-percentile partner mismatch > ASYM_TOL d0 (max over time)
+  is a numerical defect (the max is reported as asym_max).
   Clumps are always counted WITHIN a body: two surface rows meeting at a contact
   sit closer than 0.5 d0 in GIZMO too.
   A1, W*     INFO per rung (FAIL only on crash/rip); the verdict is the ORDER over
@@ -47,7 +48,10 @@ FRAG_MIN = 0.02                          # fragments >= 2 % of N count
 LINK = 1.5                               # connectivity link length / d0
 ORDER_PASS = 1.8
 CORE_FRAC = 0.25                         # T2 line region: circle r = CORE_FRAC * edge (see interior_lines)
-ASYM_TOL = 0.1                           # max mirror-partner mismatch / d0 (GIZMO: 1e-12..1e-5)
+# Symmetry verdict on the 99th percentile of the mirror-partner mismatch (max over time), not on
+# the maximum: one particle stranded in a void dominates the max. Calibrated on the user's eye
+# (P1 2x2 at w24, 2026-10-02): p99 = 1.42 / 2.34 / 0.83 judged asymmetric, 0.14 judged symmetric.
+ASYM_TOL = 0.25                          # p99 mirror-partner mismatch / d0 (GIZMO: <= 1e-5)
 P1_OUTLINE_TOL = 0.05                     # mean |outline - GIZMO outline| / W0
 
 
@@ -126,10 +130,12 @@ def sym_partners(x0, test):
     return maps
 
 
-def sym_error(x, maps, d0):
-    """max_i |x_i - S x_partner(i)| / d0 over all symmetries."""
-    return max((float(np.abs(x - x[j] * [sx, sy]).max() / d0) for (sx, sy), j in maps),
-               default=float("nan"))
+def sym_error(x, maps, d0, q=99):
+    """Mirror-partner mismatch |x_i - S x_partner(i)| / d0, worst symmetry: (q-th percentile, max)."""
+    if not maps:
+        return float("nan"), float("nan")
+    errs = [np.linalg.norm(x - x[j] * [sx, sy], axis=1) / d0 for (sx, sy), j in maps]
+    return (max(float(np.percentile(e, q)) for e in errs), max(float(e.max()) for e in errs))
 
 
 def body_gap(x, d0):
@@ -228,7 +234,7 @@ def analyse_body(D, meta, test):
                    main_frac=g["main_frac"], rho_min=float(s["rho"].min()),
                    rho_max=float(s["rho"].max()), u_min=float(s["u"].min()), E=s["E"],
                    com_dist=float(np.linalg.norm(x[half:].mean(0) - x[:half].mean(0))),
-                   asym=sym_error(x, maps, d0))
+                   asym=sym_error(x, maps, d0)[0], asym_max=sym_error(x, maps, d0)[1])
         m, v = s["m"], s["v"]
         row["Lz"] = float(np.sum(m * (x[:, 0] * v[:, 1] - x[:, 1] * v[:, 0])))
         if test == "T2" and k % stride == 0:
@@ -254,7 +260,8 @@ def analyse_body(D, meta, test):
                Lz_rel_end=float(S["Lz"][-1] / S["Lz"][0] - 1) if abs(S["Lz"][0]) > 1e-14 else None,
                com_start=float(S["com_dist"][0]), com_min=float(S["com_dist"].min()),
                com_end=float(S["com_dist"][-1]),
-               line_rho=lines["rho"], line_u=lines["u"], asym=float(np.nanmax(S["asym"])))
+               line_rho=lines["rho"], line_u=lines["u"], asym=float(np.nanmax(S["asym"])),
+               asym_max=float(np.nanmax(S["asym_max"])))
     res["rip"] = res["nfrag_max"] > 2 or res["main_frac_min"] < 0.995
     res["gap_end"] = body_gap(load(snaps[-1][1], ("x",))["x"], d0)
     res["stuck"] = res["gap_end"] < 2.0
@@ -373,7 +380,8 @@ def analyse_rod(D, meta):
     surface0 = np.abs(x0[half:, 1]) >= W0 / 2 - 0.75 * d0
     plane_clumps, plane_dmin, com = plane_metrics(snaps, d0, half)
     maps = sym_partners(x0, "P1")
-    asym = max(sym_error(load(p, ("x",))["x"], maps, d0) for _, p in snaps)
+    se = [sym_error(load(p, ("x",))["x"], maps, d0) for _, p in snaps]
+    asym, asym_max = max(a for a, _ in se), max(b for _, b in se)
     s = load(snaps[-1][1], ("x", "v", "m"))
     x = s["x"]
     shp = rod_shape(x, d0, half, W0)
@@ -383,7 +391,8 @@ def analyse_rod(D, meta):
                plane_clumps=plane_clumps, plane_dmin=plane_dmin, buried=buried,
                outline=(shp["outline"] / W0).tolist(), rip=g["nfrag"] > 2 or g["main_frac"] < 0.995,
                KE_end=float(0.5 * np.sum(s["m"] * np.sum(s["v"] ** 2, axis=1))),
-               gap_end=body_gap(x, d0), stuck=bool(body_gap(x, d0) < 2.0), asym=asym)
+               gap_end=body_gap(x, d0), stuck=bool(body_gap(x, d0) < 2.0), asym=asym,
+               asym_max=asym_max)
     eta = float((meta.get("materials") or [{}])[0].get("eta", 0.0))
     ctrl_name = meta["tag"] + ("_eta{:g}".format(eta) if eta > 0 else "")
     ctrl = os.path.join(os.path.dirname(__file__), "..", "gizmo", "runs", ctrl_name, "conv")
@@ -395,7 +404,7 @@ def analyse_rod(D, meta):
         gsh = rod_shape(xg, d0, len(xg) // 2, W0)
         n = min(len(gsh["outline"]), len(shp["outline"]))
         gpc, gpd, gcom = plane_metrics(gs, d0, len(xg) // 2)
-        gasym = max(sym_error(load(p, ("x",))["x"], maps, d0) for _, p in gs)
+        gasym = max(sym_error(load(p, ("x",))["x"], maps, d0)[0] for _, p in gs)
         res["gizmo"] = dict(t=tg, L_ratio=float(gsh["length"] / L0), plane_clumps=gpc,
                             plane_dmin=gpd, asym=gasym, gap_end=body_gap(xg, d0),
                             stuck=bool(body_gap(xg, d0) < 2.0),
