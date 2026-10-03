@@ -1,0 +1,90 @@
+# mto queue 2026-10-03 -- ranked; one job per line: CANDIDATE TEST:RUNG, or "@sh <command>".
+# Run: ./runqueue.sh queue/2026-10-03.txt (waits for mains power + Low Power Mode off, max 4 solvers).
+# Finished runs with an unchanged config are skipped, so the queue can be restarted at any time.
+#
+# 1. O1 residual jump on gzbest -- does it stop the disc braking (A1 -88 %) and keep the rebound?
+gz_res3 A1:d0.05
+gz_res3 P1:w10
+gz_res3 T1:d0.2
+gz_res3 T2:d0.025
+# 2. objective candidate: residual jump + objective Jaumann rate + contact without adhesion
+gz_res3_obj A1:d0.05
+gz_res3_obj P1:w10
+gz_res3_obj T1:d0.2
+gz_res3_obj T2:d0.025
+# 3. does the non-adhesive contact replace GIZMO's non-objective Jaumann sign (raw jump)?
+gz_obj P1:w10
+gz_obj A1:d0.05
+# rods at the finer rungs for 1-3
+gz_res3 P1:w16
+gz_res3_obj P1:w16
+gz_obj P1:w16
+gz_res3 P1:w24
+gz_res3_obj P1:w24
+gz_obj P1:w24
+# 4. rings for gzbest (user: "probably passes the rings") -- long jobs, start them early
+gzbest T1:d0.08
+gzbest T1:d0.06
+# 5. O5 limited longitudinal dissipation on top of 1 and 2 (rebound + wave damping)
+gz_res3_wtr A1:d0.05
+gz_res3_wtr P1:w10
+gz_res3_wtr T1:d0.2
+gz_res3_wtr T2:d0.025
+gz_res3_wtr P1:w16
+gz_res3_wtr P1:w24
+gz_res3_obj_wtr A1:d0.05
+gz_res3_obj_wtr P1:w10
+gz_res3_obj_wtr T1:d0.2
+gz_res3_obj_wtr T2:d0.025
+gz_res3_obj_wtr P1:w16
+gz_res3_obj_wtr P1:w24
+# waves for 1, 2, 5 (n64 is the smoke rung; order needs n128/n256)
+gz_res3 W2:n64
+gz_res3 W3:n64
+gz_res3_obj_wtr W2:n64
+gz_res3_obj_wtr W2:n128
+gz_res3_obj_wtr W2:n256
+gz_res3_obj_wtr W3:n64
+gz_res3_obj_wtr W3:n128
+gz_res3_obj_wtr W3:n256
+gz_res3_wtr W2:n64
+gz_res3_wtr W2:n128
+gz_res3_wtr W2:n256
+# 6. disc ladder for 1 and 2 (AM order)
+gz_res3 A1:d0.035
+gz_res3 A1:d0.025
+gz_res3_obj A1:d0.035
+gz_res3_obj A1:d0.025
+gz_res3 A1:d0.0177
+gz_res3_obj A1:d0.0177
+# 7. P1 plane clumps: tensile-correction strength (gzall_tg = gzbest with the Monaghan TC: w16 52 vs limit 50)
+gzall_tg P1:w24
+gzall_tg P1:w10
+gz_fmax7 P1:w16
+gz_damp16 P1:w16
+gz_pref8 P1:w16
+gz_fmax7 P1:w24
+gz_damp16 P1:w24
+gz_pref8 P1:w24
+# 8. material viscosity sweep (approved 10-02) + GIZMO viscous controls
+gz_eta1 P1:w16
+gz_eta3 P1:w16
+gz_eta10 P1:w16
+gz_eta1 P1:w24
+gz_eta3 P1:w24
+gz_eta10 P1:w24
+@sh python3 gizmo/rod.py w16 w24 --eta 0.001 0.003 0.01 -j 1
+# 9. waves of gzbest, both residual channels, ELASTIC_FACE_MODE 2; energy work sign
+gzbest W2:n128
+gzbest W2:n256
+gzbest W3:n128
+gzbest W3:n256
+gz_res4_wtr A1:d0.05
+gz_res4_wtr P1:w10
+gz_res4_wtr W2:n64
+gz_res4_wtr W2:n128
+gz_res4_wtr W2:n256
+gz_fm2 W2:n64
+gz_fm2 W2:n128
+gz_fm2 W2:n256
+gz_wsf T1:d0.08

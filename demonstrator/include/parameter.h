@@ -492,6 +492,13 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       overshoots and reverses (L_z drift -290%, omega goes negative), the disc
 //       degrades to -80% spin-down. The raw-difference P-wave term is load-
 //       bearing for stability. Kept only to document the negative result.
+//   3 = transverse channel on the RESIDUAL jump dv - (grad v_i + grad v_j)/2 . r_ij
+//       with the UNLIMITED lab-frame gradients (option O1, mto 2026-10-03): zero for
+//       any linear field like 1, but no slope limiter and no frame error (the
+//       reconstructed rows WijR/WijL are rotated into the face basis by the Riemann
+//       constructor, which makes 1 chiral). Longitudinal channel raw.
+//   4 = both channels on the residual (cf. 2: expect the stability problem of 2
+//       unless WTR_LIMITER keeps some longitudinal dissipation).
 #define RECON_FACE_DV 1
 
 // Feed the deviatoric TRACTION in the GIZMO elastic stress flux with the
@@ -583,7 +590,25 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       S_R = max(v_L,v_R) + max(a_L,a_R)
 #define HLLC_WAVESPEED_GIZMO 0
 
-#define STORE_RAW_VGRAD (MATERIAL_VISCOSITY || STRESS_RATE_RAW_GRAD)
+#define STORE_RAW_VGRAD (MATERIAL_VISCOSITY || STRESS_RATE_RAW_GRAD || RECON_FACE_DV >= 3)
+
+// Limited longitudinal dissipation of the GIZMO stress flux (option O5, Zhang-Hu-
+// Adams / Rezavand form): the impedance speeds of wt_r are replaced by
+// beta_K = min(3 max(-dv.rhat, 0), c_K), i.e. full P-wave dissipation only for
+// pairs approaching at >= c/3, none for receding pairs (no viscous cohesion across
+// an opening contact) and ~none for linear waves of small amplitude (removes the
+// O(h) wave damping). 0 = off (wt_r with c_K), 1 = on.
+#define WTR_LIMITER 0
+
+// Contact without adhesion between different bodies (objective alternative to
+// JAUMANN_SIGN_GIZMO for the P1 rebound). Bodies are the connected components of
+// the first force pass (link: r_ij < 1.5 x the smaller nearest-neighbour distance),
+// so T1/T2/P1 have two bodies and the disc and the wave boxes one. For a pair of
+// different bodies an ATTRACTIVE normal component of the total pair force
+// (Riemann + stress flux) is removed; compression and the tangential part are kept.
+// The energy flux is corrected by the removed momentum flux times the mean pair
+// velocity. 0 = off, 1 = on.
+#define CONTACT_NO_TENSION 0
 
 // Gate of the deviatoric tensile correction in the GIZMO stress flux (2D).
 //   0 = GIZMO: every positive eigenvalue l_k of the DEVIATORIC stress S is damped
@@ -1028,6 +1053,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #error "TORQUE_DIAG splits the HLLC + GIZMO elastic channels; both must be active."
 #endif
 // (the ENFORCE_FLUX_SYM guard for TORQUE_DIAG lives below, after that flag is defined)
+#if RECON_FACE_DV >= 3 && DIM != 2
+#error "RECON_FACE_DV 3/4 (residual jump) is implemented for DIM == 2 only."
+#endif
+#if (WTR_LIMITER || CONTACT_NO_TENSION) && !(DIM == 2 && USE_HLLC && GIZMO_ELASTIC_FLUX)
+#error "WTR_LIMITER / CONTACT_NO_TENSION: DIM 2 with the HLLC + GIZMO elastic flux only."
+#endif
 #if CONTACT_FORCE_DIAG && !(DIM == 2 && USE_HLLC && GIZMO_ELASTIC_FLUX && !PERIODIC_BOUNDARIES)
 #error "CONTACT_FORCE_DIAG: DIM 2, HLLC + GIZMO elastic flux, non-periodic only."
 #endif
@@ -1101,6 +1132,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #endif
 #if CONTACT_FORCE_DIAG && ENFORCE_FLUX_SYM != 1
 #error "CONTACT_FORCE_DIAG accumulates each pair once at compute time; needs ENFORCE_FLUX_SYM 1."
+#endif
+#if CONTACT_NO_TENSION && ENFORCE_FLUX_SYM != 1
+#error "CONTACT_NO_TENSION edits each pair flux once at compute time; needs ENFORCE_FLUX_SYM 1."
 #endif
 
 /// define if particles should move, otherwise a fixed grid is used

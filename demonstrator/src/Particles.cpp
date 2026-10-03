@@ -7,6 +7,11 @@
 #include <fstream>
 #include <iomanip>
 #endif
+#if CONTACT_NO_TENSION
+#include <vector>
+#include <numeric>
+#include <functional>
+#endif
 
 // Kernel functions live in include/Kernel.h (selected via KERNEL_FUNCTION).
 
@@ -473,6 +478,9 @@ Particles::~Particles() {
 #if CONTACT_FORCE_DIAG
     delete[] cfdSide;
 #endif
+#if CONTACT_NO_TENSION
+    delete[] bodyId;
+#endif
 #if USE_MATID
     delete[] matId;
 #endif
@@ -891,6 +899,24 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
     const double dv[2] = { vx[i]-vxJ[jj], vy[i]-vyJ[jj] };
     const double vdotr = dv[0]*dx + dv[1]*dy;
+#if RECON_FACE_DV
+    // Velocity jump of the HLL channels: the reconstructed face jump (1, 2) or the
+    // residual of the unlimited lab-frame gradients (3, 4; see RECON_FACE_DV).
+    auto faceJump = [&](double *out){
+#if RECON_FACE_DV >= 3
+#if PERIODIC_BOUNDARIES
+        const int jR = gp ? gp->parent[jj] : jj;
+#else
+        const int jR = jj;
+#endif
+        out[0] = dv[0] - 0.5*((vxGradRaw[i][0] + vxGradRaw[jR][0])*dx + (vxGradRaw[i][1] + vxGradRaw[jR][1])*dy);
+        out[1] = dv[1] - 0.5*((vyGradRaw[i][0] + vyGradRaw[jR][0])*dx + (vyGradRaw[i][1] + vyGradRaw[jR][1])*dy);
+#else
+        out[0] = WRSel[ii][2] - WLSel[ii][2];
+        out[1] = WRSel[ii][3] - WLSel[ii][3];
+#endif
+    };
+#endif
 
     // longitudinal (P-wave) and transverse (S-wave) acoustic impedances for HLL diffusion
 #if EOS == 1 || EOS == 2
@@ -905,7 +931,14 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
     const double ci  = sqrt((Ki + PWAVE_MU_FAC*mui)/rhoi), cj  = sqrt((Kj + PWAVE_MU_FAC*muj)/rhoj);
     const double cTi = sqrt(mui/rhoi),               cTj = sqrt(muj/rhoj);
+#if WTR_LIMITER
+    // O5: impedance speeds limited by the approach speed (none for receding pairs)
+    const double wApp = std::max(0., -vdotr*rinv);
+    const double bi = std::min(3.*wApp, ci), bj = std::min(3.*wApp, cj);
+    double wt_r = (bi > 0. && bj > 0.) ? rhoi*bi*rhoj*bj / (rhoi*bi + rhoj*bj) * FNormT : 0.;
+#else
     double wt_r = rhoi*ci*rhoj*cj / (rhoi*ci + rhoj*cj) * FNormT;
+#endif
 #if CONTACT_FORCE_DIAG
     const double wt_r0 = wt_r;
 #endif
@@ -1017,10 +1050,10 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     // (algebraically identical to the wt_rt form below when both use the same dv),
     // so the two channels can be sourced independently.
     {
-        const double dvF[2] = { WRSel[ii][2] - WLSel[ii][2],
-                                WRSel[ii][3] - WLSel[ii][3] };
+        double dvF[2];
+        faceJump(dvF);
         const double projF = (dvF[0]*dx + dvF[1]*dy) * rinv * rinv;
-#if RECON_FACE_DV == 2
+#if RECON_FACE_DV == 2 || RECON_FACE_DV == 4
         const double projR = projF;                 // longitudinal on the jump too
 #else
         const double projR = vdotr * rinv * rinv;   // longitudinal keeps raw form
@@ -1038,10 +1071,10 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         // and the approach-damping share of the longitudinal channel.
         double cR[2], cT[2], projL;
 #if RECON_FACE_DV
-        const double dvFc[2] = { WRSel[ii][2] - WLSel[ii][2],
-                                 WRSel[ii][3] - WLSel[ii][3] };
+        double dvFc[2];
+        faceJump(dvFc);
         const double projFc = (dvFc[0]*dx + dvFc[1]*dy) * rinv * rinv;
-#if RECON_FACE_DV == 2
+#if RECON_FACE_DV == 2 || RECON_FACE_DV == 4
         projL = projFc;
 #else
         projL = vdotr * rinv * rinv;
@@ -1078,10 +1111,10 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     {
         double cWtR[2], cWtT[2];
 #if RECON_FACE_DV
-        const double dvFd[2] = { WRSel[ii][2] - WLSel[ii][2],
-                                 WRSel[ii][3] - WLSel[ii][3] };
+        double dvFd[2];
+        faceJump(dvFd);
         const double projFd = (dvFd[0]*dx + dvFd[1]*dy) * rinv * rinv;
-#if RECON_FACE_DV == 2
+#if RECON_FACE_DV == 2 || RECON_FACE_DV == 4
         const double projRd = projFd;
 #else
         const double projRd = vdotr * rinv * rinv;
@@ -4888,6 +4921,36 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #if USE_HLLC
     double n_unit[DIM];
 #endif
+#if CONTACT_NO_TENSION
+    if (!bodyId){
+        // bodies = connected components, link r < 1.5 x the smaller nearest-neighbour distance
+        bodyId = new int[N];
+        std::vector<double> nn(N, std::numeric_limits<double>::max());
+        auto dist = [&](int a, int b){
+            double d2 = (x[a]-x[b])*(x[a]-x[b]) + (y[a]-y[b])*(y[a]-y[b]);
+#if DIM == 3
+            d2 += (z[a]-z[b])*(z[a]-z[b]);
+#endif
+            return sqrt(d2);
+        };
+        for (int a=0; a<N; ++a)
+            for (int jn=0; jn<noi[a]; ++jn){
+                const double d = dist(a, nnl[a*MAX_NUM_INTERACTIONS+jn]);
+                if (d > 0. && d < nn[a]) nn[a] = d;
+            }
+        std::vector<int> par(N);
+        std::iota(par.begin(), par.end(), 0);
+        std::function<int(int)> root = [&](int a){ return par[a] == a ? a : (par[a] = root(par[a])); };
+        for (int a=0; a<N; ++a)
+            for (int jn=0; jn<noi[a]; ++jn){
+                const int b = nnl[a*MAX_NUM_INTERACTIONS+jn];
+                if (dist(a, b) < 1.5*std::min(nn[a], nn[b])) par[root(a)] = root(b);
+            }
+        int nBodies = 0;
+        for (int a=0; a<N; ++a){ bodyId[a] = root(a); if (bodyId[a] == a) ++nBodies; }
+        Logger(INFO) << "CONTACT_NO_TENSION: " << nBodies << " bodies";
+    }
+#endif
 #if CONTACT_FORCE_DIAG
     if (!cfdSide){
         cfdSide = new int[N];
@@ -5108,6 +5171,24 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                                           , SfaceI_loc, SfaceJ_loc
 #endif
                                           );
+#if CONTACT_NO_TENSION
+                if (bodyId[i] != bodyId[jj]){
+                    // no adhesion between bodies: drop an attractive normal component
+                    const double dxC = x[i]-x[jj], dyC = y[i]-y[jj];
+                    const double rC = sqrt(dxC*dxC + dyC*dyC);
+                    if (rC > 0.){
+                        const double nxC = dxC/rC, nyC = dyC/rC;
+                        // force on i is -F_ij; n points from jj to i, so Fn < 0 is attraction
+                        const double Fn = -(Fij[ii][2]*nxC + Fij[ii][3]*nyC);
+                        if (Fn < 0.){
+                            const double dFx = Fn*nxC, dFy = Fn*nyC;
+                            Fij[ii][2] += dFx;
+                            Fij[ii][3] += dFy;
+                            Fij[ii][1] += dFx*0.5*(vx[i]+vx[jj]) + dFy*0.5*(vy[i]+vy[jj]);
+                        }
+                    }
+                }
+#endif
 #if CONTACT_FORCE_DIAG
                 if (cfdSide[i] != cfdSide[jj]){
                     // dp_i/dt = -F_ij, dp_jj/dt = +F_ij: sign for the right-body partner

@@ -404,6 +404,10 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     /// (T1/T2 are single-pass tests; T3 runs to completion).
     bool amSelfTestReport();
 #endif
+#if CONTACT_NO_TENSION
+    /// Body (connected component of the first force pass) of each particle.
+    int *bodyId { nullptr };
+#endif
 #if CONTACT_FORCE_DIAG
     /// Body of each particle (0: x < 0, 1: x > 0 at the first force pass).
     int *cfdSide { nullptr };
