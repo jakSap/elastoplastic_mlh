@@ -122,6 +122,84 @@ p6_ghfix W2:n64
 p6_ghfix W3:n64
 p6nl3 W1t:n64
 p6nl3 W2:n64
+# p7l5_t8m3 (DV 7 longit. 5e-3 / transv. 8e-3): P1 w16 strict + disc +0.0077 -> full ladder; NL-switch versions for the waves
+p7l5_t8m3 P1:w10
+p7l5_t8m3 A1:d0.035
+# waves good at n64 with the fixed NL switch: ladders to n256 (order check), all five wave tests
+p6nl3 W1t:n128
+p6nl3 W2:n128
+p6nl3 W3:n128
+f8nl W1t:n128
+f8nl W2:n128
+f8nl W3:n128
+wb_fm2 W3:n64
+wb_fm2 W3:n128
+wb_fm2 W2:n64
+p6nl3 W3:n64
+f8nl W1i:n64
+f8nl W1m:n64
+f8nl W1i:n128
+f8nl W1m:n128
+p7l5_t8m3 A1:d0.025
+f8nlm P1:w16
+f8nl P1:w16
+# f8nlf = p7l5_t8m3 + NL switches (TC, SPH div, face): candidate for P1 + waves order 2 + disc
+f8nlf W3:n64
+f8nlf W2:n64
+f8nlf W3:n128
+f8nlf W2:n128
+# fin1 = p7l5_t8m3 + NL switches (TC, div, face) + memory 2: the full acceptance ladder
+fin1 P1:w16
+fin1 W3:n64
+fin1 W2:n64
+fin1 A1:d0.05
+fin1 W3:n128
+fin1 W2:n128
+fin1 P1:w24
+fin1 P1:w10
+# fin2: memory 4 (fin1 w16 end clumps at the limit, 4)
+fin2 P1:w16
+# fin1 ring: smoke and the d0.05 criterion (~1.5 h)
+fin1 T1:d0.2
+fin1 T1:d0.05
+fin2 P1:w24
+# fin1 rings asymmetric (T1 d0.2 asym 0.38): which NL component?
+f8nl T1:d0.2
+f8nlm T1:d0.2
+f8nlf T1:d0.2
+p7l5_t8m3 T1:d0.2
+fin2 A1:d0.05
+fin2 P1:w10
+fin2 A1:d0.035
+fin2 W3:n64
+fin1 W1t:n64
+fin1 W1t:n128
+fin1 W1i:n64
+fin1 W1i:n128
+fin1 W1m:n64
+fin1 W1m:n128
+fin1 A1:d0.035
+fin1 A1:d0.025
+fin1 W2:n256
+fin1 W3:n256
+fin1 W1t:n256
+fin1 W1i:n256
+fin1 W1m:n256
+fin1 A1:d0.0177
+f8nlf P1:w16
+f8nlf A1:d0.05
+f8nlf W1t:n64
+f8nlf W1t:n128
+f8nlf P1:w24
+f8nlf P1:w10
+@sh ./mto.py run ref_chk --only P1:w10 --force -j 1 && ./bitcheck.py ref ref_chk P1 w10 && echo "(bit-identity after NL_SWITCH_FACE, 06:25)"
+f8nl W1t:n64
+f8nl W2:n64
+f8nl W3:n64
+f8nlm P1:w24
+f8nl P1:w24
+f8nlm A1:d0.05
+f8nl A1:d0.05
 p6nl3 W3:n64
 p6nl3m P1:w16
 p6nl3 P1:w16
@@ -134,9 +212,6 @@ p6nl3 W2:n128
 p6nl3 W3:n128
 wb_dv6 W3:n64
 wb_dv6 W3:n128
-wb_fm2 W3:n64
-wb_fm2 W3:n128
-wb_fm2 W2:n64
 wb_dv6 W1t:n128
 wb_dv6 W2:n128
 # winner + nonlinearity switch: disc (TC off in the quiet disc) and waves, rods re-checked

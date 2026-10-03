@@ -7,7 +7,7 @@
 #include <fstream>
 #include <iomanip>
 #endif
-#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC
+#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC || NL_SWITCH_FACE
 #include <vector>
 #include <numeric>
 #include <functional>
@@ -478,7 +478,7 @@ Particles::~Particles() {
 #if CONTACT_FORCE_DIAG
     delete[] cfdSide;
 #endif
-#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC
+#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC || NL_SWITCH_FACE
     delete[] bodyId;
 #endif
 #if GNOG_PENALTY
@@ -487,7 +487,7 @@ Particles::~Particles() {
 #if GNOG_PENALTY || RECON_FACE_DV == 5
     delete[] yieldGam;
 #endif
-#if NL_SWITCH_TC || NL_SWITCH_DIVV
+#if NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE
     delete[] phiNL;
 #endif
 #if SPLIT_FACE_STRESS
@@ -893,7 +893,7 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
         jj;
 #endif
-#if ELASTIC_FACE_MODE == 2
+#if ELASTIC_FACE_MODE == 2 || NL_SWITCH_FACE
     const double (*AijSel)[DIM] = Aij;
 #endif
 #if RECON_FACE_DV
@@ -911,7 +911,7 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #if USE_MATID
         matIdJ = gp->matId;
 #endif
-#if ELASTIC_FACE_MODE == 2
+#if ELASTIC_FACE_MODE == 2 || NL_SWITCH_FACE
         AijSel = AijGhosts;
 #endif
 #if RECON_FACE_DV
@@ -934,7 +934,18 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     const double dwk = std::fabs(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, smlJ[jj]));
     const double rhoi = rho[i], rhoj = rhoJ[jj];
     const double FNormT = m[i]*mJ[jj]*dwk / (rhoi*rhoj);
-#if ELASTIC_FACE_MODE == 0
+#if NL_SWITCH_FACE
+    // GIZMO's radial SPH area where the flow is nonlinear and across the contact, the MFM face (as
+    // ELASTIC_FACE_MODE 2) in linear flow: with the radial area the deviatoric wave speed converges at ~0.6
+#if PERIODIC_BOUNDARIES
+    const int jFc = gp ? gp->parent[jj] : jj;
+#else
+    const int jFc = jj;
+#endif
+    const double wF = (bodyId[i] != bodyId[jFc]) ? 1. : std::max(phiNL[i], phiNL[jFc]);
+    const double FVec[2] = { wF*FNormT*dx*rinv - (1.-wF)*AijSel[ii][0],
+                             wF*FNormT*dy*rinv - (1.-wF)*AijSel[ii][1] };
+#elif ELASTIC_FACE_MODE == 0
     const double FVec[2] = { FNormT*dx*rinv, FNormT*dy*rinv };
 #elif ELASTIC_FACE_MODE == 1
     // Bonet-Lok corrected traction area. The correction matrix is averaged over
@@ -5104,7 +5115,7 @@ void Particles::contactForceReport(double simTime){
 }
 #endif
 
-#if NL_SWITCH_TC || NL_SWITCH_DIVV
+#if NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE
 void Particles::compNonlinSwitch(const double &dt){
     if (!phiNL) phiNL = new double[N]();
     for (int i=0; i<N; ++i){
@@ -5118,7 +5129,16 @@ void Particles::compNonlinSwitch(const double &dt){
         const double mu = 0.;
 #endif
         const double c = sqrt(std::max(K + PWAVE_MU_FAC*mu, 1e-300)/rho[i]);
-        const double phiNow = std::min(1., std::max(0., sml[i]*dmag/c/RECON_FACE_DV6_S0 - 1.));
+        double phiNow = std::min(1., std::max(0., sml[i]*dmag/c/RECON_FACE_DV6_S0 - 1.));
+#if NL_SWITCH_AMP
+        // amplitude: finite strain or stress keeps the stabilisers on (rod end faces after separation,
+        // stretched rings, the disc); only linear waves (amplitude ~1e-6) fall below NL_AMP_S0
+        {
+            const double j2 = 0.5*(Sxx[i]*Sxx[i] + Syy[i]*Syy[i] + 2.*Sxy[i]*Sxy[i]);
+            const double sAmp = std::max(std::fabs(P[i])/std::max(K, 1e-300), (mu > 0.) ? std::sqrt(j2)/mu : 0.);
+            phiNow = std::max(phiNow, std::min(1., std::max(0., sAmp/NL_AMP_S0 - 1.)));
+        }
+#endif
         // memory (NL_SWITCH_TAU > 0): once deformed nonlinearly, a particle keeps the stabilisers for
         // ~NL_SWITCH_TAU; 0 = no memory
         phiNL[i] = (NL_SWITCH_TAU > 0.) ? std::max(phiNow, phiNL[i]*std::exp(-dt/std::max(NL_SWITCH_TAU, 1e-300))) : phiNow;
@@ -5134,7 +5154,7 @@ void Particles::ensureYieldGam(){
 }
 #endif
 
-#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC
+#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC || NL_SWITCH_FACE
 void Particles::compBodyIds(){
     if (!bodyId){
         // bodies = connected components, link r < 1.5 x the smaller nearest-neighbour distance
@@ -5299,7 +5319,7 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #if USE_HLLC
     double n_unit[DIM];
 #endif
-#if CONTACT_NO_TENSION || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC
+#if CONTACT_NO_TENSION || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC || NL_SWITCH_FACE
     compBodyIds();
 #endif
 #if CONTACT_FORCE_DIAG

@@ -410,7 +410,7 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     double (*Stc)[3] { nullptr };
     void compParticleTensileStress();
 #endif
-#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC
+#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC || NL_SWITCH_FACE
     /// Body (connected component of the first force pass) of each particle.
     int *bodyId { nullptr };
     void compBodyIds();
@@ -426,7 +426,7 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     void compGnogPenalty(const double &dt, const Particles *gp = nullptr);
     void addGnogForce();
 #endif
-#if NL_SWITCH_TC || NL_SWITCH_DIVV
+#if NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE
     /// Nonlinearity indicator phi in [0, 1] per particle (see NL_SWITCH_TC).
     double *phiNL { nullptr };
     void compNonlinSwitch(const double &dt);

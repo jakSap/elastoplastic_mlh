@@ -336,7 +336,7 @@ void MeshlessScheme::run(){
         particles->updateGhostGradients(ghostParticles);
 #if STORE_RAW_VGRAD
         particles->storeRawVelocityGradients();
-#if NL_SWITCH_TC || NL_SWITCH_DIVV
+#if NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE
         particles->compNonlinSwitch(timeStep);
 #endif
 #endif
@@ -408,7 +408,7 @@ void MeshlessScheme::run(){
 #endif // ELASTIC
 #if STORE_RAW_VGRAD
         particles->storeRawVelocityGradients();
-#if NL_SWITCH_TC || NL_SWITCH_DIVV
+#if NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE
         particles->compNonlinSwitch(timeStep);
 #endif
 #endif

@@ -529,6 +529,15 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //                     gradients): the SPH divergence spoils sound/P waves (c_err 8e-2 vs 1.4e-3).
 #define NL_SWITCH_TC 0
 #define NL_SWITCH_DIVV 0
+//   NL_SWITCH_FACE 1: deviatoric stress flux on GIZMO's radial SPH area where phi = 1 (and across the
+//                     contact), on the MFM face A_ij (as ELASTIC_FACE_MODE 2) where phi = 0. Needs
+//                     ELASTIC_FACE_MODE 0.
+#define NL_SWITCH_FACE 0
+// amplitude part of the switch (1 = on): phi = max(phi_rate, clamp(s_amp/NL_AMP_S0 - 1, 0, 1)) with
+// s_amp = max(|P|/K, sqrt(J2)/mu), the strain amplitude. The rate part alone switched the stabilisers off
+// in quiet but finitely strained material (rod end faces after separation, stretched rings).
+#define NL_SWITCH_AMP 0
+#define NL_AMP_S0 1e-4
 // memory time of the switch (0 = none): phi = max(phi_now, phi_old exp(-dt/TAU)), so a region keeps the
 // stabilisers for ~TAU after the nonlinear phase (rod end faces relax after separation, where |D| -> 0)
 #define NL_SWITCH_TAU 0.
@@ -624,7 +633,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       S_R = max(v_L,v_R) + max(a_L,a_R)
 #define HLLC_WAVESPEED_GIZMO 0
 
-#define STORE_RAW_VGRAD (MATERIAL_VISCOSITY || STRESS_RATE_RAW_GRAD || RECON_FACE_DV >= 3 || GNOG_PENALTY || NL_SWITCH_TC || NL_SWITCH_DIVV)
+#define STORE_RAW_VGRAD (MATERIAL_VISCOSITY || STRESS_RATE_RAW_GRAD || RECON_FACE_DV >= 3 || GNOG_PENALTY || NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE)
 
 // Limited longitudinal dissipation of the GIZMO stress flux (option O5, Zhang-Hu-
 // Adams / Rezavand form): the impedance speeds of wt_r are replaced by
@@ -1130,6 +1139,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // (the ENFORCE_FLUX_SYM guard for TORQUE_DIAG lives below, after that flag is defined)
 #if SPLIT_FACE_STRESS && (DIM != 2 || PERIODIC_BOUNDARIES || !GIZMO_ELASTIC_FLUX || !TENSILE_CORRECTION)
 #error "SPLIT_FACE_STRESS: DIM 2, non-periodic, GIZMO elastic flux with TENSILE_CORRECTION only."
+#endif
+#if NL_SWITCH_FACE && (DIM != 2 || ELASTIC_FACE_MODE != 0)
+#error "NL_SWITCH_FACE: DIM 2 with ELASTIC_FACE_MODE 0."
 #endif
 #if GNOG_PENALTY && (DIM != 2 || !ELASTIC || (GNOG_PENALTY == 1 && PERIODIC_BOUNDARIES))
 #error "GNOG_PENALTY: DIM 2 and ELASTIC only; mode 1 also non-periodic."
