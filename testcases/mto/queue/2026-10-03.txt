@@ -146,6 +146,24 @@ gzo_gnog_x1 P1:w16
 gzo_gnog_x4 P1:w16
 gzo_gnog P1:w24
 gzo_gnog_x1 P1:w24
+# 3e. can GNOG replace the TC? blocks T2 (user 03:10): GNOG fully active (xi 4), C6, TC at 1/2 and 1/4
+gzg6_tc50 T2:d0.025
+gzg6_tc25 T2:d0.025
+gzg6_tc50 T2:d0.0125
+gzg6_tc25 T2:d0.0125
+# 3f. additions: TC off (the actual "replace" test), the same three on C2 (C6 alone fails T2: clumps 8),
+#     C6 + GNOG at full TC, and the fine-rung references without/with GNOG at full TC
+gzg6_tc0 T2:d0.025
+gzg2_tc50 T2:d0.025
+gzg2_tc25 T2:d0.025
+gzg2_tc0 T2:d0.025
+gzg6_tc100 T2:d0.025
+gzg6_tc0 T2:d0.0125
+gzg2_tc50 T2:d0.0125
+gzg2_tc25 T2:d0.0125
+gzg2_tc0 T2:d0.0125
+gz_res3_obj T2:d0.0125
+gzo_gnog T2:d0.0125
 gzo_gnog T1:d0.1
 gzbest W3:n256
 gz_fm2 W2:n64
