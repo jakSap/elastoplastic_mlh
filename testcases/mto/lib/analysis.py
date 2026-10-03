@@ -47,6 +47,7 @@ CLUMP = 0.5                              # nearest neighbour < CLUMP * d0
 FRAG_MIN = 0.02                          # fragments >= 2 % of N count
 LINK = 1.5                               # connectivity link length / d0
 ORDER_PASS = 1.8
+ORDER_FALLBACK = 0.8                      # A1 fallback: everything else passes, AM converges at 1st order (user 10-03)
 CORE_FRAC = 0.25                         # T2 line region: circle r = CORE_FRAC * edge (see interior_lines)
 # Symmetry verdict on the 99th percentile of the mirror-partner mismatch (max over time), not on
 # the maximum: one particle stranded in a void dominates the max. Calibrated on the user's eye
@@ -570,16 +571,33 @@ def verdict_test(RUNS, cand, test):
     return ("PASS" if ok else "FAIL" if len(tags) >= 3 else "partial"), " ".join(parts)
 
 
+def a1_order(RUNS, cand):
+    """Fitted A1 order over the full ladder (>= 3 rungs, no crash), else nan."""
+    R = _load_results(RUNS, cand, "A1")
+    if len(R) < 3 or any(r["verdict"] == "FAIL" for r in R.values()):
+        return float("nan")
+    tags = sorted(R, key=lambda g: -float(g[1:]))
+    return order_fit([R[g].get("d0") or float(g[1:]) for g in tags], [R[g]["dLz_T"] for g in tags])[0]
+
+
 def scoreboard(RUNS, cands):
     tests = ["T1", "T2", "P1", "A1", "W1i", "W1m", "W1t", "W2", "W3"]
     lines = ["| test | " + " | ".join(cands) + " |",
              "|---|" + "---|" * len(cands)]
+    V = {c: {} for c in cands}
     for t in tests:
         cells = []
         for c in cands:
             v, why = verdict_test(RUNS, c, t)
+            V[c][t] = v
             cells.append("**{}** {}".format(v, why) if v != "-" else "-")
         lines.append("| {} | {} |".format(t, " | ".join(cells)))
+    # fallback (user 10-03): every test passes, only A1 converges at first order
+    fb = [c for c in cands if all(V[c][t] == "PASS" for t in tests if t != "A1")
+          and (V[c]["A1"] == "PASS" or ORDER_FALLBACK <= a1_order(RUNS, c) < ORDER_PASS)]
+    lines.append("")
+    lines.append("Fallback (all tests PASS, A1 only at 1st order, p >= {}): {}".format(
+        ORDER_FALLBACK, ", ".join(fb) if fb else "none"))
     return "\n".join(lines)
 
 
