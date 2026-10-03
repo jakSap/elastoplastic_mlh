@@ -5,6 +5,7 @@
 #ifndef MESHLESSHYDRO_PARTICLES_H
 #define MESHLESSHYDRO_PARTICLES_H
 
+#include <unordered_map>
 #include <cmath>
 #include <limits>
 #include <highfive/H5File.hpp>
@@ -409,17 +410,26 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     double (*Stc)[3] { nullptr };
     void compParticleTensileStress();
 #endif
-#if CONTACT_NO_TENSION || GNOG_PENALTY
+#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5
     /// Body (connected component of the first force pass) of each particle.
     int *bodyId { nullptr };
     void compBodyIds();
 #endif
 #if GNOG_PENALTY
-    /// Accumulated GNOG hourglass force and radial-return factor of each particle.
+    /// GNOG hourglass force (and, mode 2, energy flux) and radial-return factor of each particle.
     double (*hgF)[2] { nullptr };
-    double *gnogGam { nullptr };
-    void compGnogPenalty(const double &dt);
+    double *hgE { nullptr };
+    /// Mode 2: integrated residual of each unordered pair (key min<<32|max), oriented min -> max.
+    struct GnogPair { double u[2]; long stamp; };
+    std::unordered_map<unsigned long long, GnogPair> gnogHist;
+    long gnogStep { 0 };
+    void compGnogPenalty(const double &dt, const Particles *gp = nullptr);
     void addGnogForce();
+#endif
+#if GNOG_PENALTY || RECON_FACE_DV == 5
+    /// Radial-return factor of the last stress update (1 = elastic), per particle.
+    double *yieldGam { nullptr };
+    void ensureYieldGam();
 #endif
 #if CONTACT_FORCE_DIAG
     /// Body of each particle (0: x < 0, 1: x > 0 at the first force pass).

@@ -499,7 +499,17 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       constructor, which makes 1 chiral). Longitudinal channel raw.
 //   4 = both channels on the residual (cf. 2: expect the stability problem of 2
 //       unless WTR_LIMITER keeps some longitudinal dissipation).
+//   5 = hybrid (2D): both channels on the residual (as 4) in smooth elastic material, on the RAW jump
+//       for pairs of different bodies (contact) and where a particle yields (weight
+//       min(1, (1 - gamma)/RECON_FACE_DV5_WIDTH), gamma = radial-return factor): GIZMO-like
+//       first-order dissipation in impacts and plastic flow, second order in elastic waves.
+//   6 = strain-rate switch (2D): as 5, but the raw weight comes from the pair's strain rate,
+//       s = h_ij max(|D_i|, |D_j|) / c_ij with D = sym(grad v) (raw gradients, zero for rigid
+//       rotation): weight min(1, max(0, s/RECON_FACE_DV6_S0 - 1)), and 1 between bodies. Small-
+//       amplitude waves and rigid rotation see the residual only; impacts and plastic flow the raw jump.
 #define RECON_FACE_DV 1
+#define RECON_FACE_DV5_WIDTH 0.05
+#define RECON_FACE_DV6_S0 1e-3
 
 // Feed the deviatoric TRACTION in the GIZMO elastic stress flux with the
 // spatially reconstructed face stress (Sij extrapolated to the shared face
@@ -631,7 +641,15 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // exact, torque-free). xi_ij = (xi_i + xi_j)/2 with xi_i = GNOG_XI (elastic) or
 // GNOG_XI_PLASTIC times the radial-return factor min(1, Y/sigma_vM,trial) (paper: 4 and
 // 0.2). The work F^h.v enters the total energy, the internal energy is not touched.
-// 2D, non-periodic.   0 = off, 1 = on
+//   0 = off
+//   1 = as above: one accumulated force per particle (SPHinXsys). NOT momentum-conserving per body
+//       (the per-particle rotation and the persistent sums; report 2026-10-03-tipsntricks-abgleich:
+//       free blocks keep accelerating, T2 energy +1.8 %). Kept for reproducibility. 2D, non-periodic.
+//   2 = conservative: one history per unordered pair, u^_ij = int gamma_ij v^_ij dt (rotated by the
+//       pair-mean spin), force F_i = xi G (u^_ij . e_ij) e_ij dW/dr V_i V_j / |r_ij| = -F_j, recomputed
+//       every step (exact momentum, central -> exact AM), energy flux F.(v_i+v_j)/2 like every pair
+//       flux (exact total energy). Histories of pairs that left the stencil are dropped (the force
+//       vanishes there anyway with dW). 2D, periodic allowed.
 #define GNOG_PENALTY 0
 #define GNOG_XI 4.0
 #define GNOG_XI_PLASTIC 0.2
@@ -1082,8 +1100,8 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #if SPLIT_FACE_STRESS && (DIM != 2 || PERIODIC_BOUNDARIES || !GIZMO_ELASTIC_FLUX || !TENSILE_CORRECTION)
 #error "SPLIT_FACE_STRESS: DIM 2, non-periodic, GIZMO elastic flux with TENSILE_CORRECTION only."
 #endif
-#if GNOG_PENALTY && (DIM != 2 || PERIODIC_BOUNDARIES || !ELASTIC)
-#error "GNOG_PENALTY: DIM 2, non-periodic, ELASTIC only."
+#if GNOG_PENALTY && (DIM != 2 || !ELASTIC || (GNOG_PENALTY == 1 && PERIODIC_BOUNDARIES))
+#error "GNOG_PENALTY: DIM 2 and ELASTIC only; mode 1 also non-periodic."
 #endif
 #if RECON_FACE_DV >= 3 && DIM != 2
 #error "RECON_FACE_DV 3/4 (residual jump) is implemented for DIM == 2 only."

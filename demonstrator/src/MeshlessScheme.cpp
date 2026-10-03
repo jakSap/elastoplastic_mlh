@@ -488,7 +488,11 @@ void MeshlessScheme::run(){
         particles->compParticleTensileStress();
 #endif
 #if GNOG_PENALTY
+#if PERIODIC_BOUNDARIES
+        particles->compGnogPenalty(timeStep, &ghostParticles);
+#else
         particles->compGnogPenalty(timeStep);
+#endif
 #endif
 
         Logger(DEBUG) << "      > Computing fluxes";

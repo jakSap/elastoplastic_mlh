@@ -7,7 +7,7 @@
 #include <fstream>
 #include <iomanip>
 #endif
-#if CONTACT_NO_TENSION || GNOG_PENALTY
+#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5
 #include <vector>
 #include <numeric>
 #include <functional>
@@ -478,11 +478,14 @@ Particles::~Particles() {
 #if CONTACT_FORCE_DIAG
     delete[] cfdSide;
 #endif
-#if CONTACT_NO_TENSION || GNOG_PENALTY
+#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5
     delete[] bodyId;
 #endif
 #if GNOG_PENALTY
-    delete[] hgF; delete[] gnogGam;
+    delete[] hgF; delete[] hgE;
+#endif
+#if GNOG_PENALTY || RECON_FACE_DV == 5
+    delete[] yieldGam;
 #endif
 #if SPLIT_FACE_STRESS
     delete[] Stc;
@@ -948,6 +951,9 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
     const double dv[2] = { vx[i]-vxJ[jj], vy[i]-vyJ[jj] };
     const double vdotr = dv[0]*dx + dv[1]*dy;
+#if RECON_FACE_DV == 6
+    double wLinSw = 1.;
+#endif
 #if RECON_FACE_DV
     // Velocity jump of the HLL channels: the reconstructed face jump (1, 2) or the
     // residual of the unlimited lab-frame gradients (3, 4; see RECON_FACE_DV).
@@ -958,8 +964,17 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #else
         const int jR = jj;
 #endif
-        out[0] = dv[0] - 0.5*((vxGradRaw[i][0] + vxGradRaw[jR][0])*dx + (vxGradRaw[i][1] + vxGradRaw[jR][1])*dy);
-        out[1] = dv[1] - 0.5*((vyGradRaw[i][0] + vyGradRaw[jR][0])*dx + (vyGradRaw[i][1] + vyGradRaw[jR][1])*dy);
+#if RECON_FACE_DV == 5
+        // raw jump between bodies and in yielding material, residual elsewhere
+        const double wLin = (bodyId[i] != bodyId[jR]) ? 0. :
+            1. - std::min(1., std::max(0., (1. - std::min(yieldGam[i], yieldGam[jR]))/RECON_FACE_DV5_WIDTH));
+#elif RECON_FACE_DV == 6
+        const double wLin = wLinSw;   // set below, once the wave speeds are known
+#else
+        const double wLin = 1.;
+#endif
+        out[0] = dv[0] - wLin*0.5*((vxGradRaw[i][0] + vxGradRaw[jR][0])*dx + (vxGradRaw[i][1] + vxGradRaw[jR][1])*dy);
+        out[1] = dv[1] - wLin*0.5*((vyGradRaw[i][0] + vyGradRaw[jR][0])*dx + (vyGradRaw[i][1] + vyGradRaw[jR][1])*dy);
 #else
         out[0] = WRSel[ii][2] - WLSel[ii][2];
         out[1] = WRSel[ii][3] - WLSel[ii][3];
@@ -980,6 +995,22 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
     const double ci  = sqrt((Ki + PWAVE_MU_FAC*mui)/rhoi), cj  = sqrt((Kj + PWAVE_MU_FAC*muj)/rhoj);
     const double cTi = sqrt(mui/rhoi),               cTj = sqrt(muj/rhoj);
+#if RECON_FACE_DV == 6
+    {
+        // raw jump between bodies and where the strain rate is large (rigid rotation has D = 0)
+#if PERIODIC_BOUNDARIES
+        const int jS = gp ? gp->parent[jj] : jj;
+#else
+        const int jS = jj;
+#endif
+        auto dmag = [&](int k){
+            const double dxx = vxGradRaw[k][0], dyy = vyGradRaw[k][1], dxy = 0.5*(vxGradRaw[k][1] + vyGradRaw[k][0]);
+            return sqrt(dxx*dxx + dyy*dyy + 2.*dxy*dxy);
+        };
+        const double sSw = 0.5*(sml[i] + smlJ[jj]) * std::max(dmag(i), dmag(jS)) / (0.5*(ci + cj));
+        wLinSw = (bodyId[i] != bodyId[jS]) ? 0. : 1. - std::min(1., std::max(0., sSw/RECON_FACE_DV6_S0 - 1.));
+    }
+#endif
 #if WTR_LIMITER
     // O5: impedance speeds limited by the approach speed (none for receding pairs)
     const double wApp = std::max(0., -vdotr*rinv);
@@ -1120,7 +1151,7 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         double dvF[2];
         faceJump(dvF);
         const double projF = (dvF[0]*dx + dvF[1]*dy) * rinv * rinv;
-#if RECON_FACE_DV == 2 || RECON_FACE_DV == 4
+#if RECON_FACE_DV == 2 || RECON_FACE_DV >= 4
         const double projR = projF;                 // longitudinal on the jump too
 #else
         const double projR = vdotr * rinv * rinv;   // longitudinal keeps raw form
@@ -1141,7 +1172,7 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         double dvFc[2];
         faceJump(dvFc);
         const double projFc = (dvFc[0]*dx + dvFc[1]*dy) * rinv * rinv;
-#if RECON_FACE_DV == 2 || RECON_FACE_DV == 4
+#if RECON_FACE_DV == 2 || RECON_FACE_DV >= 4
         projL = projFc;
 #else
         projL = vdotr * rinv * rinv;
@@ -1181,7 +1212,7 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         double dvFd[2];
         faceJump(dvFd);
         const double projFd = (dvFd[0]*dx + dvFd[1]*dy) * rinv * rinv;
-#if RECON_FACE_DV == 2 || RECON_FACE_DV == 4
+#if RECON_FACE_DV == 2 || RECON_FACE_DV >= 4
         const double projRd = projFd;
 #else
         const double projRd = vdotr * rinv * rinv;
@@ -1378,6 +1409,9 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif // GIZMO_ELASTIC_FLUX
 
 void Particles::integrateStressTensor(const double &dt, bool rawGrad) {
+#if GNOG_PENALTY || RECON_FACE_DV == 5
+    ensureYieldGam();
+#endif
 #if STORE_RAW_VGRAD
     const double (*gvx)[DIM] = rawGrad ? vxGradRaw : vxGrad;
     const double (*gvy)[DIM] = rawGrad ? vyGradRaw : vyGrad;
@@ -1546,8 +1580,8 @@ void Particles::integrateStressTensor(const double &dt, bool rawGrad) {
             // quadratic in S, the factor is the square root of the ratio.
             // PLASTICITY_YIELD_GIZMO uses GIZMO's factor instead, the ratio itself
             // (solids/elastic_physics.c:111), which lands inside the yield surface.
-#if GNOG_PENALTY
-            if (gnogGam) gnogGam[i] = (J2 > Y2_over_d && J2 > 0.0) ? std::sqrt(Y2_over_d / J2) : 1.;
+#if GNOG_PENALTY || RECON_FACE_DV == 5
+            yieldGam[i] = (J2 > Y2_over_d && J2 > 0.0) ? std::sqrt(Y2_over_d / J2) : 1.;
 #endif
             if (J2 > Y2_over_d && J2 > 0.0) {
 #if PLASTICITY_YIELD_GIZMO
@@ -4987,7 +5021,15 @@ void Particles::contactForceReport(double simTime){
 }
 #endif
 
-#if CONTACT_NO_TENSION || GNOG_PENALTY
+#if GNOG_PENALTY || RECON_FACE_DV == 5
+void Particles::ensureYieldGam(){
+    if (yieldGam) return;
+    yieldGam = new double[N];
+    for (int i=0; i<N; ++i) yieldGam[i] = 1.;
+}
+#endif
+
+#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5
 void Particles::compBodyIds(){
     if (!bodyId){
         // bodies = connected components, link r < 1.5 x the smaller nearest-neighbour distance
@@ -5021,18 +5063,82 @@ void Particles::compBodyIds(){
 #endif
 
 #if GNOG_PENALTY
-void Particles::compGnogPenalty(const double &dt){
+void Particles::compGnogPenalty(const double &dt, const Particles *gp){
     compBodyIds();
     if (!hgF){
         hgF = new double[N][2]();
-        gnogGam = new double[N];
-        for (int i=0; i<N; ++i) gnogGam[i] = 1.;
+        hgE = new double[N]();
     }
+    ensureYieldGam();
+    const double *gnogGam = yieldGam;
 #if PLASTICITY_ANY
     const double xi0 = GNOG_XI_PLASTIC;
 #else
     const double xi0 = GNOG_XI;
 #endif
+#if GNOG_PENALTY == 2
+    ++gnogStep;
+    for (int i=0; i<N; ++i){ hgF[i][0] = hgF[i][1] = 0.; hgE[i] = 0.; }
+    // one unordered pair: i own, jR own (or the parent of a periodic image at xj)
+    auto pairForce = [&](int i, int jR, double xj, double yj, double vxj, double vyj,
+                         double smlj, double Vj){
+        if (bodyId[i] != bodyId[jR]) return;
+        const double rx = x[i]-xj, ry = y[i]-yj;
+        const double r = sqrt(rx*rx + ry*ry);
+        if (r <= 0.) return;
+        const double ex = rx/r, ey = ry/r;
+        const double vhx = (vx[i]-vxj) - 0.5*((vxGradRaw[i][0]+vxGradRaw[jR][0])*rx
+                                            + (vxGradRaw[i][1]+vxGradRaw[jR][1])*ry);
+        const double vhy = (vy[i]-vyj) - 0.5*((vyGradRaw[i][0]+vyGradRaw[jR][0])*rx
+                                            + (vyGradRaw[i][1]+vyGradRaw[jR][1])*ry);
+        const int a = std::min(i, jR), b = std::max(i, jR);
+        const double sgn = (i == a) ? 1. : -1.;          // stored u is u_ab
+        GnogPair &h = gnogHist[((unsigned long long)a << 32) | (unsigned long long)b];
+        if (h.stamp != gnogStep - 1) { h.u[0] = h.u[1] = 0.; }   // new pair (or a gap): start at 0
+        // GNOG-A: turn the history with the pair-mean spin, then integrate gamma * v^
+        const double ang = 0.25*((vyGradRaw[i][0] - vxGradRaw[i][1]) + (vyGradRaw[jR][0] - vxGradRaw[jR][1]))*dt;
+        const double c = cos(ang), sn = sin(ang);
+        const double u0 = c*h.u[0] - sn*h.u[1], u1 = sn*h.u[0] + c*h.u[1];
+        const double gam = 0.5*(gnogGam[i] + gnogGam[jR]);
+        h.u[0] = u0 + sgn*gam*vhx*dt;
+        h.u[1] = u1 + sgn*gam*vhy*dt;
+        h.stamp = gnogStep;
+        const double un = sgn*(h.u[0]*ex + h.u[1]*ey);  // u_ij . e_ij
+        const double dW = 0.5*(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, smlj));
+#if EOS == 1 || EOS == 2
+        const double G = 0.5*(MeshlessEOS->EOSShearModulus(matId[i]) + MeshlessEOS->EOSShearModulus(matId[jR]));
+#else
+        const double G = 0.;
+#endif
+        // dW < 0: an opening residual (un > 0) pulls i back towards j
+        const double f = xi0*G*un*dW*(m[i]/rho[i])*Vj/r;
+        const double Fx = f*ex, Fy = f*ey;
+        const double w = Fx*0.5*(vx[i]+vxj) + Fy*0.5*(vy[i]+vyj);
+        hgF[i][0] += Fx; hgF[i][1] += Fy; hgE[i] += w;
+        hgF[jR][0] -= Fx; hgF[jR][1] -= Fy; hgE[jR] -= w;
+    };
+    for (int i=0; i<N; ++i)
+        for (int jn=0; jn<noi[i]; ++jn){
+            const int j = nnl[i*MAX_NUM_INTERACTIONS + jn];
+            if (j > i) pairForce(i, j, x[j], y[j], vx[j], vy[j], sml[j], m[j]/rho[j]);
+        }
+#if PERIODIC_BOUNDARIES
+    if (gp)
+        for (int i=0; i<N; ++i)
+            for (int jn=0; jn<noiGhosts[i]; ++jn){
+                const int g = nnlGhosts[i*MAX_NUM_GHOST_INTERACTIONS + jn];
+                const int pa = gp->parent[g];
+                // each periodic pair appears once from either side: take it from the lower index
+                if (pa > i) pairForce(i, pa, gp->x[g], gp->y[g], gp->vx[g], gp->vy[g], gp->sml[g], gp->m[g]/gp->rho[g]);
+            }
+#else
+    (void)gp;
+#endif
+    for (auto it = gnogHist.begin(); it != gnogHist.end(); )
+        if (it->second.stamp != gnogStep) it = gnogHist.erase(it); else ++it;
+    return;
+#endif
+    (void)gp;
     // GNOG-A: the stored force turns with the particle's spin
     for (int i=0; i<N; ++i){
         const double ang = 0.5*(vyGradRaw[i][0] - vxGradRaw[i][1])*dt;
@@ -5075,7 +5181,11 @@ void Particles::addGnogForce(){
     for (int i=0; i<N; ++i){
         vF[i][0] -= hgF[i][0];
         vF[i][1] -= hgF[i][1];
+#if GNOG_PENALTY == 2
+        eF[i] -= hgE[i];
+#else
         eF[i] -= hgF[i][0]*vx[i] + hgF[i][1]*vy[i];
+#endif
     }
 }
 #endif
@@ -5084,7 +5194,7 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #if USE_HLLC
     double n_unit[DIM];
 #endif
-#if CONTACT_NO_TENSION
+#if CONTACT_NO_TENSION || RECON_FACE_DV >= 5
     compBodyIds();
 #endif
 #if CONTACT_FORCE_DIAG

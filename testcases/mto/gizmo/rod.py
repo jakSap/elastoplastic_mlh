@@ -31,6 +31,9 @@ import tests as T   # noqa: E402
 GIZMO = os.path.expanduser("~/Documents/GIZMO/build_mto_elastic/GIZMO")
 # same + VISCOSITY (explicit Navier-Stokes: eta (grad v + grad v^T) + (zeta - 2/3 eta) div v I)
 GIZMO_VISC = os.path.expanduser("~/Documents/GIZMO/build_mto_elastic_visc/GIZMO")
+# same as GIZMO but with the OBJECTIVE Jaumann term W S - S W (GIZMO has S W - W S, elastic_physics.c:133)
+GIZMO_OBJJAU = os.path.expanduser("~/Documents/GIZMO/build_mto_elastic_objjau/GIZMO")
+GIZMO_VISC_OBJJAU = os.path.expanduser("~/Documents/GIZMO/build_mto_elastic_visc_objjau/GIZMO")
 OFFSET = 5.0
 
 PARAMS = """\
@@ -166,10 +169,10 @@ def convert(D):
     return out
 
 
-def run(tag, Y0=None, name=None, eta=0.0):
+def run(tag, Y0=None, name=None, eta=0.0, binary=None):
     D = setup(tag, Y0, name, eta)
     with open(os.path.join(D, "run.log"), "w") as lf:
-        rc = subprocess.run([GIZMO_VISC if eta > 0 else GIZMO, "rod.params"], cwd=D,
+        rc = subprocess.run([binary or (GIZMO_VISC if eta > 0 else GIZMO), "rod.params"], cwd=D,
                             stdout=lf, stderr=subprocess.STDOUT).returncode
     out = convert(D)
     return name or tag, rc, len(glob.glob(os.path.join(out, "*.h5")))
@@ -185,15 +188,21 @@ if __name__ == "__main__":
     ap.add_argument("--eta", type=float, nargs="+",
                     help="shear viscosity scan (VISCOSITY build): one run per value, runs/<tag>_eta<val> "
                          "-- the name analysis.py looks for when a candidate sets @mat eta")
+    ap.add_argument("--objjau", action="store_true",
+                    help="objective-Jaumann GIZMO build (control for GIZMO's sign): runs/<tag>_objjau")
     a = ap.parse_args()
     if a.convert_only:
         for t in a.tags:
             print(convert(os.path.join(HERE, "runs", t)))
         sys.exit()
-    if a.eta:
+    if a.eta and a.objjau:
+        jobs = [(t, None, "{}_eta{:g}_objjau".format(t, e), e, GIZMO_VISC_OBJJAU) for t in a.tags for e in a.eta]
+    elif a.eta:
         jobs = [(t, None, "{}_eta{:g}".format(t, e), e) for t in a.tags for e in a.eta]
     elif a.Y0:
         jobs = [(t, y, "{}_Y{:g}".format(t, y), 0.0) for t in a.tags for y in a.Y0]
+    elif a.objjau:
+        jobs = [(t, None, "{}_objjau".format(t), 0.0, GIZMO_OBJJAU) for t in a.tags]
     else:
         jobs = [(t, None, None, 0.0) for t in a.tags]
     with cf.ThreadPoolExecutor(a.j) as ex:

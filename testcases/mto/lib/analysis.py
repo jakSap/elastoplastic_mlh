@@ -394,11 +394,16 @@ def analyse_rod(D, meta):
                KE_end=float(0.5 * np.sum(s["m"] * np.sum(s["v"] ** 2, axis=1))),
                gap_end=body_gap(x, d0), stuck=bool(body_gap(x, d0) < 2.0), asym=asym,
                asym_max=asym_max)
+    res["final_clumps"] = int(np.sum(intra_nn(x, 2) / d0 < CLUMP))
     eta = float((meta.get("materials") or [{}])[0].get("eta", 0.0))
     ctrl_name = meta["tag"] + ("_eta{:g}".format(eta) if eta > 0 else "")
-    ctrl = os.path.join(os.path.dirname(__file__), "..", "gizmo", "runs", ctrl_name, "conv")
     res["gizmo_control"] = ctrl_name
-    if os.path.isdir(ctrl) and snapshots(ctrl):
+    # original GIZMO control, and the one with the objective Jaumann term (10-03: GIZMO's
+    # S W - W S is not objective; the objective control widens the mushroom, W/W0 1.60 -> 1.74 at w16)
+    for key, name in (("gizmo", ctrl_name), ("gizmo_obj", ctrl_name + "_objjau")):
+        ctrl = os.path.join(os.path.dirname(__file__), "..", "gizmo", "runs", name, "conv")
+        if not (os.path.isdir(ctrl) and snapshots(ctrl)):
+            continue
         gs = snapshots(ctrl)
         tg, pg = min(gs, key=lambda a: abs(a[0] - snaps[-1][0]))
         xg = load(pg, ("x",))["x"]
@@ -406,16 +411,35 @@ def analyse_rod(D, meta):
         n = min(len(gsh["outline"]), len(shp["outline"]))
         gpc, gpd, gcom = plane_metrics(gs, d0, len(xg) // 2)
         gasym = max(sym_error(load(p, ("x",))["x"], maps, d0)[0] for _, p in gs)
-        res["gizmo"] = dict(t=tg, L_ratio=float(gsh["length"] / L0), plane_clumps=gpc,
-                            plane_dmin=gpd, asym=gasym, gap_end=body_gap(xg, d0),
-                            stuck=bool(body_gap(xg, d0) < 2.0),
-                            W_ratio=float(gsh["width"] / W0),
-                            outline=(gsh["outline"] / W0).tolist())
-        res["dL_vs_gizmo"] = float(abs(shp["length"] - gsh["length"]) / L0)
-        res["dW_vs_gizmo"] = float(abs(shp["width"] - gsh["width"]) / W0)
-        res["outline_L1_vs_gizmo"] = float(np.mean(np.abs(shp["outline"][:n]
-                                                          - gsh["outline"][:n])) / W0)
+        res[key] = dict(t=tg, L_ratio=float(gsh["length"] / L0), plane_clumps=gpc,
+                        plane_dmin=gpd, asym=gasym, gap_end=body_gap(xg, d0),
+                        stuck=bool(body_gap(xg, d0) < 2.0),
+                        W_ratio=float(gsh["width"] / W0),
+                        final_clumps=int(np.sum(intra_nn(xg, 2) / d0 < CLUMP)),
+                        outline=(gsh["outline"] / W0).tolist())
+        sfx = "" if key == "gizmo" else "_obj"
+        res["dL_vs_gizmo" + sfx] = float(abs(shp["length"] - gsh["length"]) / L0)
+        res["dW_vs_gizmo" + sfx] = float(abs(shp["width"] - gsh["width"]) / W0)
+        res["outline_L1_vs_gizmo" + sfx] = float(np.mean(np.abs(shp["outline"][:n]
+                                                                - gsh["outline"][:n])) / W0)
     return res
+
+
+def p1_control_fails(res, key, sfx):
+    """P1 checks relative to a GIZMO control: plane clumps at impact (GIZMO clumps there too),
+    clumps left at the end (GIZMO: 0 at every rung, 10-03), outline."""
+    g = res.get(key)
+    out = []
+    cmax = int(1.1 * g["plane_clumps"]) + 2 if g else 0
+    if res.get("plane_clumps", 0) > cmax:
+        out.append("plane_clumps={}>{}".format(res["plane_clumps"], cmax))
+    if g and "final_clumps" in g and "final_clumps" in res:
+        fmax = int(1.1 * g["final_clumps"]) + 4
+        if res["final_clumps"] > fmax:
+            out.append("final_clumps={}>{}".format(res["final_clumps"], fmax))
+    if g and res.get("outline_L1_vs_gizmo" + sfx, 0) > P1_OUTLINE_TOL:
+        out.append("outline_vs_gizmo{}={:.3f}".format(sfx, res["outline_L1_vs_gizmo" + sfx]))
+    return out
 
 
 # ------------------------------------------------------------------ dispatch
@@ -455,15 +479,16 @@ def analyse_run(D):
     if test == "P1":
         if res.get("stuck"):
             fails.append("stuck")
-        # relative to the GIZMO control: GIZMO itself clumps in the plane at impact
-        g = res.get("gizmo")
-        cmax = int(1.1 * g["plane_clumps"]) + 2 if g else 0
-        if res.get("plane_clumps", 0) > cmax:
-            fails.append("plane_clumps={}>{}".format(res["plane_clumps"], cmax))
-        if g and res.get("outline_L1_vs_gizmo", 0) > P1_OUTLINE_TOL:
-            fails.append("outline_vs_gizmo={:.3f}".format(res["outline_L1_vs_gizmo"]))
         if res.get("buried", 0) > 0:
             fails.append("fold(buried={})".format(res["buried"]))
+        base = list(fails)
+        fails += p1_control_fails(res, "gizmo", "")
+        # verdict against the objective-Jaumann GIZMO control (where it exists)
+        if res.get("gizmo_obj"):
+            fo = base + p1_control_fails(res, "gizmo_obj", "_obj")
+            if not ok:
+                fo = ["crash"] + fo
+            res["fails_obj"], res["verdict_obj"] = fo, ("FAIL" if fo else "PASS")
     if "analysis_error" in res:
         fails.append("analysis_error")
     if fails:
@@ -530,7 +555,13 @@ def order_fit(hs, errs):
 
 
 def verdict_test(RUNS, cand, test):
-    R = _load_results(RUNS, cand, test)
+    if test == "P1obj":
+        # P1 against the objective-Jaumann GIZMO control
+        R = {g: dict(r, verdict=r["verdict_obj"], fails=r.get("fails_obj", []))
+             for g, r in _load_results(RUNS, cand, "P1").items() if "verdict_obj" in r}
+        test = "P1"
+    else:
+        R = _load_results(RUNS, cand, test)
     if not R:
         return "-", ""
     if test in ("T1", "T2", "P1"):
@@ -581,7 +612,7 @@ def a1_order(RUNS, cand):
 
 
 def scoreboard(RUNS, cands):
-    tests = ["T1", "T2", "P1", "A1", "W1i", "W1m", "W1t", "W2", "W3"]
+    tests = ["T1", "T2", "P1", "P1obj", "A1", "W1i", "W1m", "W1t", "W2", "W3"]
     lines = ["| test | " + " | ".join(cands) + " |",
              "|---|" + "---|" * len(cands)]
     V = {c: {} for c in cands}
@@ -593,7 +624,7 @@ def scoreboard(RUNS, cands):
             cells.append("**{}** {}".format(v, why) if v != "-" else "-")
         lines.append("| {} | {} |".format(t, " | ".join(cells)))
     # fallback (user 10-03): every test passes, only A1 converges at first order
-    fb = [c for c in cands if all(V[c][t] == "PASS" for t in tests if t != "A1")
+    fb = [c for c in cands if all(V[c][t] == "PASS" for t in tests if t not in ("A1", "P1obj"))
           and (V[c]["A1"] == "PASS" or ORDER_FALLBACK <= a1_order(RUNS, c) < ORDER_PASS)]
     lines.append("")
     lines.append("Fallback (all tests PASS, A1 only at 1st order, p >= {}): {}".format(

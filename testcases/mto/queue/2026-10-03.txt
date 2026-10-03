@@ -166,10 +166,110 @@ gz_res3_obj T2:d0.0125
 gzo_gnog T2:d0.0125
 gzo_gnog T1:d0.1
 gzbest W3:n256
+# 4. P1 CAMPAIGN (user priorities 03:25: rods like GIZMO first; waves fully 2nd order; T1 d0.05 intact; A1 1st order)
+#    final clumps: GIZMO 0 at all rungs; Monaghan-TC family (gzall*) ~0, local TC 48-110 -> TC form, jump type, GNOG
+pm_obj0 P1:w16
+pm_obj0_g1 P1:w16
+pm_obj3_g1 P1:w16
+pm_gz_g1 P1:w16
+pm_obj3_g4 P1:w16
+pm_obj4 P1:w16
+gz_res4 P1:w16
+gz_res4 W2:n64
+# 4a. promote pm_obj0 (P1 w16 PASS 03:35, no GNOG): rods w24/w10, disc ladder (1st order?), sound/P/S waves
+pm_obj0 P1:w24
+pm_obj0 P1:w10
+pm_obj0 A1:d0.05
+pm_obj0 A1:d0.035
+# 4c. pm_obj0 end-face clumps (16 final, GIZMO 0): TC gate off / stronger Monaghan
+pm_obj0_ng P1:w16
+pm_obj0_p4 P1:w16
+pm_obj0_ng_p4 P1:w16
+# 4d. conservative GNOG (mode 2): acceptance (T2 momentum per body, dE, limE), bit-identity, then P1/waves
+gzo_G2 T2:d0.025
+@sh ./mto.py run ref_chk --only P1:w10 --force -j 1 && ./bitcheck.py ref ref_chk P1 w10
+@sh ./mto.py run chk_obj --only P1:w10 --force -j 1 && ./bitcheck.py gz_res3_obj chk_obj P1 w10
+pm_obj0_G2 P1:w16
+pm_obj0_G2x1 P1:w16
+gzo_G2 W2:n64
+gzo_G2 W1t:n64
+pm_obj0 W1t:n64
+pm_obj0 W2:n64
+# 4e. hybrid jump DV 5 (pm_obj0 fails A1: -0.90/-0.80, p 0.33): rods, disc, waves; + GNOG 2; bit-identity after DV 5
+pm_obj5 P1:w16
+pm_obj5 A1:d0.05
+pm_obj5 W2:n64
+pm_obj5 W3:n64
+pm_obj5 W1t:n64
+pm_obj5_G2 P1:w16
+gzo_G2 P1:w16
+# 4f. GIZMO control with the objective Jaumann term (report test 5): does the P1 reference live on the sign?
+@sh python3 gizmo/rod.py w16 --objjau -j 1
+@sh ./mto.py run ref_chk --only P1:w10 --force -j 1 && ./bitcheck.py ref ref_chk P1 w10
+pm_obj5 P1:w24
+pm_obj5 P1:w10
+pm_obj5 A1:d0.035
+# 4g. physical viscosity instead of resolution-dependent numerical viscosity (user 03:45). GIZMO eta 0.01:
+#     W/W0 1.457 (w16) / 1.467 (w24), L/L0 0.915/0.921: resolution-independent, unlike inviscid GIZMO (1.597/1.641)
+pv4_e10 P1:w16
+pv5_e10 P1:w16
+pv3_e10 P1:w16
+pv0_e10 P1:w16
+# 4h. strain-rate switched jump DV 6 (raw where |D| h/c > s0, residual in waves and rigid rotation)
+pm_obj6 P1:w16
+pm_obj6s5 P1:w16
+pm_obj6s20 P1:w16
+# 4i. objective-Jaumann GIZMO controls (w16_objjau: W/W0 1.742, L/L0 0.894, gap 17.0, final clumps 0)
+@sh python3 gizmo/rod.py w10 w24 --objjau -j 1
+@sh python3 gizmo/rod.py w16 --eta 0.01 --objjau -j 1
+pm_obj6 A1:d0.05
+pm_obj6s5 A1:d0.05
+# 4j. end-face clumps: GIZMO sign + no-adhesion contact (isolates CONTACT_NO_TENSION)
+# bit-identity after RECON_FACE_DV 5/6 and GNOG 2 (03:47)
+@sh ./mto.py run ref_chk --only P1:w10 --force -j 1 && ./bitcheck.py ref ref_chk P1 w10 && echo "(bit-identity after DV 5/6, GNOG 2)"
+# 4k. contact-force budget of the objective GIZMO (does it release the contact tension faster than gzx_jau, which welds?)
+@sh mkdir -p gizmo/runs/w16_diag_objjau && cp gizmo/runs/w16_diag/rod.params gizmo/runs/w16_diag/ic.hdf5 gizmo/runs/w16_diag_objjau/ && cd gizmo/runs/w16_diag_objjau && ~/Documents/GIZMO/build_mto_diag_objjau/GIZMO rod.params > run.log 2>&1
+@sh ./mto.py run chk_obj --only P1:w10 --force -j 1 && ./bitcheck.py gz_res3_obj chk_obj P1 w10 && echo "(bit-identity after DV 5/6, GNOG 2)"
+pm_gz0 P1:w16
+pm_obj6s20 A1:d0.05
+# 4l. clump fixes on the DV 6 (s0 5e-3) base: rods like DV 0, disc -0.95 % at d0.05
+p6_G2 P1:w16
+p6_G2p1 P1:w16
+p6_m3 P1:w16
+p6_G2m3 P1:w16
+p6_c6G2 P1:w16
+p6_e10 P1:w16
+pm_obj6s5 A1:d0.035
+pm_obj6s5 W3:n64
+pm_obj6s5 W1t:n64
+pm_obj6s5 W2:n64
+pm_obj6s5 W2:n128
+@sh python3 gizmo/rod.py w10 --eta 0.01 -j 1
+pv4_e10 P1:w24
+pv5_e10 P1:w24
+@sh python3 gizmo/rod.py w16 w10 w24 --eta 0.03 -j 1
+pv4_e30 P1:w16
+pv5_e30 P1:w16
+pm_obj5 W2:n128
+pm_obj5 W3:n128
+pm_obj0 W3:n64
+# 4b. wave ablation (report tipsntricks-abgleich test 3): GIZMO switches spoil sound/P waves; floor suspected
+wa_nofl W1t:n64
+wa_nofl W2:n64
+wa_nodav W1t:n64
+wa_nodav W2:n64
+wa_nodiv W1t:n64
+wa_nodiv W2:n64
+gz_res4 W2:n128
+pm_obj4 W2:n64
+pm_obj4 W2:n128
+gz_res4 W3:n64
+gz_res4 W3:n128
+gz_obj A1:d0.035
 gz_fm2 W2:n64
 gz_fm2 W2:n128
-gz_wsf T1:d0.08
+# dropped 03:35 (priorities: P1 first, T1 only d0.05, blocks optional): gz_wsf T1:d0.08
 # 10. split face on gzbest (GIZMO Jaumann sign) for comparison
-gzbest_sf A1:d0.05
-gzbest_sf P1:w10
-gzbest_sf P1:w16
+# dropped 03:35 (priorities: P1 first, T1 only d0.05, blocks optional): gzbest_sf A1:d0.05
+# dropped 03:35 (priorities: P1 first, T1 only d0.05, blocks optional): gzbest_sf P1:w10
+# dropped 03:35 (priorities: P1 first, T1 only d0.05, blocks optional): gzbest_sf P1:w16
