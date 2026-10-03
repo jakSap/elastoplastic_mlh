@@ -126,9 +126,10 @@ def bulk_modulus(eos):
     return float(c[0]) ** 2 * RHO_BAR
 
 
-def longitudinal_speed(eos, mu):
-    """c_l = sqrt((K + 4/3 mu)/rho_0), what xSplitElasticHLLC uses (HLLC.cpp:640)."""
-    return np.sqrt((bulk_modulus(eos) + 4.0 / 3.0 * mu) / RHO_BAR)
+def longitudinal_speed(eos, mu, pmod=4.0 / 3.0):
+    """c_l = sqrt((K + pmod mu)/rho_0): pmod 4/3 = plane strain (xSplitElasticHLLC default),
+    1 = GIZMO's 2D model (STRESS_2D_GIZMO)."""
+    return np.sqrt((bulk_modulus(eos) + pmod * mu) / RHO_BAR)
 
 
 def shear_speed(mu):
@@ -138,21 +139,34 @@ def shear_speed(mu):
 
 # --- kernel-sum density offset ------------------------------------------------------------
 
-def lattice_kernel_sum(h_over_d, dim=2, R=12):
-    """d^DIM * sum_j W(r_j, h) over the infinite cubic lattice (Wendland C2, GIZMO norms)."""
+def _wendland_2d(u, kernel):
+    """2D Wendland kernel shape * norm (GIZMO numbering 6/7/9 = C2/C4/C6, Kernel.h)."""
+    t = np.clip(1.0 - u, 0.0, None)
+    if kernel == 6:
+        return 7.0 / np.pi * t**4 * (1.0 + 4.0 * u)
+    if kernel == 7:
+        return 9.0 / np.pi * t**6 * (1.0 + 6.0 * u + 35.0 / 3.0 * u * u)
+    if kernel == 9:
+        return 78.0 / (7.0 * np.pi) * t**8 * (1.0 + 8.0 * u + 25.0 * u * u + 32.0 * u**3)
+    raise ValueError("kernel {} not supported (6/7/9)".format(kernel))
+
+
+def lattice_kernel_sum(h_over_d, dim=2, R=12, kernel=6):
+    """d^DIM * sum_j W(r_j, h) over the infinite cubic lattice (Wendland, GIZMO norms)."""
     i = np.arange(-R, R + 1)
     if dim == 2:
         X, Y = np.meshgrid(i, i)
         u = np.hypot(X, Y) / h_over_d
-        t = np.clip(1.0 - u, 0.0, None)
-        return (7.0 / np.pi / h_over_d**2 * t**4 * (1.0 + 4.0 * u)).sum()
+        return (_wendland_2d(u, kernel) / h_over_d**2).sum()
+    if kernel != 6:
+        raise ValueError("3D kernel sum implemented for Wendland C2 only")
     X, Y, Z = np.meshgrid(i, i, i)
     u = np.sqrt(X * X + Y * Y + Z * Z) / h_over_d
     t = np.clip(1.0 - u, 0.0, None)
     return (21.0 / (2.0 * np.pi) / h_over_d**3 * t**4 * (1.0 + 4.0 * u)).sum()
 
 
-def kernel_offset(nnn, dim=2):
+def kernel_offset(nnn, dim=2, kernel=6):
     """Kernel-sum density offset for target neighbour number nnn (bisection on h/d).
 
     The solver's neighbour count is V(h) sum_j W with V = pi h^2 (2D) / (4/3) pi h^3 (3D),
@@ -162,11 +176,11 @@ def kernel_offset(nnn, dim=2):
     lo, hi = 1.0, 10.0
     for _ in range(200):
         mid = 0.5 * (lo + hi)
-        if vcoef * mid**dim * lattice_kernel_sum(mid, dim) < nnn:
+        if vcoef * mid**dim * lattice_kernel_sum(mid, dim, kernel=kernel) < nnn:
             lo = mid
         else:
             hi = mid
-    return lattice_kernel_sum(0.5 * (lo + hi), dim) - 1.0
+    return lattice_kernel_sum(0.5 * (lo + hi), dim, kernel=kernel) - 1.0
 
 
 # --- geometry -----------------------------------------------------------------------------
@@ -270,7 +284,7 @@ def lagrangian_to_euler(q, A, k):
 # --- the IC -------------------------------------------------------------------------------
 
 def make_ic(geometry, wave, mode="p", eos="tillotson", mu=0.0, amplitude=1e-6,
-            nnn=32, polarisation=None, out=None, quiet=False):
+            nnn=32, polarisation=None, out=None, quiet=False, kernel=6, pmod=4.0 / 3.0):
     """Build a travelling-wave IC and write it to HDF5. Returns the file name.
 
     mode  "p" longitudinal (sound / P-wave), "s" shear (needs mu > 0)
@@ -296,11 +310,12 @@ def make_ic(geometry, wave, mode="p", eos="tillotson", mu=0.0, amplitude=1e-6,
         pos = np.mod(pos, np.array(geometry.L))
         rho = RHO_BAR * (1.0 + A * np.sin(k * phase))
         P, _, u = eos_state(eos, rho)
-        c_wave = longitudinal_speed(eos, mu)
+        c_wave = longitudinal_speed(eos, mu, pmod)
         vel = np.outer(c_wave * A * np.sin(k * phase), wave.n_hat)
-        # S_ij = -2 mu ln(rho/rho_0) (n_i n_j - delta_ij/3)
+        # S_ij = -2 mu ln(rho/rho_0) (n_i n_j - delta_ij (1 - pmod/2)): plane strain 1/3,
+        # GIZMO's traceless 2D deviator 1/2
         lnr = np.log(rho / TILL_RHO0)
-        shape = np.outer(wave.n_hat, wave.n_hat) - np.eye(dim) / 3.0
+        shape = np.outer(wave.n_hat, wave.n_hat) - np.eye(dim) * (1.0 - pmod / 2.0)
         S = (-2.0 * mu * lnr)[:, None, None] * shape[None, :, :]
     else:
         rho = np.full(geometry.N, RHO_BAR)
@@ -313,7 +328,7 @@ def make_ic(geometry, wave, mode="p", eos="tillotson", mu=0.0, amplitude=1e-6,
         shape = np.outer(wave.n_hat, e_hat) + np.outer(e_hat, wave.n_hat)
         S = (-RHO_BAR * c_wave * v_amp)[:, None, None] * shape[None, :, :]
 
-    offset = 0.0 if nnn is None else kernel_offset(nnn, dim)
+    offset = 0.0 if nnn is None else kernel_offset(nnn, dim, kernel)
     m = np.full(geometry.N, RHO_BAR * geometry.volume / geometry.N / (1.0 + offset))
     matId = np.zeros(geometry.N, dtype=np.int8)
     P_bar = float(eos_state(eos, np.array([RHO_BAR]))[0][0])
@@ -343,7 +358,8 @@ def make_ic(geometry, wave, mode="p", eos="tillotson", mu=0.0, amplitude=1e-6,
                 ("wavelength", wave.wavelength), ("ppw", wave.ppw),
                 ("amplitude", A), ("rho_bar", RHO_BAR), ("P_bar", P_bar),
                 ("mu", mu), ("K0", bulk_modulus(eos)),
-                ("c_l", longitudinal_speed(eos, mu)), ("c_s", shear_speed(mu)),
+                ("c_l", longitudinal_speed(eos, mu, pmod)), ("c_s", shear_speed(mu)),
+                ("kernel", kernel), ("pmod", pmod),
                 ("c_wave", c_wave), ("period", period),
                 ("kernel_offset", offset), ("correct_nnn", 0 if nnn is None else nnn)):
             f.attrs[key] = val

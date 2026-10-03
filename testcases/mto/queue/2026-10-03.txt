@@ -22,6 +22,28 @@ gz_obj P1:w16
 gz_res3 P1:w24
 gz_res3_obj P1:w24
 gz_obj P1:w24
+# 3a. bit-identity re-check of the default build after the SPLIT_FACE_STRESS / kernel changes
+ref_chk P1:w10
+# 3b. split-face stress divergence (O3) + per-particle tensile correction (O4) on the objective candidate (user, 02:15)
+gz_res3_obj_sf A1:d0.05
+gz_res3_obj_sf P1:w10
+gz_res3_obj_sf T1:d0.2
+gz_res3_obj_sf T2:d0.025
+gz_res3_obj_sf P1:w16
+gz_res3_obj_sf P1:w24
+# 3c. higher-order kernels (O6): Wendland C4 / N_NN 50, C6 / N_NN 72 on the objective candidate (user, 02:20)
+gz_res3_obj_c4 A1:d0.05
+gz_res3_obj_c4 P1:w10
+gz_res3_obj_c4 T1:d0.2
+gz_res3_obj_c4 T2:d0.025
+gz_res3_obj_c6 A1:d0.05
+gz_res3_obj_c6 P1:w10
+gz_res3_obj_c6 T1:d0.2
+gz_res3_obj_c6 T2:d0.025
+gz_res3_obj_c4 P1:w16
+gz_res3_obj_c6 P1:w16
+gz_res3_obj_c4 W2:n64
+gz_res3_obj_c6 W2:n64
 # 4. rings for gzbest (user: "probably passes the rings") -- long jobs, start them early
 gzbest T1:d0.08
 gzbest T1:d0.06
@@ -88,3 +110,7 @@ gz_fm2 W2:n64
 gz_fm2 W2:n128
 gz_fm2 W2:n256
 gz_wsf T1:d0.08
+# 10. split face on gzbest (GIZMO Jaumann sign) for comparison
+gzbest_sf A1:d0.05
+gzbest_sf P1:w10
+gzbest_sf P1:w16

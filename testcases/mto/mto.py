@@ -85,11 +85,23 @@ def mat_overrides(cand):
 
 
 def rung_for(cand, test, tag):
-    """The rung as the candidate runs it: lib/tests.py + the candidate's @mat overrides."""
+    """The rung as the candidate runs it: lib/tests.py + the candidate's @mat overrides, and the
+    candidate's kernel / neighbour number (kernelSize, NNNTarget, wave mass correction) and 2D
+    P-wave modulus (wave IC + reference speed under STRESS_2D_GIZMO)."""
     r = T.rung(test, tag)
     ov = [(k, v) for k, v, tests in mat_overrides(cand) if test in tests]
     if ov:
         r["materials"] = [dict(m, **{k: float(v) for k, v in ov}) for m in r["materials"]]
+    f = cand_flags(cand, r["variant"])
+    nnn, kern = int(float(f.get("NNN_TARGET", 32))), int(f.get("KERNEL_FUNCTION", 6))
+    pm1 = f.get("STRESS_2D_GIZMO", "0") == "1"
+    r["nnn"], r["ic_tag"] = nnn, tag
+    if nnn != 32:
+        r["kernel"] = r["kernel"] * (nnn / 32.0) ** 0.5
+    if r["gen"] == "wave" and (nnn != 32 or kern != 6 or pm1):
+        r["genargs"] = dict(r["genargs"], nnn=nnn, kernel=kern, pmod=1.0 if pm1 else 4.0 / 3.0)
+        r["ic_tag"] = tag + ("_k{}n{}".format(kern, nnn) if (nnn != 32 or kern != 6) else "") \
+            + ("_pm1" if pm1 else "")
     return r
 
 
@@ -189,11 +201,12 @@ def ic_path(test, tag):
     return os.path.join(ICS, "{}_{}.h5".format(test, tag))
 
 
-def make_ic(test, tag):
+def make_ic(test, tag, r=None):
+    """IC of a rung; r = rung_for(cand, ...) selects the candidate's IC flavour (r["ic_tag"])."""
     import gen
     import h5py
-    r = T.rung(test, tag)
-    path = ic_path(test, tag)
+    r = r or T.rung(test, tag)
+    path = ic_path(test, r.get("ic_tag", tag))
     os.makedirs(ICS, exist_ok=True)
     with _lock(os.path.join(ICS, ".lock")):
         return _make_ic_locked(test, tag, r, path, gen, h5py)
@@ -210,7 +223,7 @@ def _make_ic_locked(test, tag, r, path, gen, h5py):
 
 
 SML = """sml {
-    NNNTarget 32
+    NNNTarget {nnn}
     tol       1e-3
     maxIter   200
     maxFactor 1.2
@@ -234,7 +247,7 @@ def config_text(r, ic, outdir):
          "periodicBoxLimits {",
          "    lowerX {}".format(lo[0]), "    lowerY {}".format(lo[1]), "    lowerZ 0.0",
          "    upperX {}".format(hi[0]), "    upperY {}".format(hi[1]), "    upperZ 0.0", "}",
-         "kernelSize {:.9g}".format(r["kernel"]), SML,
+         "kernelSize {:.9g}".format(r["kernel"]), SML.replace("{nnn}", str(r.get("nnn", 32))),
          "hydro_gamma 1.6666666666666667"]
     if r["materials"]:
         s.append("materials {")
@@ -267,7 +280,7 @@ def est_cost(r, N):
 
 def cfg_hash(r, test, tag, D):
     """Identity of a rung's runtime setup: the config text (material, t_end, box, ...)."""
-    return hashlib.md5(config_text(r, ic_path(test, tag), os.path.join(D, "output"))
+    return hashlib.md5(config_text(r, ic_path(test, r.get("ic_tag", tag)), os.path.join(D, "output"))
                        .encode()).hexdigest()
 
 
@@ -312,10 +325,11 @@ def run_one(cand, test, tag, stamp, B, stop_flag):
         return test, tag, "skipped", None
     shutil.rmtree(D, ignore_errors=True)
     os.makedirs(os.path.join(D, "output"))
-    N = make_ic(test, tag)
+    N = make_ic(test, tag, r)
+    ic = ic_path(test, r.get("ic_tag", tag))
     open(os.path.join(D, "config.info"), "w").write(
-        config_text(r, ic_path(test, tag), os.path.join(D, "output")))
-    meta = dict(cand=cand, test=test, tag=tag, stamp=stamp, source=source_hash(), N=N,
+        config_text(r, ic, os.path.join(D, "output")))
+    meta = dict(cand=cand, test=test, tag=tag, stamp=stamp, source=source_hash(), N=N, ic=ic,
                 t_end=r["t_end"], d=r["d"], variant=r["variant"], est_s=est_cost(r, N),
                 cfg=cfg_hash(r, test, tag, D), materials=r["materials"],
                 start=time.time())
@@ -368,7 +382,7 @@ def cmd_run(args):
             if (same_build and m.get("exit") == 0
                     and m.get("cfg") == cfg_hash(r, test, tag, D)):
                 continue
-        N = make_ic(test, tag)
+        N = make_ic(test, tag, r)
         todo.append((est_cost(r, N), test, tag, B, stamp))
     todo.sort(reverse=True)                      # longest first: critical path starts early
     os.makedirs(os.path.join(RUNS, args.cand), exist_ok=True)
@@ -397,7 +411,7 @@ def cmd_plan(args):
     tot = 0
     for test, tag in jobs_for(args):
         r = rung_for(args.cand, test, tag)
-        N = make_ic(test, tag)
+        N = make_ic(test, tag, r)
         c = est_cost(r, N)
         tot += c
         print("{:5s} {:8s} {:8s} N={:6d} steps~{:7.0f} est {:7.0f} s".format(

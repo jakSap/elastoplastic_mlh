@@ -610,6 +610,16 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // velocity. 0 = off, 1 = on.
 #define CONTACT_NO_TENSION 0
 
+// Split-face form of the deviatoric stress divergence in the GIZMO stress flux
+// (option O3, Mars ELASTIC_FACE_MODE 3): pair force S~_i a_ij - S~_j a_ji with the
+// MFM half-faces a_ij = V_i psiTilde_j(x_i) (A_ij = a_ij - a_ji). Exactly torque-free
+// for symmetric S, because sum_j (x_j - x_i) (x) psiTilde_j(x_i) = I, PROVIDED the
+// tensile correction is per particle (option O4): S~_i = S_i with its tensile
+// principal components damped once by f_i = max_j f_ij (TC_TOTAL_STRESS_GATE
+// applies). The HLL dissipation terms are unchanged. 2D, non-periodic.
+//   0 = off (eigen-projection on the radial SPH area, per-pair TC), 1 = on
+#define SPLIT_FACE_STRESS 0
+
 // Gate of the deviatoric tensile correction in the GIZMO stress flux (2D).
 //   0 = GIZMO: every positive eigenvalue l_k of the DEVIATORIC stress S is damped
 //       by (1 - f), also where the total principal stress -P + l_k is compressive
@@ -1053,6 +1063,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #error "TORQUE_DIAG splits the HLLC + GIZMO elastic channels; both must be active."
 #endif
 // (the ENFORCE_FLUX_SYM guard for TORQUE_DIAG lives below, after that flag is defined)
+#if SPLIT_FACE_STRESS && (DIM != 2 || PERIODIC_BOUNDARIES || !GIZMO_ELASTIC_FLUX || !TENSILE_CORRECTION)
+#error "SPLIT_FACE_STRESS: DIM 2, non-periodic, GIZMO elastic flux with TENSILE_CORRECTION only."
+#endif
 #if RECON_FACE_DV >= 3 && DIM != 2
 #error "RECON_FACE_DV 3/4 (residual jump) is implemented for DIM == 2 only."
 #endif

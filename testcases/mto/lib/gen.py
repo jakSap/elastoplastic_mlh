@@ -113,11 +113,11 @@ def rod(out, d, length=1.0, width=0.25, gap=0.1, v=0.2):
                                          velocity=v, t_contact=gap / (2 * v)))
 
 
-def wave(out, n, mode, eos, mu, amplitude=1e-6):
+def wave(out, n, mode, eos, mu, amplitude=1e-6, nnn=32, kernel=6, pmod=4.0 / 3.0):
     """Travelling wave along +x in the [0,1) x [0,1/4) box, n particles per wavelength."""
     if n % 4:
         raise ValueError("n must be a multiple of 4 (box is 4 x 1 cells)")
     wave_build((4, 1), n // 4, (1, 0), mode=mode, eos=eos, mu=mu, amplitude=amplitude,
-               nnn=32, out=out, quiet=True)
+               nnn=nnn, out=out, quiet=True, kernel=kernel, pmod=pmod)
     with h5py.File(out, "r") as f:
         return len(f["m"])

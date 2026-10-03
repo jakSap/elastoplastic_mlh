@@ -215,7 +215,7 @@ def interior_lines(x, fields, d0, tree, core=None):
 
 def analyse_body(D, meta, test):
     snaps = snapshots(os.path.join(D, "output"))
-    with h5py.File(os.path.join(os.path.dirname(D), "..", "..", "..", "ics",
+    with h5py.File(meta.get("ic") or os.path.join(os.path.dirname(D), "..", "..", "..", "ics",
                                 "{}_{}.h5".format(test, meta["tag"])), "r") as f:
         attrs = dict(f.attrs)
         x0 = f["x"][:]
@@ -292,8 +292,8 @@ def analyse_disc(D, meta):
 # ------------------------------------------------------------------ waves
 
 def analyse_wave(D, meta, test):
-    ic = os.path.join(os.path.dirname(D), "..", "..", "..", "ics",
-                      "{}_{}.h5".format(test, meta["tag"]))
+    ic = meta.get("ic") or os.path.join(os.path.dirname(D), "..", "..", "..", "ics",
+                                        "{}_{}.h5".format(test, meta["tag"]))
     with h5py.File(ic, "r") as f:
         A = float(f.attrs["amplitude"])
         k = float(np.linalg.norm(f.attrs["k"]))

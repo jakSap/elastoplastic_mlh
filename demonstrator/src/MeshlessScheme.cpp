@@ -484,6 +484,9 @@ void MeshlessScheme::run(){
         particles->computeFabMonaghan();
 #endif
 #endif
+#if SPLIT_FACE_STRESS
+        particles->compParticleTensileStress();
+#endif
 
         Logger(DEBUG) << "      > Computing fluxes";
 #if AM_SELFTEST == 2

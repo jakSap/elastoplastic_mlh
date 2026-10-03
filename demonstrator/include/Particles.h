@@ -404,6 +404,11 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     /// (T1/T2 are single-pass tests; T3 runs to completion).
     bool amSelfTestReport();
 #endif
+#if SPLIT_FACE_STRESS
+    /// Per-particle tensile-corrected deviatoric stress (xx, xy, yy) for the split face.
+    double (*Stc)[3] { nullptr };
+    void compParticleTensileStress();
+#endif
 #if CONTACT_NO_TENSION
     /// Body (connected component of the first force pass) of each particle.
     int *bodyId { nullptr };

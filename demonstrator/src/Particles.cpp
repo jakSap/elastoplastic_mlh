@@ -481,6 +481,9 @@ Particles::~Particles() {
 #if CONTACT_NO_TENSION
     delete[] bodyId;
 #endif
+#if SPLIT_FACE_STRESS
+    delete[] Stc;
+#endif
 #if USE_MATID
     delete[] matId;
 #endif
@@ -773,6 +776,49 @@ void Particles::computeFabMonaghan(
 }
 #endif // TENSILE_CORRECTION
 
+#if SPLIT_FACE_STRESS
+// O4: damp the tensile principal components of S_i ONCE per particle, with the
+// largest pair factor f_i = max_j f_ij of this step, so the split-face force stays
+// torque-free (a pair-dependent damping would not be).
+void Particles::compParticleTensileStress(){
+    if (!Stc) Stc = new double[N][3];
+    for (int i = 0; i < N; ++i){
+        double fi = 0.;
+        for (int jn = 0; jn < noi[i]; ++jn){
+            double f = TENSILE_CORRECTION_PREFAC * pow(fabMonaghan[i*MAX_NUM_INTERACTIONS+jn],
+                                                       TENSILE_CORRECTION_POWER);
+#if TENSILE_CORRECTION_LOCAL
+            if (f > TENSILE_CORRECTION_FMAX) f = TENSILE_CORRECTION_FMAX;
+#endif
+            if (f > fi) fi = f;
+        }
+        const double a = Sxx[i], b = Sxy[i], c = Syy[i];
+        const double mean = 0.5*(a + c), dev = sqrt(0.25*(a - c)*(a - c) + b*b);
+        double l1 = mean + dev, l2 = mean - dev, e1x, e1y;
+        if (dev <= 1e-12*std::fabs(mean)){ e1x = 1.; e1y = 0.; }
+        else {
+            double v1x = b, v1y = l1 - a; const double wx = l1 - c, wy = b;
+            if (wx*wx + wy*wy > v1x*v1x + v1y*v1y){ v1x = wx; v1y = wy; }
+            const double nv = sqrt(v1x*v1x + v1y*v1y); e1x = v1x/nv; e1y = v1y/nv;
+        }
+        auto damp = [&](double l){
+            if (l <= 0.) return l;
+#if TC_TOTAL_STRESS_GATE
+            const double sig = l - P[i];
+            return (sig > 0.) ? l - fi*std::min(l, sig) : l;
+#else
+            return l*(1. - fi);
+#endif
+        };
+        l1 = damp(l1); l2 = damp(l2);
+        const double e2x = -e1y, e2y = e1x;
+        Stc[i][0] = l1*e1x*e1x + l2*e2x*e2x;
+        Stc[i][1] = l1*e1x*e1y + l2*e2x*e2y;
+        Stc[i][2] = l1*e1y*e1y + l2*e2y*e2y;
+    }
+}
+#endif
+
 #if GIZMO_ELASTIC_FLUX
 // Port of GIZMO solids/elastic_stress_tensor_force.h (eigenvalue branch), in the
 // demonstrator's lab frame. Computed once per pair (i<jj); the flux-symmetry copy
@@ -971,7 +1017,25 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     // deviatoric stress force: project face onto stress eigenvectors, damp tensile
     // (positive) principal components by (1 - f); summed over both sides at wt=-0.5
     double cmag[2] = {0., 0.};
+#if SPLIT_FACE_STRESS
+    {
+        // O3: S~_i a_ij - S~_j a_ji with the MFM half-faces (A_ij = a_ij - a_ji)
+        int rev = 0;
+        while (rev < noi[jj] && nnl[jj*MAX_NUM_INTERACTIONS + rev] != i) ++rev;
+        const double Vi = m[i]/rho[i], Vj = mJ[jj]/rhoJ[jj];
+        const double *pij = psijTilde_xi[ii];
+        const double *pji = psijTilde_xi[jj*MAX_NUM_INTERACTIONS + rev];
+        const double aij[2] = { Vi*pij[0], Vi*pij[1] };
+        const double aji[2] = { Vj*pji[0], Vj*pji[1] };
+        const double *Si = Stc[i], *Sj = Stc[jj];
+        cmag[0] = (Si[0]*aij[0] + Si[1]*aij[1]) - (Sj[0]*aji[0] + Sj[1]*aji[1]);
+        cmag[1] = (Si[1]*aij[0] + Si[2]*aij[1]) - (Sj[1]*aji[0] + Sj[2]*aji[1]);
+        (void)FVec;
+    }
+    for (int side = 0; side < 0; ++side){   // eigen-projection branch disabled
+#else
     for (int side = 0; side < 2; ++side){
+#endif
         const int p = (side == 0) ? i : jj;
         // Side-0 reads `this`, side-1 the j-side binding (== `this` unless the
         // partner is a periodic image), so `p` indexes the right container.
