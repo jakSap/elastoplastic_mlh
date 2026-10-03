@@ -555,6 +555,15 @@ def order_fit(hs, errs):
 
 
 def verdict_test(RUNS, cand, test):
+    if test == "T1r":
+        # relaxed ring criterion (user priorities 10-03): one run at d0.05 that does not fall apart
+        r = _load_results(RUNS, cand, "T1").get("d0.05")
+        if not r:
+            return "-", ""
+        bad = (r.get("exit") != 0 or r.get("rip") or r.get("nfrag_max", 2) > 2
+               or r.get("main_frac_min", 1.0) < 0.995)
+        return ("FAIL" if bad else "PASS"), "d0.05 frag={} main_frac={:.4f}".format(
+            r.get("nfrag_max"), r.get("main_frac_min", float("nan")))
     if test == "P1obj":
         # P1 against the objective-Jaumann GIZMO control
         R = {g: dict(r, verdict=r["verdict_obj"], fails=r.get("fails_obj", []))
@@ -612,7 +621,7 @@ def a1_order(RUNS, cand):
 
 
 def scoreboard(RUNS, cands):
-    tests = ["T1", "T2", "P1", "P1obj", "A1", "W1i", "W1m", "W1t", "W2", "W3"]
+    tests = ["T1", "T1r", "T2", "P1", "P1obj", "A1", "W1i", "W1m", "W1t", "W2", "W3"]
     lines = ["| test | " + " | ".join(cands) + " |",
              "|---|" + "---|" * len(cands)]
     V = {c: {} for c in cands}
@@ -624,10 +633,10 @@ def scoreboard(RUNS, cands):
             cells.append("**{}** {}".format(v, why) if v != "-" else "-")
         lines.append("| {} | {} |".format(t, " | ".join(cells)))
     # fallback (user 10-03): every test passes, only A1 converges at first order
-    fb = [c for c in cands if all(V[c][t] == "PASS" for t in tests if t not in ("A1", "P1obj"))
+    fb = [c for c in cands if all(V[c][t] == "PASS" for t in tests if t not in ("A1", "P1obj", "T1", "T2"))
           and (V[c]["A1"] == "PASS" or ORDER_FALLBACK <= a1_order(RUNS, c) < ORDER_PASS)]
     lines.append("")
-    lines.append("Fallback (all tests PASS, A1 only at 1st order, p >= {}): {}".format(
+    lines.append("Accepted under the 10-03 priorities (P1 strict, waves order 2, T1r, A1 p >= {}): {}".format(
         ORDER_FALLBACK, ", ".join(fb) if fb else "none"))
     return "\n".join(lines)
 

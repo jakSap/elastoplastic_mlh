@@ -59,6 +59,107 @@ p6_tg2st2_m3_eps P1:w16
 p6_tg2st2_m3_eps P1:w24
 p7_r2_m3_eps P1:w16
 p7_r2_m3_eps P1:w24
+p7_r2_m3_eps P1:w10
+p7_r2_m3 P1:w10
+p7_r2_m3_eps A1:d0.05
+p7_r2_m3_eps A1:d0.035
+# waves for the leading rod family: nonlinearity switch (no Monaghan TC / SPH divergence in waves) + minmod residual
+p7_r2_m3_eps T1:d0.2
+wv7 W1t:n64
+wv7 W2:n64
+# p6_tg2st2_m3_eps passes P1 w16 and w24 strictly (both references): w10, disc
+p6_tg2st2_m3_eps P1:w10
+p6_tg2st2_m3_eps A1:d0.05
+p6_tg2st2_m3_eps A1:d0.035
+wv7 W3:n64
+# wave ablation from wa_nodiv (W1t c_err -1.4e-3) towards the leading rod config (W1t c_err -1.8e-2, growth)
+wb_dv6 W1t:n64
+# P1 strict pass at all rungs: p6_tg2st2_m3_eps -> ring d0.05 (long, ~1.5 h), disc ladder
+p6_tg2st2_m3_eps T1:d0.05
+p6_tg2st2_m3_eps T1:d0.2
+p6_tg2st2_m3_eps A1:d0.025
+# DV 7 sibling (disc +0.0039) needs w24 end clumps 8 -> 4
+p7_m35_eps P1:w24
+p7_t4_eps P1:w24
+wb_dv6 W2:n64
+wb_dv7 W1t:n64
+wb_dv7 W2:n64
+wb_nldiv W1t:n64
+wb_nldiv W2:n64
+wb_st W1t:n64
+wb_st W2:n64
+wb_eps W1t:n64
+# winner with DV 7 split thresholds: longitudinal 5e-3, transverse 8e-3 / 1.2e-2 (disc vs rods)
+p7l5_t8m3 A1:d0.05
+p7l5_t12m2 A1:d0.05
+# wave ablation 2 from wb_dv6 (good sound wave) towards the winner
+wc_mon W1t:n64
+wc_mon W2:n64
+wc_mon W3:n64
+wc_div W1t:n64
+wc_div W2:n64
+wc_div W3:n64
+wc_tg2 W1t:n64
+wc_tg2 W2:n64
+wc_tg2 W3:n64
+wc_eps W1t:n64
+wc_eps W2:n64
+wc_eps W3:n64
+wc_all W1t:n64
+wc_all W2:n64
+wc_all W3:n64
+p7l5_t8m3 P1:w16
+p7l5_t12m2 P1:w16
+p7l5_t8m3 P1:w24
+p7l5_t12m2 P1:w24
+wb_eps W2:n64
+wb_nolim W1t:n64
+wb_nolim W2:n64
+# review fixes (06:18): SPH div with periodic images, fresh gradients in kick B, NL switch on both TC channels, switch memory
+@sh ./mto.py run ref_chk --only P1:w10 --force -j 1 && ./bitcheck.py ref ref_chk P1 w10 && echo "(bit-identity after review fixes, 06:18)"
+p6_ghfix W1t:n64
+p6_ghfix W2:n64
+p6_ghfix W3:n64
+p6nl3 W1t:n64
+p6nl3 W2:n64
+p6nl3 W3:n64
+p6nl3m P1:w16
+p6nl3 P1:w16
+p6nl3m A1:d0.05
+p6nl3 A1:d0.05
+p6nl3m P1:w24
+p6nl3m P1:w10
+p6nl3 W1t:n128
+p6nl3 W2:n128
+p6nl3 W3:n128
+wb_dv6 W3:n64
+wb_dv6 W3:n128
+wb_fm2 W3:n64
+wb_fm2 W3:n128
+wb_fm2 W2:n64
+wb_dv6 W1t:n128
+wb_dv6 W2:n128
+# winner + nonlinearity switch: disc (TC off in the quiet disc) and waves, rods re-checked
+p6nlt A1:d0.05
+p6nlt P1:w16
+p6nl2 A1:d0.05
+p6nl2 P1:w16
+p6nl2 W1t:n64
+p6nl2 W2:n64
+p6nl2 W3:n64
+p6nlt P1:w24
+p6nl2 P1:w24
+p6nlt P1:w10
+p7_m35_eps A1:d0.05
+p7_t4_eps A1:d0.05
+p6_tg2st2_m3_eps A1:d0.0177
+wv7_nomm W1t:n64
+wv7_nomm W2:n64
+wv7 W1t:n128
+wv7 W2:n128
+wv7 W3:n128
+wv7 P1:w16
+wv7 A1:d0.05
 pm_obj0_tg2st2_eps P1:w24
 p6_tg2st2_m3 P1:w10 (rerun)
 p6_tg2st2_m3 A1:d0.05 (rerun)

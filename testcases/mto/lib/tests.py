@@ -61,7 +61,7 @@ def _body(test, gen, d, t_end, dump, box, c, mat, **genargs):
 def rungs_T1():   # colliding rings, contact at t ~ 7.5 (shift 5), rebound done by 180
     c = math.sqrt(1 + 4 / 3 * MU_BODY)
     return {"d{:g}".format(d): _body("T1", "rings", d, 180.0, 1.0, 20.0, c, till(MU_BODY))
-            for d in (0.2, 0.1, 0.08, 0.06)}
+            for d in (0.2, 0.1, 0.08, 0.06, 0.05)}
 
 
 def rungs_T2():   # offset blocks, contact t ~ 0.85

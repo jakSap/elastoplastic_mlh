@@ -337,7 +337,7 @@ void MeshlessScheme::run(){
 #if STORE_RAW_VGRAD
         particles->storeRawVelocityGradients();
 #if NL_SWITCH_TC || NL_SWITCH_DIVV
-        particles->compNonlinSwitch();
+        particles->compNonlinSwitch(timeStep);
 #endif
 #endif
 
@@ -409,7 +409,7 @@ void MeshlessScheme::run(){
 #if STORE_RAW_VGRAD
         particles->storeRawVelocityGradients();
 #if NL_SWITCH_TC || NL_SWITCH_DIVV
-        particles->compNonlinSwitch();
+        particles->compNonlinSwitch(timeStep);
 #endif
 #endif
 #if SLOPE_LIMITING
@@ -450,7 +450,11 @@ void MeshlessScheme::run(){
         // finalize=false: under EXPLICIT_VOL_FREEZE_RHO the working rho is left
         // frozen for the flux pass (GIZMO mode==0).
         Logger(DEBUG) << "      > Explicit-volume half-step kick A";
+        #if PERIODIC_BOUNDARIES
+        particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/false, &ghostParticles);
+#else
         particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/false);
+#endif
 #endif
 // #ifdef FIRST_ORDER_DEBUG
 //         // zero all gradients -> first-order (no spatial reconstruction, no half-step)
@@ -638,7 +642,11 @@ void MeshlessScheme::run(){
         // Half-step kick B: advance rhoExplicit by dt/2 using post-update gradients.
         // finalize=true: end-of-step swap rho <- rhoExplicit (GIZMO mode==1).
         Logger(DEBUG) << "      > Explicit-volume half-step kick B";
+        #if PERIODIC_BOUNDARIES
+        particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/true, &ghostParticles);
+#else
         particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/true);
+#endif
 #endif
 
         Logger(INFO) << "    > Moving particles";

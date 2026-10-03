@@ -700,6 +700,9 @@ void Particles::computeFabMonaghan(
     const Particles *gp
 #endif
 ){
+#if NL_SWITCH_TC
+    compBodyIds();
+#endif
 #if TENSILE_CORRECTION_LOCAL
     // Scale-free variant: the reference spacing is MEASURED per particle from
     // the volume the scheme itself carries, dp_i = (m_i/rho_i)^(1/DIM), instead
@@ -748,6 +751,13 @@ void Particles::computeFabMonaghan(
             // To be consistent with Monaghan, dont apply the power of n here.
             fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = kernelQ / kernelDeltaP;
 #endif
+#if NL_SWITCH_TC
+            // tensile correction only where the flow is nonlinear (always across the contact):
+            // f = PREFAC fab^POWER is scaled by w = max(phi_i, phi_j); the Riemann-channel push and the
+            // stress-flux damping both read this factor
+            if (bodyId[i] == bodyId[j])
+                fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] *= std::pow(std::max(phiNL[i], phiNL[j]), 1./TENSILE_CORRECTION_POWER);
+#endif
         }
     }
 
@@ -777,6 +787,13 @@ void Particles::computeFabMonaghan(
                 const double q = r / std::max(sml[i], gp->sml[j]);
                 fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn]
                         = Kernel::W(q, 1.) / kernelDeltaP;
+#endif
+#if NL_SWITCH_TC
+                {
+                    const int pa = gp->parent[j];
+                    if (bodyId[i] == bodyId[pa])
+                        fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn] *= std::pow(std::max(phiNL[i], phiNL[pa]), 1./TENSILE_CORRECTION_POWER);
+                }
 #endif
             }
         }
@@ -904,17 +921,7 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     }
 #endif // PERIODIC_BOUNDARIES
 #if DIM == 2
-#if NL_SWITCH_TC
-    // tensile correction only where the flow is nonlinear (and always across the contact)
-#if PERIODIC_BOUNDARIES
-    const int jNL = gp ? gp->parent[jj] : jj;
-#else
-    const int jNL = jj;
-#endif
-    const double f = (bodyId[i] != bodyId[jNL]) ? fIn : fIn*std::max(phiNL[i], phiNL[jNL]);
-#else
-    const double &f = fIn;
-#endif
+    const double &f = fIn;   // NL_SWITCH_TC acts on fabMonaghan (computeFabMonaghan): both channels
 #if CONTACT_FORCE_DIAG
     for (int k = 0; k < 8; ++k) cfdPair[k] = 0.;
 #endif
@@ -992,6 +999,19 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
         out[0] = dv[0] - wLin*0.5*((vxGradRaw[i][0] + vxGradRaw[jR][0])*dx + (vxGradRaw[i][1] + vxGradRaw[jR][1])*dy);
         out[1] = dv[1] - wLin*0.5*((vyGradRaw[i][0] + vyGradRaw[jR][0])*dx + (vyGradRaw[i][1] + vyGradRaw[jR][1])*dy);
+#if RECON_RESID_MINMOD
+        {
+            // minmod of residual and raw jump, normal and tangential parts separately: the residual of
+            // inexact gradients can oppose the raw jump (anti-dissipation, growing waves)
+            const double nx = dx*rinv, ny = dy*rinv;
+            const double rn = out[0]*nx + out[1]*ny, rt = -out[0]*ny + out[1]*nx;
+            const double qn = dv[0]*nx + dv[1]*ny,   qt = -dv[0]*ny + dv[1]*nx;
+            auto mm = [](double a, double b){ return (a*b > 0.) ? ((std::fabs(a) < std::fabs(b)) ? a : b) : 0.; };
+            const double mn = mm(rn, qn), mt = mm(rt, qt);
+            out[0] = mn*nx - mt*ny;
+            out[1] = mn*ny + mt*nx;
+        }
+#endif
 #else
         out[0] = WRSel[ii][2] - WLSel[ii][2];
         out[1] = WRSel[ii][3] - WLSel[ii][3];
@@ -2786,12 +2806,27 @@ void Particles::applyExplicitVolumeOverride(){
 }
 
 #if EXPLICIT_VOL_SPH_DIVV
-double Particles::sphDivV(int i){
+double Particles::sphDivV(int i, const Particles *gp){
     // GIZMO Particle_DivVel (density.c:334,514): -sum_j dW/dr (dp.dv)/r normalized
     // by the kernel-sum neighbour number (= omega, which includes the self term).
-    // The kernel normalization cancels between numerator and omega. No ghosts:
-    // EXPLICIT_VOL_INTEGRATION is guarded to the non-periodic path.
+    // The kernel normalization cancels between numerator and omega. Periodic images
+    // are included (SPH_DIVV_GHOSTS): omega counts them, so leaving them out cut div v
+    // near every seam of the periodic wave boxes (independent review 2026-10-03).
     double acc = 0.;
+#if PERIODIC_BOUNDARIES && SPH_DIVV_GHOSTS
+    if (gp)
+        for (int jn = 0; jn < noiGhosts[i]; ++jn){
+            const int g = nnlGhosts[i*MAX_NUM_GHOST_INTERACTIONS + jn];
+            const double dpx = x[i]-gp->x[g], dpy = y[i]-gp->y[g];
+            const double dvx = vx[i]-gp->vx[g], dvy = vy[i]-gp->vy[g];
+            const double r2 = dpx*dpx + dpy*dpy;
+            if (r2 <= 0.) continue;
+            const double r = std::sqrt(r2);
+            acc -= Kernel::WDr(r, sml[i]) * (dpx*dvx + dpy*dvy) / r;
+        }
+#else
+    (void)gp;
+#endif
     for (int jn = 0; jn < noi[i]; ++jn){
         const int j = nnl[i*MAX_NUM_INTERACTIONS + jn];
         const double dpx = x[i]-x[j], dpy = y[i]-y[j];
@@ -2810,7 +2845,7 @@ double Particles::sphDivV(int i){
 }
 #endif
 
-void Particles::integrateExplicitVolumeHalfStep(const double &dt, bool finalize){
+void Particles::integrateExplicitVolumeHalfStep(const double &dt, bool finalize, const Particles *gp){
     // Mirror of GIZMO master/kicks.c:308-318. Called twice per outer step
     // with dt = full_step / 2 to bracket the flux/updateState block.
     // No-op until the advected density has been seeded (see applyExplicitVolumeOverride):
@@ -2819,9 +2854,12 @@ void Particles::integrateExplicitVolumeHalfStep(const double &dt, bool finalize)
     for (int i = 0; i < N; ++i){
         // Advection step: d ln rho / dt = -div v.
 #if EXPLICIT_VOL_SPH_DIVV && NL_SWITCH_DIVV
-        double divV = phiNL[i]*sphDivV(i) + (1. - phiNL[i])*(vxGradRaw[i][0] + vyGradRaw[i][1]);
+        // kick A runs after the slope limiter (use the raw copy), kick B after the gradient refresh
+        // that limits only the stress (vxGrad is current and unlimited there)
+        const double divM = finalize ? (vxGrad[i][0] + vyGrad[i][1]) : (vxGradRaw[i][0] + vyGradRaw[i][1]);
+        double divV = phiNL[i]*sphDivV(i, gp) + (1. - phiNL[i])*divM;
 #elif EXPLICIT_VOL_SPH_DIVV
-        double divV = sphDivV(i);
+        double divV = sphDivV(i, gp);
 #else
         double divV = vxGrad[i][0] + vyGrad[i][1];
 #if DIM == 3
@@ -5067,8 +5105,8 @@ void Particles::contactForceReport(double simTime){
 #endif
 
 #if NL_SWITCH_TC || NL_SWITCH_DIVV
-void Particles::compNonlinSwitch(){
-    if (!phiNL) phiNL = new double[N];
+void Particles::compNonlinSwitch(const double &dt){
+    if (!phiNL) phiNL = new double[N]();
     for (int i=0; i<N; ++i){
         const double dxx = vxGradRaw[i][0], dyy = vyGradRaw[i][1], dxy = 0.5*(vxGradRaw[i][1] + vyGradRaw[i][0]);
         const double dmag = sqrt(dxx*dxx + dyy*dyy + 2.*dxy*dxy);
@@ -5080,7 +5118,10 @@ void Particles::compNonlinSwitch(){
         const double mu = 0.;
 #endif
         const double c = sqrt(std::max(K + PWAVE_MU_FAC*mu, 1e-300)/rho[i]);
-        phiNL[i] = std::min(1., std::max(0., sml[i]*dmag/c/RECON_FACE_DV6_S0 - 1.));
+        const double phiNow = std::min(1., std::max(0., sml[i]*dmag/c/RECON_FACE_DV6_S0 - 1.));
+        // memory (NL_SWITCH_TAU > 0): once deformed nonlinearly, a particle keeps the stabilisers for
+        // ~NL_SWITCH_TAU; 0 = no memory
+        phiNL[i] = (NL_SWITCH_TAU > 0.) ? std::max(phiNow, phiNL[i]*std::exp(-dt/std::max(NL_SWITCH_TAU, 1e-300))) : phiNow;
     }
 }
 #endif

@@ -160,12 +160,12 @@ public:
     /// `finalize` marks the end-of-step kick (GIZMO kicks.c:395, mode==1): under
     /// EXPLICIT_VOL_FREEZE_RHO only the finalize kick writes rho <- rhoExplicit, so
     /// the working density stays frozen through the hydro pass.
-    void integrateExplicitVolumeHalfStep(const double &dt, bool finalize = false);
+    void integrateExplicitVolumeHalfStep(const double &dt, bool finalize = false, const Particles *gp = nullptr);
 #if EXPLICIT_VOL_SPH_DIVV
     /// GIZMO's robust SPH kernel-weighted velocity divergence (Particle_DivVel,
     /// density.c:334/514): -sum_j dW/dr (dp.dv)/r normalized by omega (kernel-sum
     /// neighbour number). Surface-stable, unlike the MFM gradient trace.
-    double sphDivV(int i);
+    double sphDivV(int i, const Particles *gp = nullptr);
 #endif
 #endif
 
@@ -429,7 +429,7 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
 #if NL_SWITCH_TC || NL_SWITCH_DIVV
     /// Nonlinearity indicator phi in [0, 1] per particle (see NL_SWITCH_TC).
     double *phiNL { nullptr };
-    void compNonlinSwitch();
+    void compNonlinSwitch(const double &dt);
 #endif
 #if GNOG_PENALTY || RECON_FACE_DV == 5
     /// Radial-return factor of the last stress update (1 = elastic), per particle.

@@ -514,6 +514,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       and a separate threshold RECON_FACE_DV7_S0T for the transverse channel (the non-central raw
 //       friction that brakes rotation): the disc's elastic breathing can trigger 6 at low thresholds.
 #define RECON_FACE_DV7_S0T 5e-3
+// minmod of the residual (RECON_FACE_DV >= 3) and the raw jump, normal and tangential components:
+// keeps the residual dissipation from turning anti-dissipative where the gradients are inexact.
+#define RECON_RESID_MINMOD 0
 
 // Nonlinearity switch for the GIZMO-like stabilisers (2D). phi_i = min(1, max(0, s_i/RECON_FACE_DV6_S0 - 1))
 // with s_i = h_i |D_i| / c_i (raw gradients; D = sym(grad v) vanishes for rigid rotation), the same
@@ -526,6 +529,11 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //                     gradients): the SPH divergence spoils sound/P waves (c_err 8e-2 vs 1.4e-3).
 #define NL_SWITCH_TC 0
 #define NL_SWITCH_DIVV 0
+// memory time of the switch (0 = none): phi = max(phi_now, phi_old exp(-dt/TAU)), so a region keeps the
+// stabilisers for ~TAU after the nonlinear phase (rod end faces relax after separation, where |D| -> 0)
+#define NL_SWITCH_TAU 0.
+// periodic images in the SPH divergence of the explicit volume (bug fix; 0 = old, images missing)
+#define SPH_DIVV_GHOSTS 1
 
 // Feed the deviatoric TRACTION in the GIZMO elastic stress flux with the
 // spatially reconstructed face stress (Sij extrapolated to the shared face
