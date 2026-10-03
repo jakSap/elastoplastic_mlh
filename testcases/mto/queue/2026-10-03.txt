@@ -44,6 +44,30 @@ gz_res3_obj_c4 P1:w16
 gz_res3_obj_c6 P1:w16
 gz_res3_obj_c4 W2:n64
 gz_res3_obj_c6 W2:n64
+# 7'. P1 plane clumps and w16 asymmetry on the front-runner gz_res3_obj (02:25)
+gzo_mon P1:w16
+gzo_fmax7 P1:w16
+gzo_damp16 P1:w16
+gzo_pref8 P1:w16
+gzo_mon P1:w24
+gzo_fmax7 P1:w24
+gzo_damp16 P1:w24
+gzo_pref8 P1:w24
+# 8'. material viscosity on gz_res3_obj
+gzo_eta1 P1:w16
+gzo_eta3 P1:w16
+gzo_eta10 P1:w16
+gzo_eta3 P1:w24
+# waves of the front-runner gz_res3_obj (P-wave IC with K + mu under STRESS_2D_GIZMO)
+gz_res3_obj W1t:n64
+gz_res3_obj W2:n64
+gz_res3_obj W2:n128
+gz_res3_obj W2:n256
+gz_res3_obj W3:n64
+gz_res3_obj W3:n128
+gz_res3_obj W3:n256
+gz_res3_obj W1t:n128
+gz_res3_obj W1t:n256
 # 4. rings for gzbest (user: "probably passes the rings") -- long jobs, start them early
 gzbest T1:d0.08
 gzbest T1:d0.06
@@ -57,55 +81,55 @@ gz_res3_wtr P1:w24
 gz_res3_obj_wtr A1:d0.05
 gz_res3_obj_wtr P1:w10
 gz_res3_obj_wtr T1:d0.2
-gz_res3_obj_wtr T2:d0.025
-gz_res3_obj_wtr P1:w16
-gz_res3_obj_wtr P1:w24
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_obj_wtr T2:d0.025
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_obj_wtr P1:w16
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_obj_wtr P1:w24
 # waves for 1, 2, 5 (n64 is the smoke rung; order needs n128/n256)
-gz_res3 W2:n64
-gz_res3 W3:n64
-gz_res3_obj_wtr W2:n64
-gz_res3_obj_wtr W2:n128
-gz_res3_obj_wtr W2:n256
-gz_res3_obj_wtr W3:n64
-gz_res3_obj_wtr W3:n128
-gz_res3_obj_wtr W3:n256
-gz_res3_wtr W2:n64
-gz_res3_wtr W2:n128
-gz_res3_wtr W2:n256
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3 W2:n64
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3 W3:n64
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_obj_wtr W2:n64
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_obj_wtr W2:n128
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_obj_wtr W2:n256
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_obj_wtr W3:n64
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_obj_wtr W3:n128
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_obj_wtr W3:n256
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_wtr W2:n64
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_wtr W2:n128
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_wtr W2:n256
 # 6. disc ladder for 1 and 2 (AM order)
-gz_res3 A1:d0.035
-gz_res3 A1:d0.025
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3 A1:d0.035
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3 A1:d0.025
 gz_res3_obj A1:d0.035
 gz_res3_obj A1:d0.025
-gz_res3 A1:d0.0177
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3 A1:d0.0177
 gz_res3_obj A1:d0.0177
 # 7. P1 plane clumps: tensile-correction strength (gzall_tg = gzbest with the Monaghan TC: w16 52 vs limit 50)
-gzall_tg P1:w24
-gzall_tg P1:w10
-gz_fmax7 P1:w16
-gz_damp16 P1:w16
-gz_pref8 P1:w16
-gz_fmax7 P1:w24
-gz_damp16 P1:w24
-gz_pref8 P1:w24
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gzall_tg P1:w24
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gzall_tg P1:w10
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_fmax7 P1:w16
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_damp16 P1:w16
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_pref8 P1:w16
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_fmax7 P1:w24
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_damp16 P1:w24
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_pref8 P1:w24
 # 8. material viscosity sweep (approved 10-02) + GIZMO viscous controls
-gz_eta1 P1:w16
-gz_eta3 P1:w16
-gz_eta10 P1:w16
-gz_eta1 P1:w24
-gz_eta3 P1:w24
-gz_eta10 P1:w24
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_eta1 P1:w16
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_eta3 P1:w16
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_eta10 P1:w16
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_eta1 P1:w24
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_eta3 P1:w24
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_eta10 P1:w24
 @sh python3 gizmo/rod.py w16 w24 --eta 0.001 0.003 0.01 -j 1
 # 9. waves of gzbest, both residual channels, ELASTIC_FACE_MODE 2; energy work sign
 gzbest W2:n128
 gzbest W2:n256
 gzbest W3:n128
 gzbest W3:n256
-gz_res4_wtr A1:d0.05
-gz_res4_wtr P1:w10
-gz_res4_wtr W2:n64
-gz_res4_wtr W2:n128
-gz_res4_wtr W2:n256
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res4_wtr A1:d0.05
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res4_wtr P1:w10
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res4_wtr W2:n64
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res4_wtr W2:n128
+# (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res4_wtr W2:n256
 gz_fm2 W2:n64
 gz_fm2 W2:n128
 gz_fm2 W2:n256
