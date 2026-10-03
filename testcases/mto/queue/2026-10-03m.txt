@@ -1,0 +1,17 @@
+# DV 1, TC fully off, eta 0.1: all body testcases and the mu=1 waves
+dv1_eta1_notc_g2 T1:d0.08
+dv1_eta1_notc_g2 T1:d0.1
+dv1_eta1_notc_g2 A1:d0.025
+dv1_eta1_notc_g2 A1:d0.035
+dv1_eta1_notc_g2 A1:d0.05
+dv1_eta1_notc_g2 P1:w24
+dv1_eta1_notc_g2 P1:w16
+dv1_eta1_notc_g2 P1:w10
+dv1_eta1_notc_g2 T2:d0.025
+dv1_eta1_notc_g2 T2:d0.05
+dv1_eta1_notc_g2 W4p:n32
+dv1_eta1_notc_g2 W4p:n64
+dv1_eta1_notc_g2 W4p:n128
+dv1_eta1_notc_g2 W4s:n32
+dv1_eta1_notc_g2 W4s:n64
+dv1_eta1_notc_g2 W4s:n128

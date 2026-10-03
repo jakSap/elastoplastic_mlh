@@ -1,0 +1,9 @@
+# conservative GNOG (mode 2) with TC at 0 and 25%: rings, blocks, rods
+gzg2m2_tc0 T1:d0.08
+gzg2m2_tc25 T1:d0.08
+gzg2m2_tc0 T1:d0.1
+gzg2m2_tc0 P1:w16
+gzg2m2_tc0 T2:d0.025
+gzg2m2_tc25 T1:d0.1
+gzg2m2_tc25 P1:w16
+gzg2m2_tc25 T2:d0.025

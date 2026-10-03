@@ -43,6 +43,8 @@ TENSILE_CORRECTION_FMAX 0.5
 TENSILE_CORRECTION_DAMP 8.0
 TENSILE_CORRECTION_PREFAC 4.0
 TENSILE_CORRECTION_POWER 1.
+# deviatoric TC on the part that is tensile in the TOTAL principal stress (standard since 10-03)
+TC_TOTAL_STRESS_GATE 1
 # volume / surface
 EXPLICIT_VOL_INTEGRATION 1
 EXPLICIT_VOL_SPH_DIVV 0
@@ -57,3 +59,20 @@ FRAGMENTATION 0
 # diagnostics off
 TORQUE_DIAG 0
 AM_SELFTEST 0
+# Old parameter.h defaults, pinned when the mto winner fin1_g2_eta1_mn became the parameter.h default
+# (2026-10-03): keeps ref and every logged candidate bit-identical. Winner = candidates/fin1_g2_eta1_mn.flags.
+STRESS_2D_GIZMO 0
+RIEMANN_PSTAR_FLOOR 0
+STRESS_RATE_RAW_GRAD 0
+HLLC_WAVESPEED_GIZMO 0
+CONTACT_NO_TENSION 0
+SLOPE_LIMITER_EPS 0.
+RECON_FACE_DV6_S0 1e-3
+RECON_FACE_DV7_S0T 5e-3
+NL_SWITCH_TC 0
+NL_SWITCH_DIVV 0
+NL_SWITCH_FACE 0
+NL_SWITCH_TAU 0.
+GNOG_PENALTY 0
+MATERIAL_VISCOSITY 0
+VISC_MOMENT_NORM 0

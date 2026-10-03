@@ -1,0 +1,11 @@
+# DV 1 + eta 0.1, all body testcases
+dv1_eta1_all T1:d0.08
+dv1_eta1_all T1:d0.1
+dv1_eta1_all A1:d0.025
+dv1_eta1_all A1:d0.035
+dv1_eta1_all A1:d0.05
+dv1_eta1_all P1:w24
+dv1_eta1_all P1:w16
+dv1_eta1_all P1:w10
+dv1_eta1_all T2:d0.025
+dv1_eta1_all T2:d0.05

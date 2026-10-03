@@ -1,0 +1,6 @@
+# DV 1 scheme, tensile correction fully off (TENSILE_CORRECTION 0: no pressure repulsion, no deviatoric damping, no approach damping), physical viscosity eta 0.1 on the bodies and the mu = 1 waves
+RECON_FACE_DV 1
+TENSILE_CORRECTION 0
+MATERIAL_VISCOSITY 1
+@mat eta 0.1
+@mat eta 0.1 W4p W4s

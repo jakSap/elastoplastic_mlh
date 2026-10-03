@@ -119,6 +119,9 @@ TESTS = {
     "W1t": ("wave_e2", lambda: rungs_wave("W1t", "p", "tillotson", 0.0), "sound, Tillotson"),
     "W2": ("wave_e2", lambda: rungs_wave("W2", "p", "tillotson", MU_WAVE), "P-wave, mu = 6/13"),
     "W3": ("wave_e2", lambda: rungs_wave("W3", "s", "tillotson", MU_WAVE), "shear wave"),
+    # viscous-wave study (10-03): mu = 1 Tillotson, low-resolution ladder; eta via the candidate's @mat
+    "W4p": ("wave_e2", lambda: rungs_wave("W4p", "p", "tillotson", 1.0, ns=(32, 64, 128)), "P-wave, mu = 1"),
+    "W4s": ("wave_e2", lambda: rungs_wave("W4s", "s", "tillotson", 1.0, ns=(32, 64, 128)), "shear wave, mu = 1"),
 }
 
 # Tiers = which (test, rung) pairs a stage runs. Order inside a tier does not matter:
@@ -137,6 +140,7 @@ TIERS = {
     # W: wave order; n = 32 is diagnostic only, the order is judged on 64/128/256.
     "W": [(t, "n{}".format(n)) for t in ("W1i", "W1m", "W1t", "W2", "W3")
           for n in (64, 128, 256)],
+    "Wv": [(t, "n{}".format(n)) for t in ("W1i", "W4p", "W4s") for n in (32, 64, 128)],
     "Wq": [(t, "n{}".format(n)) for t in ("W1t", "W2", "W3") for n in (32, 64, 128)],
 }
 

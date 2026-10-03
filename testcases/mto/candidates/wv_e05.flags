@@ -1,0 +1,4 @@
+# wave study: wv_e0 + material viscosity eta 0.05 on the mu = 1 Tillotson P/S waves: does the viscous wave still converge (against the damped linear solution)?
+RECON_FACE_DV 1
+MATERIAL_VISCOSITY 1
+@mat eta 0.05 W4p W4s

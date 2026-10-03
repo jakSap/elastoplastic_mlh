@@ -490,6 +490,9 @@ Particles::~Particles() {
 #if NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE
     delete[] phiNL;
 #endif
+#if MATERIAL_VISCOSITY && VISC_MOMENT_NORM && DIM == 2
+    delete[] viscMom;
+#endif
 #if SPLIT_FACE_STRESS
     delete[] Stc;
 #endif
@@ -1344,7 +1347,12 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #else
             const int jG = jj;
 #endif
+#if VISC_MOMENT_NORM
+            const double eta = 2.*etaI*etaJ/(etaI + etaJ)
+                               / std::max(VISC_MOMENT_FLOOR, 0.5*(viscMom[i] + viscMom[jG]));
+#else
             const double eta = 2.*etaI*etaJ/(etaI + etaJ);
+#endif
             const double w = 0.25*(vyGradRaw[i][0] - vxGradRaw[i][1]
                                    + vyGradRaw[jG][0] - vxGradRaw[jG][1]);
             // r = x_i - x_j = (dx, dy); W r = w (-dy, dx)
@@ -5142,6 +5150,35 @@ void Particles::compNonlinSwitch(const double &dt){
         // memory (NL_SWITCH_TAU > 0): once deformed nonlinearly, a particle keeps the stabilisers for
         // ~NL_SWITCH_TAU; 0 = no memory
         phiNL[i] = (NL_SWITCH_TAU > 0.) ? std::max(phiNow, phiNL[i]*std::exp(-dt/std::max(NL_SWITCH_TAU, 1e-300))) : phiNow;
+    }
+}
+#endif
+
+#if MATERIAL_VISCOSITY && VISC_MOMENT_NORM && DIM == 2
+void Particles::compViscMoment(const Particles *gp){
+    if (!viscMom) viscMom = new double[N];
+    // the same pair weight |W'(r,h_i) + W'(r,h_j)|/2 as FNormT in addGizmoElasticStressFlux
+    auto term = [&](int i, double xj, double yj, double smlj, double Vj){
+        const double r = sqrt((x[i]-xj)*(x[i]-xj) + (y[i]-yj)*(y[i]-yj));
+        if (r <= 0.) return 0.;
+        return Vj*0.5*std::fabs(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, smlj))*r;
+    };
+    for (int i=0; i<N; ++i){
+        double s = 0.;
+        for (int jn=0; jn<noi[i]; ++jn){
+            const int j = nnl[i*MAX_NUM_INTERACTIONS + jn];
+            s += term(i, x[j], y[j], sml[j], m[j]/rho[j]);
+        }
+#if PERIODIC_BOUNDARIES
+        if (gp)
+            for (int jn=0; jn<noiGhosts[i]; ++jn){
+                const int g = nnlGhosts[i*MAX_NUM_GHOST_INTERACTIONS + jn];
+                s += term(i, gp->x[g], gp->y[g], gp->sml[g], gp->m[g]/gp->rho[g]);
+            }
+#else
+        (void)gp;
+#endif
+        viscMom[i] = s/DIM;
     }
 }
 #endif

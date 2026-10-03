@@ -426,6 +426,11 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     void compGnogPenalty(const double &dt, const Particles *gp = nullptr);
     void addGnogForce();
 #endif
+#if MATERIAL_VISCOSITY && VISC_MOMENT_NORM && DIM == 2
+    /// Discrete kernel moment M_i of the viscosity pair operator (see VISC_MOMENT_NORM).
+    double *viscMom { nullptr };
+    void compViscMoment(const Particles *gp = nullptr);
+#endif
 #if NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE
     /// Nonlinearity indicator phi in [0, 1] per particle (see NL_SWITCH_TC).
     double *phiNL { nullptr };

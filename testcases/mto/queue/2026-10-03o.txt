@@ -1,0 +1,26 @@
+# fin1_g2_eta1_mn (= fin1_g2_eta1 + VISC_MOMENT_NORM): body testcases and all waves (W4 already done)
+fin1_g2_eta1_mn T1:d0.08
+fin1_g2_eta1_mn T1:d0.1
+fin1_g2_eta1_mn A1:d0.025
+fin1_g2_eta1_mn A1:d0.035
+fin1_g2_eta1_mn A1:d0.05
+fin1_g2_eta1_mn P1:w24
+fin1_g2_eta1_mn P1:w16
+fin1_g2_eta1_mn P1:w10
+fin1_g2_eta1_mn T2:d0.025
+fin1_g2_eta1_mn W1i:n64
+fin1_g2_eta1_mn W1i:n128
+fin1_g2_eta1_mn W1i:n256
+fin1_g2_eta1_mn W1m:n64
+fin1_g2_eta1_mn W1m:n128
+fin1_g2_eta1_mn W1m:n256
+fin1_g2_eta1_mn W1t:n64
+fin1_g2_eta1_mn W1t:n128
+fin1_g2_eta1_mn W1t:n256
+fin1_g2_eta1_mn W2:n64
+fin1_g2_eta1_mn W2:n128
+fin1_g2_eta1_mn W2:n256
+fin1_g2_eta1_mn W3:n64
+fin1_g2_eta1_mn W3:n128
+fin1_g2_eta1_mn W3:n256
+fin1_g2_eta1_mn T1:d0.05

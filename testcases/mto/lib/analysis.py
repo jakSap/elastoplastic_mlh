@@ -303,6 +303,25 @@ def analyse_wave(D, meta, test):
         rho_bar = float(f.attrs["rho_bar"])
     Av = c * A
     comp = 0 if mode == "p" else 1
+    # Material viscosity (MATERIAL_VISCOSITY): the reference is the damped linear solution, not the undamped wave.
+    # The pair force is the Morris form MINUS the mean spin W r; to second order in r the spin term removes
+    # half of the Laplacian and adds half a grad div, so the operator is div(eta D) = eta/2 (lap v + grad div v)
+    # (D = sym grad v), not eta lap v: P mode eta k^2, S mode eta k^2 / 2 (measured 10-03: S rates 1.148,
+    # 1.052, 1.007 -> eta k^2/4rho = 0.987, P rates -> eta k^2/2rho = 1.974).
+    #   d/dt [v, s] = [[-G, ik/rho], [ik rho c^2, 0]] [v, s],  G = f eta k^2 / rho (f = 1 P, 1/2 S),  s0 = -rho c v0
+    # with the same initial condition; amplitude exp(-G t / 2), phase speed sqrt(c^2 - (G/2k)^2).
+    eta = float((meta.get("materials") or [{}])[0].get("eta", 0.0))
+    visc = eta > 0.
+    G = (1.0 if mode == "p" else 0.5) * eta * k * k / rho_bar
+
+    def exact_v(t):
+        """(amplitude, phase) of the exact v(x,t) = amp sin(kx + phase), amplitude as a fraction of Av."""
+        if not visc:
+            return 1.0, -k * c * t
+        Mat = np.array([[-G, 1j * k / rho_bar], [1j * k * rho_bar * c * c, 0.0]])
+        w, V = np.linalg.eig(Mat)
+        y = V @ (np.exp(w * t) * np.linalg.solve(V, np.array([1.0, -rho_bar * c], dtype=complex)))
+        return abs(y[0]), float(np.angle(y[0]))
     rows = []
     for t, path in snapshots(os.path.join(D, "output")):
         s = load(path, ("x", "v", "rho"))
@@ -311,15 +330,16 @@ def analyse_wave(D, meta, test):
                              np.sin(2 * k * x), np.cos(2 * k * x)])
         out = dict(t=t)
         for name, f, amp in (("v", s["v"][:, comp], Av), ("rho", s["rho"], rho_bar * A)):
-            if name == "rho" and mode == "s":
+            if name == "rho" and (mode == "s" or visc):
                 continue
             coef, *_ = np.linalg.lstsq(X, f, rcond=None)
             a = math.hypot(coef[1], coef[2])
             psi = math.atan2(coef[2], coef[1])          # f ~ a sin(kx + psi)
-            dpsi = (psi + k * c * t + math.pi) % (2 * math.pi) - math.pi
+            a_ex, psi_ex = exact_v(t) if name == "v" else (1.0, -k * c * t)
+            dpsi = (psi - psi_ex + math.pi) % (2 * math.pi) - math.pi
             mean = coef[0] if name == "v" else rho_bar
-            exact = mean + amp * np.sin(k * (x - c * t))
-            out[name] = dict(a=a / amp, dphi=dpsi, harm2=math.hypot(coef[3], coef[4]) / amp,
+            exact = mean + amp * a_ex * np.sin(k * x + psi_ex)
+            out[name] = dict(a=a / amp, a_ex=a_ex, dphi=dpsi, harm2=math.hypot(coef[3], coef[4]) / amp,
                              L1=float(np.mean(np.abs(f - exact)) / amp))
         rows.append(out)
     t = np.array([r["t"] for r in rows])
@@ -331,10 +351,13 @@ def analyse_wave(D, meta, test):
     res = dict(t_final=float(t[-1]),
                c_err=float(-fin["v"]["dphi"] / (k * c * t[-1])),
                freq_err=float(-slope / (k * c)),
-               damp_v=float(1 - fin["v"]["a"]), dphi_v=float(fin["v"]["dphi"]),
+               damp_v=float(fin["v"]["a_ex"] - fin["v"]["a"]), dphi_v=float(fin["v"]["dphi"]),
+               eta=eta, a_final=float(fin["v"]["a"]), a_exact=float(fin["v"]["a_ex"]),
+               gamma_meas=float(-2 * math.log(max(fin["v"]["a"], 1e-300)) / t[-1] / 2) if eta > 0 else 0.0,
+               gamma_th=float(G / 2),
                L1_v=float(fin["v"]["L1"]), harm2_v=float(fin["v"]["harm2"]),
                series=rows)
-    if mode == "p":
+    if mode == "p" and not visc:
         res.update(damp_rho=float(1 - fin["rho"]["a"]), L1_rho=float(fin["rho"]["L1"]))
     return res
 

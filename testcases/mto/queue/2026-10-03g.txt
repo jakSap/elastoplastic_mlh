@@ -1,0 +1,22 @@
+# wave convergence, ladder n32/64/128: ideal gas first, then mu=1 with eta 0, 0.05, 0.1
+wv_e0 W1i:n32
+wv_e0 W1i:n64
+wv_e0 W1i:n128
+wv_e0 W4p:n32
+wv_e0 W4p:n64
+wv_e0 W4p:n128
+wv_e0 W4s:n32
+wv_e0 W4s:n64
+wv_e0 W4s:n128
+wv_e05 W4p:n32
+wv_e05 W4p:n64
+wv_e05 W4p:n128
+wv_e05 W4s:n32
+wv_e05 W4s:n64
+wv_e05 W4s:n128
+wv_e1 W4p:n32
+wv_e1 W4p:n64
+wv_e1 W4p:n128
+wv_e1 W4s:n32
+wv_e1 W4s:n64
+wv_e1 W4s:n128

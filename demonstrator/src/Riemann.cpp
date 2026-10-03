@@ -10,13 +10,21 @@
 // Damp tensile (positive) principal components of a symmetric 3x3 deviatoric stress by
 // (1 - f). No closed-form eigenbasis in 3D, so use LAPACK (Helper). Reconstruct
 // S = sum_k lambda_k e_k e_k^T with the damped eigenvalues.
-static void dampTensilePrincipalComponents(double *S, const double &f){
+static void dampTensilePrincipalComponents(double *S, const double &f, const double &P){
     double norm2 = 0.;
     for (int a = 0; a < DIM*DIM; ++a) norm2 += S[a]*S[a];
     if (norm2 < 1e-300) return;
     double eval[DIM], evec[DIM*DIM];
     Helper::eigenDecompositionSym(S, eval, evec);
-    for (int k = 0; k < DIM; ++k) if (eval[k] > 0.) eval[k] *= 1. - f;
+    for (int k = 0; k < DIM; ++k) if (eval[k] > 0.){
+#if TC_TOTAL_STRESS_GATE
+        // only the part that is tensile in the TOTAL principal stress l_k - P (P = pressure, > 0 compressive)
+        const double sig = eval[k] - P;
+        if (sig > 0.) eval[k] -= f*std::min(eval[k], sig);
+#else
+        eval[k] *= 1. - f;
+#endif
+    }
     // eigenvector k is column k of evec: evec[k*DIM + component]
     for (int rr = 0; rr < DIM; ++rr){
         for (int cc = 0; cc < DIM; ++cc){
@@ -29,14 +37,25 @@ static void dampTensilePrincipalComponents(double *S, const double &f){
 #else // DIM == 2
 // Damp tensile (positive) principal components of a symmetric 2x2 deviatoric stress
 // by (1 - f), as in GIZMO's default eigenvalue branch (elastic_stress_tensor_force.h).
-static void dampTensilePrincipalComponents(double *S, const double &f){
+static void dampTensilePrincipalComponents(double *S, const double &f, const double &P){
     const double a = S[0], b = S[1], c = S[3];
+    // TC_TOTAL_STRESS_GATE: damp only the part of l_k that is tensile in the TOTAL principal stress l_k - P
+    // (P = pressure of this side, > 0 compressive), as in the GIZMO stress flux (Particles.cpp)
+    auto damp = [&](double l){
+        if (l <= 0.) return l;
+#if TC_TOTAL_STRESS_GATE
+        const double sig = l - P;
+        return (sig > 0.) ? l - f*std::min(l, sig) : l;
+#else
+        return l*(1. - f);
+#endif
+    };
     if (a*a + 2.*b*b + c*c < 1e-300) return;
     const double mean = .5*(a + c);
     const double dev = sqrt(.25*(a - c)*(a - c) + b*b);
     // (near-)isotropic tensor: both eigenvalues = mean, damp directly
     if (dev <= 1e-12 * std::fabs(mean)){
-        if (mean > 0.){ S[0] *= 1. - f; S[1] *= 1. - f; S[2] *= 1. - f; S[3] *= 1. - f; }
+        if (mean > 0.){ const double g = damp(mean)/mean; S[0] *= g; S[1] *= g; S[2] *= g; S[3] *= g; }
         return;
     }
     double l1 = mean + dev, l2 = mean - dev;
@@ -47,8 +66,8 @@ static void dampTensilePrincipalComponents(double *S, const double &f){
     const double n = sqrt(v1x*v1x + v1y*v1y);
     v1x /= n; v1y /= n;
     const double v2x = -v1y, v2y = v1x;
-    if (l1 > 0.) l1 *= 1. - f;
-    if (l2 > 0.) l2 *= 1. - f;
+    l1 = damp(l1);
+    l2 = damp(l2);
     S[0] = l1*v1x*v1x + l2*v2x*v2x;
     S[1] = l1*v1x*v1y + l2*v2x*v2y;
     S[2] = S[1];
@@ -155,8 +174,8 @@ Riemann::Riemann(double *WR, double *WL, double *vFrame, double *Aij, int i,
 #endif
 #if TENSILE_CORRECTION && TENSILE_CORRECTION_3
     // GIZMO's default 'artificial stress': damp tensile principal components everywhere.
-    dampTensilePrincipalComponents(SijR, tensileCorrectionFactor);
-    dampTensilePrincipalComponents(SijL, tensileCorrectionFactor);
+    dampTensilePrincipalComponents(SijR, tensileCorrectionFactor, WR[1]);
+    dampTensilePrincipalComponents(SijL, tensileCorrectionFactor, WL[1]);
 #endif
     // }
     double Lambda[DIM*DIM];

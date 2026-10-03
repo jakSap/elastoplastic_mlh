@@ -1,0 +1,4 @@
+# physical viscosity eta 0.8 on the rods (P1) with the standard RECON_FACE_DV 1 (transverse channel on the face jump), base flags only: does material viscosity alone tame the contact-plane clumps?
+RECON_FACE_DV 1
+MATERIAL_VISCOSITY 1
+@mat eta 0.8 P1

@@ -5,6 +5,13 @@
 #ifndef DEMONSTRATOR_PARAMETER_H
 #define DEMONSTRATOR_PARAMETER_H
 
+// Defaults since 2026-10-03 = the mto configuration that passes the whole testplan (rings, blocks,
+// Taylor rods, rotating disc with 2nd-order angular momentum, all waves 2nd order): candidate
+// testcases/mto/candidates/fin1_g2_eta1_mn.flags. Runtime part, not set here: smoothing-length
+// tolerance sml.tol 1e-10 (SML_TOL is only the fallback) and material viscosity eta 0.1 on the
+// bodies (config key `eta`, mu = 0.22 / 0.5 in code units). Flags documented as "0 = baseline"
+// below refer to the pre-10-03 baseline, which testcases/mto/flags/base.flags still pins.
+
 /// possible values 2 or 3 for 2D or 3D simulations
 #define DIM 2
 
@@ -34,7 +41,7 @@
 // the pairwise limiter clamps the full polynomial face value, so the
 // stabilization strategy of the 20260720 study carries over unchanged.
 // Only meaningful when GRADIENT_ORDER >= 2 (no-op otherwise).
-#define POLY_RECONSTRUCTION 1
+#define POLY_RECONSTRUCTION 0
 #define POLY_RECONSTRUCTION_ACTIVE (POLY_RECONSTRUCTION && SECOND_ORDER_GRADIENTS)
 // Stress-field polynomial additionally requires ELASTIC (S exists at all)
 // and !GIZMO_ELASTIC_FLUX (that path uses cell-centered stress -- the
@@ -171,7 +178,7 @@
 #define NNN_TARGET 32
 
 /// numerical tolerance for the Newton-Raphson root finding on f_SML
-#define SML_TOL 1e-3
+#define SML_TOL 1e-10
 
 /// maximum number of Newton-Raphson iterations
 #define SML_MAX_ITER 20
@@ -341,7 +348,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // the 27-run baseline, against 0.33-0.56 for the Monaghan form). It also stays
 // 1 under uniform stretching -- r and dp_i grow together -- so the correction
 // no longer fires on mere expansion, only on genuine pair collapse.
-#define TENSILE_CORRECTION_LOCAL 1
+#define TENSILE_CORRECTION_LOCAL 0
 
 // Upper clamp on the correction factor (TENSILE_CORRECTION_LOCAL only).
 // Without it the (1 - s) profile keeps growing as a pair collapses and turns
@@ -371,8 +378,8 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // (TENSILE_CORRECTION_LOCAL reuses both: PREFAC scales f, POWER sharpens the
 // (1 - s) profile. Because f == 0 on a good lattice, PREFAC may be raised well
 // above Monaghan's 0.2 without paying a permanent tax.)
-#define TENSILE_CORRECTION_PREFAC 4.0
-#define TENSILE_CORRECTION_POWER 1.
+#define TENSILE_CORRECTION_PREFAC 0.3
+#define TENSILE_CORRECTION_POWER 4.
 // Output per-particle average f_ab to h5 dump (requires TENSILE_CORRECTION)
 #if TENSILE_CORRECTION
 #define OUTPUT_FAB 0
@@ -507,13 +514,13 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       s = h_ij max(|D_i|, |D_j|) / c_ij with D = sym(grad v) (raw gradients, zero for rigid
 //       rotation): weight min(1, max(0, s/RECON_FACE_DV6_S0 - 1)), and 1 between bodies. Small-
 //       amplitude waves and rigid rotation see the residual only; impacts and plastic flow the raw jump.
-#define RECON_FACE_DV 1
+#define RECON_FACE_DV 7
 #define RECON_FACE_DV5_WIDTH 0.05
-#define RECON_FACE_DV6_S0 1e-3
+#define RECON_FACE_DV6_S0 5e-3
 //   7 = as 6 for the longitudinal channel (threshold RECON_FACE_DV6_S0; central, so it exerts no torque),
 //       and a separate threshold RECON_FACE_DV7_S0T for the transverse channel (the non-central raw
 //       friction that brakes rotation): the disc's elastic breathing can trigger 6 at low thresholds.
-#define RECON_FACE_DV7_S0T 5e-3
+#define RECON_FACE_DV7_S0T 8e-3
 // minmod of the residual (RECON_FACE_DV >= 3) and the raw jump, normal and tangential components:
 // keeps the residual dissipation from turning anti-dissipative where the gradients are inexact.
 #define RECON_RESID_MINMOD 0
@@ -527,12 +534,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //                     gives a wave-speed error that does not converge.
 //   NL_SWITCH_DIVV 1: explicit volume rate = phi * SPH divergence + (1 - phi) * matrix divergence (raw
 //                     gradients): the SPH divergence spoils sound/P waves (c_err 8e-2 vs 1.4e-3).
-#define NL_SWITCH_TC 0
-#define NL_SWITCH_DIVV 0
+#define NL_SWITCH_TC 1
+#define NL_SWITCH_DIVV 1
 //   NL_SWITCH_FACE 1: deviatoric stress flux on GIZMO's radial SPH area where phi = 1 (and across the
 //                     contact), on the MFM face A_ij (as ELASTIC_FACE_MODE 2) where phi = 0. Needs
 //                     ELASTIC_FACE_MODE 0.
-#define NL_SWITCH_FACE 0
+#define NL_SWITCH_FACE 1
 // amplitude part of the switch (1 = on): phi = max(phi_rate, clamp(s_amp/NL_AMP_S0 - 1, 0, 1)) with
 // s_amp = max(|P|/K, sqrt(J2)/mu), the strain amplitude. The rate part alone switched the stabilisers off
 // in quiet but finitely strained material (rod end faces after separation, stretched rings).
@@ -540,7 +547,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define NL_AMP_S0 1e-4
 // memory time of the switch (0 = none): phi = max(phi_now, phi_old exp(-dt/TAU)), so a region keeps the
 // stabilisers for ~TAU after the nonlinear phase (rod end faces relax after separation, where |D| -> 0)
-#define NL_SWITCH_TAU 0.
+#define NL_SWITCH_TAU 2.
 // periodic images in the SPH divergence of the explicit volume (bug fix; 0 = old, images missing)
 #define SPH_DIVV_GHOSTS 1
 
@@ -579,7 +586,22 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// ELASTIC_WORK_SIGN_FIX). Timestep: dt <= 0.25 rho L^2 / eta (GIZMO timestep.c).
 ///   0 = off (baseline, bit-identical)
 ///   1 = on (materials with eta > 0)
-#define MATERIAL_VISCOSITY 0
+#define MATERIAL_VISCOSITY 1
+
+/// Kernel-moment normalisation of the MATERIAL_VISCOSITY pair coefficient
+/// (2026-10-03, mto W4p/W4s). The pair force is eta * <operator> with
+///     <operator> = M_i (lap v - div W),  M_i = 1/DIM sum_j V_j |W'(r,h_i) + W'(r,h_j)|/2 r_ij,
+/// and M = 1 only for the continuum integral. On the wave lattice (h/dx 3.18,
+/// 21 neighbours) M = 0.99187 at every resolution, so the viscous damping of
+/// both modes is 0.8 % too weak and does not converge (measured 0.7 % at n64
+/// and n128, fin1_g2_eta1). Dividing the coefficient by the pair mean
+/// (M_i + M_j)/2 keeps the pair symmetric (momentum exact) and removes it.
+/// At a free surface M drops to ~0.5; VISC_MOMENT_FLOOR bounds the division
+/// there so a truncated support does not double the surface viscosity.
+///   0 = off (baseline, bit-identical)
+///   1 = coefficient / max(VISC_MOMENT_FLOOR, (M_i + M_j)/2)
+#define VISC_MOMENT_NORM 1
+#define VISC_MOMENT_FLOOR 0.95
 
 /// Sign of the work term of the GIZMO elastic stress flux. The pair force on i
 /// is +cmag (Fout momentum -= cmag), so the energy exchange must be +cmag . v_bar;
@@ -600,7 +622,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       grad v^T) - mu tr(grad v) I, traceless in 2D; P-wave modulus K + mu
 //       (eos.c:76 adds mu/rho to c^2), used for the HLL weights of the stress
 //       flux, the HLLC wave speeds and the timestep as well.
-#define STRESS_2D_GIZMO 0
+#define STRESS_2D_GIZMO 1
 #if STRESS_2D_GIZMO && DIM == 2
 #define PWAVE_MU_FAC 1.0
 #else
@@ -612,14 +634,14 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // 0), so the Riemann channel never pulls harder than the dummy shift, i.e. than the
 // smaller of the two particle pressures: separating faces get no velocity-driven
 // tension. 0 = unclipped (default), 1 = GIZMO floor.
-#define RIEMANN_PSTAR_FLOOR 0
+#define RIEMANN_PSTAR_FLOOR 1
 
 // Velocity gradient for the stress rate in the first stress half-kick.
 //   0 = the slope-LIMITED gradient (it is computed after slopeLimiter)
 //   1 = the unlimited gradient, as GIZMO (gradients.c:1214: "needs to be done
 //       before slope-limiting to use full velocity gradient information")
 // The second half-kick uses freshly computed, unlimited gradients either way.
-#define STRESS_RATE_RAW_GRAD 0
+#define STRESS_RATE_RAW_GRAD 1
 
 // Sign of the Jaumann rotation term in the stress rate (2D).
 //   0 = objective (co-rotational) rate dS/dt += W S - S W, W = (grad v - grad v^T)/2
@@ -631,7 +653,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //   0 = per side: S_L = v_L - a_L, S_R = v_R + a_R
 //   1 = GIZMO (reimann.h:541-542, Davis): S_L = min(v_L,v_R) - max(a_L,a_R),
 //       S_R = max(v_L,v_R) + max(a_L,a_R)
-#define HLLC_WAVESPEED_GIZMO 0
+#define HLLC_WAVESPEED_GIZMO 1
 
 #define STORE_RAW_VGRAD (MATERIAL_VISCOSITY || STRESS_RATE_RAW_GRAD || RECON_FACE_DV >= 3 || GNOG_PENALTY || NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE)
 
@@ -651,7 +673,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // (Riemann + stress flux) is removed; compression and the tangential part are kept.
 // The energy flux is corrected by the removed momentum flux times the mean pair
 // velocity. 0 = off, 1 = on.
-#define CONTACT_NO_TENSION 0
+#define CONTACT_NO_TENSION 1
 
 // Split-face form of the deviatoric stress divergence in the GIZMO stress flux
 // (option O3, Mars ELASTIC_FACE_MODE 3): pair force S~_i a_ij - S~_j a_ji with the
@@ -683,20 +705,23 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       every step (exact momentum, central -> exact AM), energy flux F.(v_i+v_j)/2 like every pair
 //       flux (exact total energy). Histories of pairs that left the stencil are dropped (the force
 //       vanishes there anyway with dW). 2D, periodic allowed.
-#define GNOG_PENALTY 0
+#define GNOG_PENALTY 2
 #define GNOG_XI 4.0
 #define GNOG_XI_PLASTIC 0.2
 
-// Gate of the deviatoric tensile correction in the GIZMO stress flux (2D).
+// Gate of the deviatoric tensile correction (2D GIZMO stress flux in Particles.cpp; the embedded-stress
+// Riemann solver, TENSILE_CORRECTION_3, in Riemann.cpp, 2D and 3D). The pressure part of the TC
+// (TENSILE_CORRECTION_1, both Riemann solvers) acts on tension only by construction.
 //   0 = GIZMO: every positive eigenvalue l_k of the DEVIATORIC stress S is damped
-//       by (1 - f), also where the total principal stress -P + l_k is compressive
+//       by (1 - f), also where the total principal stress l_k - P is compressive
 //       (measured on P1: 6-16 % of the correction acts under compression)
-//   1 = damp only the part of l_k that is tensile in the TOTAL stress:
-//       l_k -> l_k - f min(l_k, max(0, l_k - P))
+//   1 = damp only the part of l_k that is tensile in the TOTAL stress (P = pressure, > 0 compressive):
+//       l_k -> l_k - f min(l_k, max(0, l_k - P))       STANDARD since 2026-10-03 (user)
 //   2 = 1 for pairs of different bodies (contact: no particle crossing), 0 inside a body (lets
 //       the TC separate pairs collapsed under compression; the no-adhesion contact leaves the
-//       rod end faces in residual compression, where 1 never fires)
-#define TC_TOTAL_STRESS_GATE 0
+//       rod end faces in residual compression, where 1 never fires). GIZMO stress flux only;
+//       in Riemann.cpp it acts as 1.
+#define TC_TOTAL_STRESS_GATE 2
 
 // Angular-momentum TORQUE BUDGET instrumentation (WP0 of the 20260727 plan).
 //
@@ -851,7 +876,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// Relative round-off tolerance of the slope limiter's denominators (0 = absolute 1e-30, the old
 /// behaviour). With 0 the limiter breaks mirror symmetry in the first step of P1 (a surface particle
 /// keeps its density gradient, its mirror partner's is zeroed: exact 0 vs 1e-17 in the denominator).
-#define SLOPE_LIMITER_EPS 0.
+#define SLOPE_LIMITER_EPS 1e-10
 
 /// use pairwise limiter
 #define PAIRWISE_LIMITER 1
@@ -978,7 +1003,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///
 ///   0 = baseline (single-endpoint drift)
 ///   1 = trapezoidal drift, x += dt (v^n + v^{n+1})/2
-#define DRIFT_KDK 0
+#define DRIFT_KDK 1
 
 /// MUSCL half-step (time) predictor in the face reconstruction.
 ///
@@ -1272,7 +1297,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// error can be split into scheme error and limiter injection.
 ///   0 = off (baseline, bit-identical)
 ///   1 = on
-#define ENERGY_HALF_LIMIT 0
+#define ENERGY_HALF_LIMIT 1
 
 // Output per-particle condition number of the gradient estimation matrix E
 #define OUTPUT_CONDITION_NUMBER 1
@@ -1361,7 +1386,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// noisier at the free surface than the MFM trace and did not improve the rings, so
 /// it is left OFF by default; the working seed-fix run uses the MFM trace.
 /// 1 = GIZMO SPH estimator (faithful, noisier here); 0 = MFM gradient trace (DEFAULT).
-#define EXPLICIT_VOL_SPH_DIVV 0
+#define EXPLICIT_VOL_SPH_DIVV 1
 /// Number of initial steps to run on the kernel density before seeding the advected
 /// density. The demonstrator's t=0 kernel density is truncated by the incomplete
 /// startup NNS (bulk ~0.89) and self-heals by re-summation at step 1; seeding the

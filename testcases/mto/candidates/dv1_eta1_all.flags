@@ -1,0 +1,4 @@
+# DV 1 scheme with physical viscosity eta 0.1 on all body testcases (rings, blocks, rods, disc), current standard (TC_TOTAL_STRESS_GATE 1 from base.flags)
+RECON_FACE_DV 1
+MATERIAL_VISCOSITY 1
+@mat eta 0.1

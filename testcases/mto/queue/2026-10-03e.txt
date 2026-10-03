@@ -1,0 +1,5 @@
+# disc ladder, eta 0.1, RECON_FACE_DV 1
+dv1_eta1_disc A1:d0.05
+dv1_eta1_disc A1:d0.035
+dv1_eta1_disc A1:d0.025
+dv1_eta1_disc A1:d0.0177

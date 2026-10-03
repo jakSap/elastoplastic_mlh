@@ -1,0 +1,5 @@
+# viscosity sweep on RECON_FACE_DV 1 (base flags), eta 0.1-0.8, P1 w16
+dv1_eta1 P1:w16
+dv1_eta2 P1:w16
+dv1_eta4 P1:w16
+dv1_eta8 P1:w16

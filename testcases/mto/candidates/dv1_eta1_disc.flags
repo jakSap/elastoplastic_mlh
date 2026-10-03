@@ -1,0 +1,4 @@
+# physical viscosity eta 0.1 on the bodies (disc A1 included) with the standard RECON_FACE_DV 1: does the viscosity brake the rotation / change the AM order?
+RECON_FACE_DV 1
+MATERIAL_VISCOSITY 1
+@mat eta 0.1

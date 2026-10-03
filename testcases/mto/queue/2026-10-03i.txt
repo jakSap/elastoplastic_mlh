@@ -1,0 +1,16 @@
+# GNOG (mode 2, TC 0, same setup as the rings) on the waves
+gzg2m2_tc0 W1i:n32
+gzg2m2_tc0 W1i:n64
+gzg2m2_tc0 W1i:n128
+gzg2m2_tc0 W4p:n32
+gzg2m2_tc0 W4p:n64
+gzg2m2_tc0 W4p:n128
+gzg2m2_tc0 W4s:n32
+gzg2m2_tc0 W4s:n64
+gzg2m2_tc0 W4s:n128
+gzg2m2_tc0 W2:n64
+gzg2m2_tc0 W2:n128
+gzg2m2_tc0 W2:n256
+gzg2m2_tc0 W3:n64
+gzg2m2_tc0 W3:n128
+gzg2m2_tc0 W3:n256

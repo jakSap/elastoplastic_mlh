@@ -497,6 +497,13 @@ void MeshlessScheme::run(){
 #if SPLIT_FACE_STRESS
         particles->compParticleTensileStress();
 #endif
+#if MATERIAL_VISCOSITY && VISC_MOMENT_NORM && DIM == 2
+#if PERIODIC_BOUNDARIES
+        particles->compViscMoment(&ghostParticles);
+#else
+        particles->compViscMoment();
+#endif
+#endif
 #if GNOG_PENALTY
 #if PERIODIC_BOUNDARIES
         particles->compGnogPenalty(timeStep, &ghostParticles);

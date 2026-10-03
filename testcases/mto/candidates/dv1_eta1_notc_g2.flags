@@ -1,0 +1,7 @@
+# DV 1 scheme, tensile correction fully off (TENSILE_CORRECTION 0), conservative GNOG as its replacement (GNOG_PENALTY 2, xi 4 elastic / 0.2 plastic), physical viscosity eta 0.1 on the bodies and the mu = 1 waves
+RECON_FACE_DV 1
+TENSILE_CORRECTION 0
+GNOG_PENALTY 2
+MATERIAL_VISCOSITY 1
+@mat eta 0.1
+@mat eta 0.1 W4p W4s
