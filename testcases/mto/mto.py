@@ -26,6 +26,8 @@ Layout:
 """
 
 import argparse
+import fcntl
+from contextlib import contextmanager
 import concurrent.futures as cf
 import glob
 import hashlib
@@ -115,15 +117,40 @@ def set_flag(text, name, value):
     return pat.sub("#define {} {}".format(name, value), text, count=1)
 
 
+@contextmanager
+def _lock(path):
+    """Exclusive inter-process lock (parallel queue jobs share builds and ICs)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def _built(B, stamp):
+    st = os.path.join(B, "STAMP")
+    return (os.path.exists(os.path.join(B, "bin", "mlh")) and os.path.exists(st)
+            and open(st).read().strip() == stamp)
+
+
 def build(cand, variant, quiet=False):
     flags = cand_flags(cand, variant)
     stamp = hashlib.md5((source_hash() + json.dumps(flags, sort_keys=True)
                          + open(os.path.join(DEMO, "include", "parameter.h")).read())
                         .encode()).hexdigest()
     B = os.path.join(BUILDS, cand, variant)
-    binp = os.path.join(B, "bin", "mlh")
-    if os.path.exists(binp) and open(os.path.join(B, "STAMP")).read().strip() == stamp:
+    if _built(B, stamp):
         return B, stamp
+    with _lock(os.path.join(BUILDS, cand, variant + ".lock")):
+        if _built(B, stamp):                     # another job built it while we waited
+            return B, stamp
+        return _build_locked(cand, variant, flags, stamp, B, quiet)
+
+
+def _build_locked(cand, variant, flags, stamp, B, quiet):
+    binp = os.path.join(B, "bin", "mlh")
     if not quiet:
         print("build {}/{} ...".format(cand, variant), flush=True)
     shutil.rmtree(B, ignore_errors=True)
@@ -167,8 +194,13 @@ def make_ic(test, tag):
     import h5py
     r = T.rung(test, tag)
     path = ic_path(test, tag)
+    os.makedirs(ICS, exist_ok=True)
+    with _lock(os.path.join(ICS, ".lock")):
+        return _make_ic_locked(test, tag, r, path, gen, h5py)
+
+
+def _make_ic_locked(test, tag, r, path, gen, h5py):
     if not os.path.exists(path):
-        os.makedirs(ICS, exist_ok=True)
         if r["gen"] == "wave":
             gen.wave(path, **r["genargs"])
         else:
