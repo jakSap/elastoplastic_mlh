@@ -1,0 +1,75 @@
+# mto queue part 3 (05:55): symmetry seed with the runtime sml.tol; viscosity (symmetric) + contact-only TC gate (clean end faces)
+pm_obj0_st2 P1:w16
+pm_obj0_tg2st2 P1:w16
+p6_tg2st2 P1:w16
+pv5_e30_tg2 P1:w16
+pv4_e30_tg2 P1:w16
+p6_e30_tg2 P1:w16
+p6_e10_tg2 P1:w16
+# first strict P1 w16 pass: pm_obj0_tg2st2 (DV 0) -> w24/w10; DV 6 variant (A1-compatible) needs final clumps 8 -> 4
+pm_obj0_tg2st2 P1:w24
+pm_obj0_tg2st2 P1:w10
+p6_tg2st2 P1:w24
+p6_tg2st2_G2 P1:w16
+p6_tg2st2_s2 P1:w16
+p6_tg2st2_e10 P1:w16
+p6_tg2st2 A1:d0.05
+# nonlinearity switch on TC + SPH divergence (nl6): rods, waves, disc
+# strict w16 pass p6_tg2st2_s2 (DV 6, s0 2e-3): disc first (does s0 2e-3 brake the disc?), then w24/w10; s0 3e-3
+p6_tg2st2_s2 A1:d0.05
+p6_tg2st2_s3 A1:d0.05
+# where does the 1e-3 mirror asymmetry before impact come from? dumps every 0.002 up to t 0.04
+@sh ./symtest.py ref w16 && ./symtest.py pm_obj0 w16
+p6_tg2st2_s3 P1:w16
+p6_tg2st2_s2 P1:w24
+p6_tg2st2_s2 P1:w10
+nl6 P1:w16
+nl6 W1t:n64
+nl6 W2:n64
+nl6 W3:n64
+nl6 A1:d0.05
+nl6 W2:n128
+# first-step mirror asymmetry (surface particles accelerate 0.0025 vs 0.0015 by index): which component?
+@sh ./symtest.py sy_nolim w16 0.004 0.002 && ./symtest.py sy_nopw w16 0.004 0.002 && ./symtest.py sy_notp w16 0.004 0.002
+@sh ./symtest.py sy_nofs w16 0.004 0.002 && ./symtest.py sy_ref_nocnt w16 0.004 0.002
+nl6 W3:n128
+nl6 W1t:n128
+@sh ./mto.py run ref_chk --only P1:w10 --force -j 1 && ./bitcheck.py ref ref_chk P1 w10 && echo "(bit-identity after NL switch, 06:00)"
+@sh ./mto.py run chk_obj --only P1:w10 --force -j 1 && ./bitcheck.py gz_res3_obj chk_obj P1 w10 && echo "(bit-identity after NL switch, 06:00)"
+p6_tg2st2_m3 P1:w16
+# DV 7: longitudinal switched low (torque-free), transverse high: rods + disc together?
+p7_r2 A1:d0.05
+p7_r2 P1:w16
+p7_r1 A1:d0.05
+p7_r1 P1:w16
+p7_r2 P1:w10
+p7_r2 P1:w24
+pm0_tg2st2_m3 P1:w16
+# slope limiter breaks the mirror symmetry (first step 1e-3 -> 2e-16 without it): rods without limiter
+pm0_tg2_nl P1:w16
+# strict w16 pass p6_tg2st2_m3 (DV 6 s0 5e-3, Monaghan 0.3, gate 2, sml.tol): w24, w10, disc; DV 7 + m3; no limiter
+p6_tg2st2_m3 P1:w24
+p6_tg2st2_m3 P1:w10
+p6_tg2st2_m3 A1:d0.05
+p7_r2_m3 P1:w16
+p6m3_nl P1:w16
+# round-off-safe limiter (symmetric first step): rods w16/w24 for the three best; re-runs after the 06:00 build failure
+p6_tg2st2_m3_eps P1:w16
+@sh ./mto.py run ref_chk --only P1:w10 --force -j 1 && ./bitcheck.py ref ref_chk P1 w10 && echo "(bit-identity after DV 7, NL switch, limiter EPS, 06:05)"
+p6_tg2st2_m3_eps P1:w24
+p7_r2_m3_eps P1:w16
+p7_r2_m3_eps P1:w24
+pm_obj0_tg2st2_eps P1:w24
+p6_tg2st2_m3 P1:w10 (rerun)
+p6_tg2st2_m3 A1:d0.05 (rerun)
+p7m3_nl P1:w16
+p6m3_nl P1:w24
+p7m3_nl P1:w24
+p6_tg2_nl P1:w16
+p7_r2_nl P1:w16
+pm0_tg2_nl P1:w24
+p6_tg2_nl P1:w24
+p6_tg2_nl A1:d0.05
+p6_tg2_nl W2:n64
+p6_tg2_nl W1t:n64
+pm0_tg2st2_m3 P1:w10

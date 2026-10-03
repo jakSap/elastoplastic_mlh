@@ -336,6 +336,9 @@ void MeshlessScheme::run(){
         particles->updateGhostGradients(ghostParticles);
 #if STORE_RAW_VGRAD
         particles->storeRawVelocityGradients();
+#if NL_SWITCH_TC || NL_SWITCH_DIVV
+        particles->compNonlinSwitch();
+#endif
 #endif
 
 #if SLOPE_LIMITING
@@ -405,6 +408,9 @@ void MeshlessScheme::run(){
 #endif // ELASTIC
 #if STORE_RAW_VGRAD
         particles->storeRawVelocityGradients();
+#if NL_SWITCH_TC || NL_SWITCH_DIVV
+        particles->compNonlinSwitch();
+#endif
 #endif
 #if SLOPE_LIMITING
         // TODO: check how to properly limit gradiens

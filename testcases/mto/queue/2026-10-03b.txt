@@ -1,0 +1,4 @@
+# mto queue part 2 (2026-10-03 05:50): symmetry seed (SML_TOL), then the clean-end-face TC gate on symmetric runs
+pm_obj0_st P1:w16
+pm_obj0_tg2st P1:w16
+p6_tg2st P1:w16

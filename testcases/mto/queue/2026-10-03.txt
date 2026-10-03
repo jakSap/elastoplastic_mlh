@@ -233,6 +233,25 @@ pm_obj6s5 A1:d0.05
 pm_gz0 P1:w16
 pm_obj6s20 A1:d0.05
 # 4l. clump fixes on the DV 6 (s0 5e-3) base: rods like DV 0, disc -0.95 % at d0.05
+# 4b. wave ablation (report tipsntricks-abgleich test 3): GIZMO switches spoil sound/P waves; floor suspected
+wa_nofl W1t:n64
+wa_nofl W2:n64
+wa_nodav W1t:n64
+wa_nodav W2:n64
+wa_nodiv W1t:n64
+wa_nodiv W2:n64
+# 4m. the same three switches on the DV 6 base: rods w16 + waves
+p6_nofl P1:w16
+p6_nodiv P1:w16
+p6_nodav P1:w16
+# 4n. end-face clumps sit in residual compression: TC gate only across the contact (mode 2)
+p6_tg2 P1:w16
+pm_obj0_tg2 P1:w16
+p6_tg2G2 P1:w16
+p6_nofl W1t:n64
+p6_nodiv W1t:n64
+p6_nofl W2:n64
+p6_nodiv W2:n64
 p6_G2 P1:w16
 p6_G2p1 P1:w16
 p6_m3 P1:w16
@@ -253,13 +272,6 @@ pv5_e30 P1:w16
 pm_obj5 W2:n128
 pm_obj5 W3:n128
 pm_obj0 W3:n64
-# 4b. wave ablation (report tipsntricks-abgleich test 3): GIZMO switches spoil sound/P waves; floor suspected
-wa_nofl W1t:n64
-wa_nofl W2:n64
-wa_nodav W1t:n64
-wa_nodav W2:n64
-wa_nodiv W1t:n64
-wa_nodiv W2:n64
 gz_res4 W2:n128
 pm_obj4 W2:n64
 pm_obj4 W2:n128

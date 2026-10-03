@@ -7,7 +7,7 @@
 #include <fstream>
 #include <iomanip>
 #endif
-#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5
+#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC
 #include <vector>
 #include <numeric>
 #include <functional>
@@ -478,7 +478,7 @@ Particles::~Particles() {
 #if CONTACT_FORCE_DIAG
     delete[] cfdSide;
 #endif
-#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5
+#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC
     delete[] bodyId;
 #endif
 #if GNOG_PENALTY
@@ -486,6 +486,9 @@ Particles::~Particles() {
 #endif
 #if GNOG_PENALTY || RECON_FACE_DV == 5
     delete[] yieldGam;
+#endif
+#if NL_SWITCH_TC || NL_SWITCH_DIVV
+    delete[] phiNL;
 #endif
 #if SPLIT_FACE_STRESS
     delete[] Stc;
@@ -829,7 +832,7 @@ void Particles::compParticleTensileStress(){
 // Port of GIZMO solids/elastic_stress_tensor_force.h (eigenvalue branch), in the
 // demonstrator's lab frame. Computed once per pair (i<jj); the flux-symmetry copy
 // negates it for jj, matching GIZMO's antisymmetric +i/-j application.
-void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f, double *Fout
+void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &fIn, double *Fout
 #if RECON_FACE_TRACTION
                                           , const double *SfaceI, const double *SfaceJ
 #endif
@@ -901,6 +904,17 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     }
 #endif // PERIODIC_BOUNDARIES
 #if DIM == 2
+#if NL_SWITCH_TC
+    // tensile correction only where the flow is nonlinear (and always across the contact)
+#if PERIODIC_BOUNDARIES
+    const int jNL = gp ? gp->parent[jj] : jj;
+#else
+    const int jNL = jj;
+#endif
+    const double f = (bodyId[i] != bodyId[jNL]) ? fIn : fIn*std::max(phiNL[i], phiNL[jNL]);
+#else
+    const double &f = fIn;
+#endif
 #if CONTACT_FORCE_DIAG
     for (int k = 0; k < 8; ++k) cfdPair[k] = 0.;
 #endif
@@ -951,8 +965,11 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
     const double dv[2] = { vx[i]-vxJ[jj], vy[i]-vyJ[jj] };
     const double vdotr = dv[0]*dx + dv[1]*dy;
-#if RECON_FACE_DV == 6
-    double wLinSw = 1.;
+#if RECON_FACE_DV >= 6
+    double wLinSw = 1.;            // weight of the linear prediction used by faceJump (6, 7)
+#endif
+#if RECON_FACE_DV == 7
+    double wLinR = 1., wLinT = 1.; // longitudinal / transverse weights (7)
 #endif
 #if RECON_FACE_DV
     // Velocity jump of the HLL channels: the reconstructed face jump (1, 2) or the
@@ -968,7 +985,7 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         // raw jump between bodies and in yielding material, residual elsewhere
         const double wLin = (bodyId[i] != bodyId[jR]) ? 0. :
             1. - std::min(1., std::max(0., (1. - std::min(yieldGam[i], yieldGam[jR]))/RECON_FACE_DV5_WIDTH));
-#elif RECON_FACE_DV == 6
+#elif RECON_FACE_DV >= 6
         const double wLin = wLinSw;   // set below, once the wave speeds are known
 #else
         const double wLin = 1.;
@@ -995,7 +1012,7 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #endif
     const double ci  = sqrt((Ki + PWAVE_MU_FAC*mui)/rhoi), cj  = sqrt((Kj + PWAVE_MU_FAC*muj)/rhoj);
     const double cTi = sqrt(mui/rhoi),               cTj = sqrt(muj/rhoj);
-#if RECON_FACE_DV == 6
+#if RECON_FACE_DV >= 6
     {
         // raw jump between bodies and where the strain rate is large (rigid rotation has D = 0)
 #if PERIODIC_BOUNDARIES
@@ -1009,6 +1026,10 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         };
         const double sSw = 0.5*(sml[i] + smlJ[jj]) * std::max(dmag(i), dmag(jS)) / (0.5*(ci + cj));
         wLinSw = (bodyId[i] != bodyId[jS]) ? 0. : 1. - std::min(1., std::max(0., sSw/RECON_FACE_DV6_S0 - 1.));
+#if RECON_FACE_DV == 7
+        wLinR = wLinSw;
+        wLinT = (bodyId[i] != bodyId[jS]) ? 0. : 1. - std::min(1., std::max(0., sSw/RECON_FACE_DV7_S0T - 1.));
+#endif
     }
 #endif
 #if WTR_LIMITER
@@ -1110,7 +1131,15 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
             const double sigK = l[kk] - ((side == 0) ? P[i] : PJ[jj]);   // total principal stress
 #endif
             if (l[kk] > 0.){
-#if TC_TOTAL_STRESS_GATE
+#if TC_TOTAL_STRESS_GATE == 2
+                // gate only across the contact (pairs of different bodies); GIZMO form inside a body
+#if PERIODIC_BOUNDARIES
+                const int jB = gp ? gp->parent[jj] : jj;
+#else
+                const int jB = jj;
+#endif
+                damp = (bodyId[i] != bodyId[jB]) ? ((sigK > 0.) ? f*std::min(1., sigK/l[kk]) : 0.) : f;
+#elif TC_TOTAL_STRESS_GATE
                 damp = (sigK > 0.) ? f*std::min(1., sigK/l[kk]) : 0.;
 #else
                 damp = f;
@@ -1148,6 +1177,14 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     // (algebraically identical to the wt_rt form below when both use the same dv),
     // so the two channels can be sourced independently.
     {
+#if RECON_FACE_DV == 7
+        // longitudinal channel (central, torque-free) and transverse channel switched separately
+        double dvL[2], dvF[2];
+        wLinSw = wLinR; faceJump(dvL);
+        wLinSw = wLinT; faceJump(dvF);
+        const double projF = (dvF[0]*dx + dvF[1]*dy) * rinv * rinv;
+        const double projR = (dvL[0]*dx + dvL[1]*dy) * rinv * rinv;
+#else
         double dvF[2];
         faceJump(dvF);
         const double projF = (dvF[0]*dx + dvF[1]*dy) * rinv * rinv;
@@ -1155,6 +1192,7 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
         const double projR = projF;                 // longitudinal on the jump too
 #else
         const double projR = vdotr * rinv * rinv;   // longitudinal keeps raw form
+#endif
 #endif
         cmag[0] -= wt_r*projR*dx + wt_t*(dvF[0] - projF*dx);
         cmag[1] -= wt_r*projR*dy + wt_t*(dvF[1] - projF*dy);
@@ -2780,7 +2818,9 @@ void Particles::integrateExplicitVolumeHalfStep(const double &dt, bool finalize)
     if (!explicitVolInitialized) return;
     for (int i = 0; i < N; ++i){
         // Advection step: d ln rho / dt = -div v.
-#if EXPLICIT_VOL_SPH_DIVV
+#if EXPLICIT_VOL_SPH_DIVV && NL_SWITCH_DIVV
+        double divV = phiNL[i]*sphDivV(i) + (1. - phiNL[i])*(vxGradRaw[i][0] + vyGradRaw[i][1]);
+#elif EXPLICIT_VOL_SPH_DIVV
         double divV = sphDivV(i);
 #else
         double divV = vxGrad[i][0] + vyGrad[i][1];
@@ -4221,8 +4261,13 @@ void Particles::slopeLimiter(double *f, double (*grad)[DIM],
         // update gradients if necessary
         double denomMax = psiMaxMid - f[i];
         double denomMin = f[i] - psiMinMid;
-        double alphaMax = (std::fabs(denomMax) > 1e-30) ? std::fabs((psiMaxNgb - f[i]) / denomMax) : 1.0;
-        double alphaMin = (std::fabs(denomMin) > 1e-30) ? std::fabs((f[i] - psiMinNgb) / denomMin) : 1.0;
+        // round-off-safe: a denominator below EPS of the local field scale counts as zero (exact
+        // zero vs 1e-17 must not decide whether a gradient is kept: mirror partners differ there).
+        // EPS = 0 reproduces the old absolute threshold 1e-30 exactly.
+        const double scale = std::max(std::fabs(f[i]), std::max(std::fabs(psiMaxNgb), std::fabs(psiMinNgb)));
+        const double dTol = std::max(1e-30, SLOPE_LIMITER_EPS*scale);
+        double alphaMax = (std::fabs(denomMax) > dTol) ? std::fabs((psiMaxNgb - f[i]) / denomMax) : 1.0;
+        double alphaMin = (std::fabs(denomMin) > dTol) ? std::fabs((f[i] - psiMinNgb) / denomMin) : 1.0;
 
         //if(i==6){
         //    Logger(DEBUG) << "alphaMin = " << alphaMin << ", alphaMax = " << alphaMax
@@ -5021,6 +5066,25 @@ void Particles::contactForceReport(double simTime){
 }
 #endif
 
+#if NL_SWITCH_TC || NL_SWITCH_DIVV
+void Particles::compNonlinSwitch(){
+    if (!phiNL) phiNL = new double[N];
+    for (int i=0; i<N; ++i){
+        const double dxx = vxGradRaw[i][0], dyy = vyGradRaw[i][1], dxy = 0.5*(vxGradRaw[i][1] + vyGradRaw[i][0]);
+        const double dmag = sqrt(dxx*dxx + dyy*dyy + 2.*dxy*dxy);
+#if EOS == 1 || EOS == 2
+        const double K = MeshlessEOS->EOSBulkModulus(matId[i], rho[i], P[i]);
+        const double mu = MeshlessEOS->EOSShearModulus(matId[i]);
+#else
+        const double K = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
+        const double mu = 0.;
+#endif
+        const double c = sqrt(std::max(K + PWAVE_MU_FAC*mu, 1e-300)/rho[i]);
+        phiNL[i] = std::min(1., std::max(0., sml[i]*dmag/c/RECON_FACE_DV6_S0 - 1.));
+    }
+}
+#endif
+
 #if GNOG_PENALTY || RECON_FACE_DV == 5
 void Particles::ensureYieldGam(){
     if (yieldGam) return;
@@ -5029,7 +5093,7 @@ void Particles::ensureYieldGam(){
 }
 #endif
 
-#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5
+#if CONTACT_NO_TENSION || GNOG_PENALTY || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC
 void Particles::compBodyIds(){
     if (!bodyId){
         // bodies = connected components, link r < 1.5 x the smaller nearest-neighbour distance
@@ -5194,7 +5258,7 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
 #if USE_HLLC
     double n_unit[DIM];
 #endif
-#if CONTACT_NO_TENSION || RECON_FACE_DV >= 5
+#if CONTACT_NO_TENSION || RECON_FACE_DV >= 5 || TC_TOTAL_STRESS_GATE == 2 || NL_SWITCH_TC
     compBodyIds();
 #endif
 #if CONTACT_FORCE_DIAG

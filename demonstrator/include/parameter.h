@@ -510,6 +510,22 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #define RECON_FACE_DV 1
 #define RECON_FACE_DV5_WIDTH 0.05
 #define RECON_FACE_DV6_S0 1e-3
+//   7 = as 6 for the longitudinal channel (threshold RECON_FACE_DV6_S0; central, so it exerts no torque),
+//       and a separate threshold RECON_FACE_DV7_S0T for the transverse channel (the non-central raw
+//       friction that brakes rotation): the disc's elastic breathing can trigger 6 at low thresholds.
+#define RECON_FACE_DV7_S0T 5e-3
+
+// Nonlinearity switch for the GIZMO-like stabilisers (2D). phi_i = min(1, max(0, s_i/RECON_FACE_DV6_S0 - 1))
+// with s_i = h_i |D_i| / c_i (raw gradients; D = sym(grad v) vanishes for rigid rotation), the same
+// indicator as RECON_FACE_DV 6. Small-amplitude waves and rigid rotation have phi = 0, impacts and
+// plastic flow phi = 1.
+//   NL_SWITCH_TC   1: tensile-correction factor f scaled by max(phi_i, phi_j) inside a body (full
+//                     across bodies): the Monaghan form damps on a perfect lattice too (f ~ 0.2), which
+//                     gives a wave-speed error that does not converge.
+//   NL_SWITCH_DIVV 1: explicit volume rate = phi * SPH divergence + (1 - phi) * matrix divergence (raw
+//                     gradients): the SPH divergence spoils sound/P waves (c_err 8e-2 vs 1.4e-3).
+#define NL_SWITCH_TC 0
+#define NL_SWITCH_DIVV 0
 
 // Feed the deviatoric TRACTION in the GIZMO elastic stress flux with the
 // spatially reconstructed face stress (Sij extrapolated to the shared face
@@ -600,7 +616,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       S_R = max(v_L,v_R) + max(a_L,a_R)
 #define HLLC_WAVESPEED_GIZMO 0
 
-#define STORE_RAW_VGRAD (MATERIAL_VISCOSITY || STRESS_RATE_RAW_GRAD || RECON_FACE_DV >= 3 || GNOG_PENALTY)
+#define STORE_RAW_VGRAD (MATERIAL_VISCOSITY || STRESS_RATE_RAW_GRAD || RECON_FACE_DV >= 3 || GNOG_PENALTY || NL_SWITCH_TC || NL_SWITCH_DIVV)
 
 // Limited longitudinal dissipation of the GIZMO stress flux (option O5, Zhang-Hu-
 // Adams / Rezavand form): the impedance speeds of wt_r are replaced by
@@ -660,6 +676,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       (measured on P1: 6-16 % of the correction acts under compression)
 //   1 = damp only the part of l_k that is tensile in the TOTAL stress:
 //       l_k -> l_k - f min(l_k, max(0, l_k - P))
+//   2 = 1 for pairs of different bodies (contact: no particle crossing), 0 inside a body (lets
+//       the TC separate pairs collapsed under compression; the no-adhesion contact leaves the
+//       rod end faces in residual compression, where 1 never fires)
 #define TC_TOTAL_STRESS_GATE 0
 
 // Angular-momentum TORQUE BUDGET instrumentation (WP0 of the 20260727 plan).
@@ -812,6 +831,10 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 
 /// slope limiting parameter, ignored when `SLOPE_LIMITING` is false
 #define BETA 4.             // TODO: move to config
+/// Relative round-off tolerance of the slope limiter's denominators (0 = absolute 1e-30, the old
+/// behaviour). With 0 the limiter breaks mirror symmetry in the first step of P1 (a surface particle
+/// keeps its density gradient, its mirror partner's is zeroed: exact 0 vs 1e-17 in the denominator).
+#define SLOPE_LIMITER_EPS 0.
 
 /// use pairwise limiter
 #define PAIRWISE_LIMITER 1

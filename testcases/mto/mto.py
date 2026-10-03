@@ -84,11 +84,24 @@ def mat_overrides(cand):
     return out
 
 
+def sml_overrides(cand):
+    """Runtime smoothing-length solver overrides: '@sml KEY VALUE' lines (config block sml {})."""
+    out = {}
+    for line in open(os.path.join(HERE, "candidates", cand + ".flags")):
+        line = line.split("#", 1)[0].split()
+        if line and line[0] == "@sml":
+            out[line[1]] = line[2]
+    return out
+
+
 def rung_for(cand, test, tag):
     """The rung as the candidate runs it: lib/tests.py + the candidate's @mat overrides, and the
     candidate's kernel / neighbour number (kernelSize, NNNTarget, wave mass correction) and 2D
     P-wave modulus (wave IC + reference speed under STRESS_2D_GIZMO)."""
     r = T.rung(test, tag)
+    so = sml_overrides(cand)
+    if so:
+        r["sml"] = so
     ov = [(k, v) for k, v, tests in mat_overrides(cand) if test in tests]
     if ov:
         r["materials"] = [dict(m, **{k: float(v) for k, v in ov}) for m in r["materials"]]
@@ -235,6 +248,13 @@ SML = """sml {
 """
 
 
+def sml_text(r):
+    t = SML.replace("{nnn}", str(r.get("nnn", 32)))
+    for k, v in r.get("sml", {}).items():
+        t = re.sub(r"(?m)^(\s*){}\s+\S+$".format(re.escape(k)), r"\g<1>{} {}".format(k, v), t)
+    return t
+
+
 def config_text(r, ic, outdir):
     if r["box"] is None:            # periodic wave box
         lo, hi = (0.0, 0.0), (1.0, 0.25)
@@ -247,7 +267,7 @@ def config_text(r, ic, outdir):
          "periodicBoxLimits {",
          "    lowerX {}".format(lo[0]), "    lowerY {}".format(lo[1]), "    lowerZ 0.0",
          "    upperX {}".format(hi[0]), "    upperY {}".format(hi[1]), "    upperZ 0.0", "}",
-         "kernelSize {:.9g}".format(r["kernel"]), SML.replace("{nnn}", str(r.get("nnn", 32))),
+         "kernelSize {:.9g}".format(r["kernel"]), sml_text(r),
          "hydro_gamma 1.6666666666666667"]
     if r["materials"]:
         s.append("materials {")
