@@ -79,8 +79,8 @@ gz_res3_wtr T2:d0.025
 gz_res3_wtr P1:w16
 gz_res3_wtr P1:w24
 gz_res3_obj_wtr A1:d0.05
-gz_res3_obj_wtr P1:w10
-gz_res3_obj_wtr T1:d0.2
+# dropped 02:35 (O5 harmful): gz_res3_obj_wtr P1:w10
+# dropped 02:35 (O5 harmful): gz_res3_obj_wtr T1:d0.2
 # (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_obj_wtr T2:d0.025
 # (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_obj_wtr P1:w16
 # (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res3_obj_wtr P1:w24
@@ -124,15 +124,32 @@ gz_res3_obj A1:d0.0177
 gzbest W2:n128
 gzbest W2:n256
 gzbest W3:n128
-gzbest W3:n256
+# build failed 02:57 (broken intermediate source), re-queued after GNOG: gzbest W3:n256
 # (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res4_wtr A1:d0.05
 # (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res4_wtr P1:w10
 # (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res4_wtr W2:n64
 # (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res4_wtr W2:n128
 # (dropped 02:25, superseded by gz_res3_obj / WTR_LIMITER harmful) gz_res4_wtr W2:n256
+# build failed 02:57 (broken intermediate source), re-queued after GNOG: gz_fm2 W2:n64
+# build failed 02:57 (broken intermediate source), re-queued after GNOG: gz_fm2 W2:n128
+gz_fm2 W2:n256
+# 3d. GNOG hourglass penalty (user, 02:50): SPHinXsys form (GNOG-A rotation) on gz_res3_obj; bit-identity checks first
+@sh ./mto.py run ref_chk --only P1:w10 --force -j 1 && ./bitcheck.py ref ref_chk P1 w10
+@sh ./mto.py run chk_obj --only P1:w10 -j 1 && ./bitcheck.py gz_res3_obj chk_obj P1 w10
+gzo_gnog P1:w10
+gzo_gnog A1:d0.05
+gzo_gnog T1:d0.2
+gzo_gnog T2:d0.025
+gzo_gnog P1:w16
+gzo_gnog_x1 P1:w10
+gzo_gnog_x1 P1:w16
+gzo_gnog_x4 P1:w16
+gzo_gnog P1:w24
+gzo_gnog_x1 P1:w24
+gzo_gnog T1:d0.1
+gzbest W3:n256
 gz_fm2 W2:n64
 gz_fm2 W2:n128
-gz_fm2 W2:n256
 gz_wsf T1:d0.08
 # 10. split face on gzbest (GIZMO Jaumann sign) for comparison
 gzbest_sf A1:d0.05

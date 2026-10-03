@@ -23,12 +23,21 @@ def power_ok():
 def entries():
     return [" ".join(l.split()) for l in open(Q) if l.strip() and not l.lstrip().startswith("#")]
 
-def solvers():
-    """Solver processes on the machine (orphans of an earlier runner included)."""
-    n = 0
+def busy(running):
+    """Slots in use: every own job holds one slot from its start (also while it builds or makes its
+    IC), plus solvers that are not ours (orphans of an earlier runner, manual runs)."""
+    kids = {}
+    for l in subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True).stdout.splitlines():
+        pid, ppid = map(int, l.split()); kids.setdefault(ppid, []).append(pid)
+    mine, stack = set(), [p.pid for p in running.values()]
+    while stack:
+        q = stack.pop()
+        if q not in mine: mine.add(q); stack += kids.get(q, [])
+    foreign = 0
     for pat in ("bin/mlh -c config.info", "GIZMO rod.params"):
-        n += len(subprocess.run(["pgrep", "-f", pat], capture_output=True, text=True).stdout.split())
-    return n
+        foreign += sum(int(q) not in mine for q in
+                       subprocess.run(["pgrep", "-f", pat], capture_output=True, text=True).stdout.split())
+    return len(running) + foreign
 
 def started():
     return set(open(STATE).read().splitlines()) if os.path.exists(STATE) else set()
@@ -42,7 +51,7 @@ while True:
         if p.poll() is not None: del running[e]
     done = started()
     todo = [e for e in entries() if e not in done]
-    while todo and max(len(running), solvers()) < J:
+    while todo and busy(running) < J:
         e = todo.pop(0)
         with open(STATE, "a") as f: f.write(e + "\n")
         running[e] = subprocess.Popen(["./queue_job.sh"] + e.split())

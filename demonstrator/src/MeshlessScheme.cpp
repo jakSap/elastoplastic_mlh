@@ -487,6 +487,9 @@ void MeshlessScheme::run(){
 #if SPLIT_FACE_STRESS
         particles->compParticleTensileStress();
 #endif
+#if GNOG_PENALTY
+        particles->compGnogPenalty(timeStep);
+#endif
 
         Logger(DEBUG) << "      > Computing fluxes";
 #if AM_SELFTEST == 2
@@ -551,6 +554,9 @@ void MeshlessScheme::run(){
         Logger(INFO) << "    > Collecting fluxes";
 
         particles->collectFluxes(helper);
+#if GNOG_PENALTY
+        particles->addGnogForce();
+#endif
 #if TORQUE_DIAG
         // After collectFluxes so tqF is available for the split cross-check, and
         // before the state update so the reported rate belongs to this step.

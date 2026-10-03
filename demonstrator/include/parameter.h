@@ -590,7 +590,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       S_R = max(v_L,v_R) + max(a_L,a_R)
 #define HLLC_WAVESPEED_GIZMO 0
 
-#define STORE_RAW_VGRAD (MATERIAL_VISCOSITY || STRESS_RATE_RAW_GRAD || RECON_FACE_DV >= 3)
+#define STORE_RAW_VGRAD (MATERIAL_VISCOSITY || STRESS_RATE_RAW_GRAD || RECON_FACE_DV >= 3 || GNOG_PENALTY)
 
 // Limited longitudinal dissipation of the GIZMO stress flux (option O5, Zhang-Hu-
 // Adams / Rezavand form): the impedance speeds of wt_r are replaced by
@@ -619,6 +619,22 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // applies). The HLL dissipation terms are unchanged. 2D, non-periodic.
 //   0 = off (eigen-projection on the radial SPH area, per-pair TC), 1 = on
 #define SPLIT_FACE_STRESS 0
+
+// GNOG hourglass penalty (Zhang, Wu, Lourenco, Hu, arXiv 2409.11474), as implemented in
+// SPHinXsys (ShearStressRelaxationHourglassControl2ndHalf, with the GNOG-A rotation): a
+// per-particle force F^h_i, integrated in time, against the residual of the pair velocity
+// difference with respect to the linear prediction (raw, unlimited gradients):
+//   v^_ij  = v_ij - 1/2 (grad v_i + grad v_j) r_ij,   r_ij = x_i - x_j, e_ij = r_ij/|r_ij|
+//   dF^h_i = sum_j xi_ij G (v^_ij . e_ij) e_ij dW/dr V_i V_j dt / |r_ij|   (same body only)
+// F^h_i is rotated each step by the particle's spin (Rodrigues). v^ vanishes for linear
+// velocity fields (rigid rotation); each increment is a central pair force (momentum
+// exact, torque-free). xi_ij = (xi_i + xi_j)/2 with xi_i = GNOG_XI (elastic) or
+// GNOG_XI_PLASTIC times the radial-return factor min(1, Y/sigma_vM,trial) (paper: 4 and
+// 0.2). The work F^h.v enters the total energy, the internal energy is not touched.
+// 2D, non-periodic.   0 = off, 1 = on
+#define GNOG_PENALTY 0
+#define GNOG_XI 4.0
+#define GNOG_XI_PLASTIC 0.2
 
 // Gate of the deviatoric tensile correction in the GIZMO stress flux (2D).
 //   0 = GIZMO: every positive eigenvalue l_k of the DEVIATORIC stress S is damped
@@ -1065,6 +1081,9 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // (the ENFORCE_FLUX_SYM guard for TORQUE_DIAG lives below, after that flag is defined)
 #if SPLIT_FACE_STRESS && (DIM != 2 || PERIODIC_BOUNDARIES || !GIZMO_ELASTIC_FLUX || !TENSILE_CORRECTION)
 #error "SPLIT_FACE_STRESS: DIM 2, non-periodic, GIZMO elastic flux with TENSILE_CORRECTION only."
+#endif
+#if GNOG_PENALTY && (DIM != 2 || PERIODIC_BOUNDARIES || !ELASTIC)
+#error "GNOG_PENALTY: DIM 2, non-periodic, ELASTIC only."
 #endif
 #if RECON_FACE_DV >= 3 && DIM != 2
 #error "RECON_FACE_DV 3/4 (residual jump) is implemented for DIM == 2 only."

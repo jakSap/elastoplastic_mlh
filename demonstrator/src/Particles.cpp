@@ -7,7 +7,7 @@
 #include <fstream>
 #include <iomanip>
 #endif
-#if CONTACT_NO_TENSION
+#if CONTACT_NO_TENSION || GNOG_PENALTY
 #include <vector>
 #include <numeric>
 #include <functional>
@@ -478,8 +478,11 @@ Particles::~Particles() {
 #if CONTACT_FORCE_DIAG
     delete[] cfdSide;
 #endif
-#if CONTACT_NO_TENSION
+#if CONTACT_NO_TENSION || GNOG_PENALTY
     delete[] bodyId;
+#endif
+#if GNOG_PENALTY
+    delete[] hgF; delete[] gnogGam;
 #endif
 #if SPLIT_FACE_STRESS
     delete[] Stc;
@@ -1543,6 +1546,9 @@ void Particles::integrateStressTensor(const double &dt, bool rawGrad) {
             // quadratic in S, the factor is the square root of the ratio.
             // PLASTICITY_YIELD_GIZMO uses GIZMO's factor instead, the ratio itself
             // (solids/elastic_physics.c:111), which lands inside the yield surface.
+#if GNOG_PENALTY
+            if (gnogGam) gnogGam[i] = (J2 > Y2_over_d && J2 > 0.0) ? std::sqrt(Y2_over_d / J2) : 1.;
+#endif
             if (J2 > Y2_over_d && J2 > 0.0) {
 #if PLASTICITY_YIELD_GIZMO
                 const double f = Y2_over_d / J2;
@@ -4981,11 +4987,8 @@ void Particles::contactForceReport(double simTime){
 }
 #endif
 
-void Particles::solveRiemannProblems(const Particles &ghostParticles){
-#if USE_HLLC
-    double n_unit[DIM];
-#endif
-#if CONTACT_NO_TENSION
+#if CONTACT_NO_TENSION || GNOG_PENALTY
+void Particles::compBodyIds(){
     if (!bodyId){
         // bodies = connected components, link r < 1.5 x the smaller nearest-neighbour distance
         bodyId = new int[N];
@@ -5012,8 +5015,77 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
             }
         int nBodies = 0;
         for (int a=0; a<N; ++a){ bodyId[a] = root(a); if (bodyId[a] == a) ++nBodies; }
-        Logger(INFO) << "CONTACT_NO_TENSION: " << nBodies << " bodies";
+        Logger(INFO) << "bodies (connected components): " << nBodies;
     }
+}
+#endif
+
+#if GNOG_PENALTY
+void Particles::compGnogPenalty(const double &dt){
+    compBodyIds();
+    if (!hgF){
+        hgF = new double[N][2]();
+        gnogGam = new double[N];
+        for (int i=0; i<N; ++i) gnogGam[i] = 1.;
+    }
+#if PLASTICITY_ANY
+    const double xi0 = GNOG_XI_PLASTIC;
+#else
+    const double xi0 = GNOG_XI;
+#endif
+    // GNOG-A: the stored force turns with the particle's spin
+    for (int i=0; i<N; ++i){
+        const double ang = 0.5*(vyGradRaw[i][0] - vxGradRaw[i][1])*dt;
+        const double c = cos(ang), sn = sin(ang);
+        const double fx = hgF[i][0], fy = hgF[i][1];
+        hgF[i][0] = c*fx - sn*fy;
+        hgF[i][1] = sn*fx + c*fy;
+    }
+    for (int i=0; i<N; ++i){
+        const double Vi = m[i]/rho[i];
+        for (int jn=0; jn<noi[i]; ++jn){
+            const int j = nnl[i*MAX_NUM_INTERACTIONS + jn];
+            if (j <= i || bodyId[i] != bodyId[j]) continue;
+            const double rx = x[i]-x[j], ry = y[i]-y[j];
+            const double r = sqrt(rx*rx + ry*ry);
+            if (r <= 0.) continue;
+            const double ex = rx/r, ey = ry/r;
+            // residual against the linear prediction 1/2 (grad v_i + grad v_j) r_ij
+            const double vhx = (vx[i]-vx[j]) - 0.5*((vxGradRaw[i][0]+vxGradRaw[j][0])*rx
+                                                  + (vxGradRaw[i][1]+vxGradRaw[j][1])*ry);
+            const double vhy = (vy[i]-vy[j]) - 0.5*((vyGradRaw[i][0]+vyGradRaw[j][0])*rx
+                                                  + (vyGradRaw[i][1]+vyGradRaw[j][1])*ry);
+            const double dW = 0.5*(Kernel::WDr(r, sml[i]) + Kernel::WDr(r, sml[j]));
+#if EOS == 1 || EOS == 2
+            const double G = 0.5*(MeshlessEOS->EOSShearModulus(matId[i]) + MeshlessEOS->EOSShearModulus(matId[j]));
+#else
+            const double G = 0.;
+#endif
+            const double xi = xi0*0.5*(gnogGam[i] + gnogGam[j]);
+            // dW < 0: a residual opening (vh.e > 0) pulls i back towards j
+            const double f = xi*G*(vhx*ex + vhy*ey)*dW*Vi*(m[j]/rho[j])*dt/r;
+            hgF[i][0] += f*ex; hgF[i][1] += f*ey;
+            hgF[j][0] -= f*ex; hgF[j][1] -= f*ey;
+        }
+    }
+}
+
+void Particles::addGnogForce(){
+    // updateState does Q -= dt*F, so a force on i enters with a minus sign
+    for (int i=0; i<N; ++i){
+        vF[i][0] -= hgF[i][0];
+        vF[i][1] -= hgF[i][1];
+        eF[i] -= hgF[i][0]*vx[i] + hgF[i][1]*vy[i];
+    }
+}
+#endif
+
+void Particles::solveRiemannProblems(const Particles &ghostParticles){
+#if USE_HLLC
+    double n_unit[DIM];
+#endif
+#if CONTACT_NO_TENSION
+    compBodyIds();
 #endif
 #if CONTACT_FORCE_DIAG
     if (!cfdSide){

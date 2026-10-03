@@ -409,9 +409,17 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     double (*Stc)[3] { nullptr };
     void compParticleTensileStress();
 #endif
-#if CONTACT_NO_TENSION
+#if CONTACT_NO_TENSION || GNOG_PENALTY
     /// Body (connected component of the first force pass) of each particle.
     int *bodyId { nullptr };
+    void compBodyIds();
+#endif
+#if GNOG_PENALTY
+    /// Accumulated GNOG hourglass force and radial-return factor of each particle.
+    double (*hgF)[2] { nullptr };
+    double *gnogGam { nullptr };
+    void compGnogPenalty(const double &dt);
+    void addGnogForce();
 #endif
 #if CONTACT_FORCE_DIAG
     /// Body of each particle (0: x < 0, 1: x > 0 at the first force pass).
