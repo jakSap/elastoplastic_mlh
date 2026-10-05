@@ -1,0 +1,28 @@
+# nv_nv1_sph_gtc0_ng with the pair factor exactly 1 wherever the particles are at least the local spacing apart
+# (user 10-05: "can the pair factor not be 1 everywhere it's not needed?"): local TC f = PREFAC (1 - r/dp)
+# for r < dp, dp = sqrt(m/rho), else 0 -> no stiffness tax on regular arrangements (waves untouched to O(A^2)).
+# Close-range strength matched to GIZMO's (f(0.5 dp) = 1.25 vs GIZMO 1.46 - its 0.2 baseline), no cap, no
+# approach damping (both suspected of stopping the rearrangement GIZMO shows).
+# Uniform choices (identical in every test): numerical viscosity (bare jump, both channels), SPH divergence,
+# no GNOG, deviatoric force on the MFM face, 2D-traceless deviator as GIZMO, unlimited gradient in the stress
+# rate, no adhesion between bodies, correct work-term sign, no physical viscosity.
+RECON_FACE_DV 0
+NUM_VISC 1
+NUM_VISC_L 1.
+NUM_VISC_T 1.
+ART_VISC 0
+TENSILE_CORRECTION 1
+GNOG_PENALTY 0
+ELASTIC_FACE_MODE 2
+STRESS_2D_GIZMO 1
+STRESS_RATE_RAW_GRAD 1
+CONTACT_NO_TENSION 1
+ELASTIC_WORK_SIGN_FIX 1
+MATERIAL_VISCOSITY 0
+EXPLICIT_VOL_SPH_DIVV 1
+TENSILE_CORRECTION_LOCAL 1
+TENSILE_CORRECTION_PREFAC 2.5
+TENSILE_CORRECTION_POWER 1.
+TENSILE_CORRECTION_FMAX 3.0
+TENSILE_CORRECTION_DAMP 0.
+TC_TOTAL_STRESS_GATE 0

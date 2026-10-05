@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """P1 movie: a candidate's Taylor rods above the GIZMO control, same times, coloured by density.
 
-    python3 lib/rod_movie.py CAND[,CAND2,...] RUNG [-o OUT.mp4] [--fps 8] [--full]
+    python3 lib/rod_movie.py CAND[,CAND2,...] RUNG [-o OUT.mp4] [--fps 8] [--full | --xy X Y]
 
 Default: zoom on the contact interface (|x| < 0.4), run and GIZMO side by side; --full: whole rods,
 run above GIZMO. Particles whose nearest neighbour in the same rod is closer than 0.5 d0 (the clump
@@ -30,6 +30,7 @@ def main():
     ap.add_argument("cand"); ap.add_argument("rung")
     ap.add_argument("-o", "--out"); ap.add_argument("--fps", type=float, default=8)
     ap.add_argument("--full", action="store_true", help="whole rods instead of the interface zoom")
+    ap.add_argument("--xy", type=float, nargs=2, metavar=("X", "Y"), help="half-widths of the zoom window (default 0.40 0.32)")
     a = ap.parse_args()
     cands = a.cand.split(",")
     multi = len(cands) > 1
@@ -66,8 +67,8 @@ def main():
         fig, axs = plt.subplots(2, 1, figsize=(12, 7.2), dpi=100)
         fig.subplots_adjust(left=0.02, right=0.90, bottom=0.10, top=0.90, hspace=0.18)
     else:
-        X, Y = 0.40, 0.32
-        fig, axs = plt.subplots(1, 2, figsize=(12, 6.4), dpi=100)
+        X, Y = a.xy or (0.40, 0.32)
+        fig, axs = plt.subplots(1, 2, figsize=(12, 6.4 * Y / 0.32 * 0.40 / X), dpi=100)
         fig.subplots_adjust(left=0.02, right=0.90, bottom=0.13, top=0.88, wspace=0.05)
     cax = fig.add_axes([0.92, 0.15, 0.015, 0.7])
     wpt = axs[0].get_window_extent().width * 72 / fig.dpi
