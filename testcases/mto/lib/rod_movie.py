@@ -30,26 +30,27 @@ def main():
     ap.add_argument("cand"); ap.add_argument("rung")
     ap.add_argument("-o", "--out"); ap.add_argument("--fps", type=float, default=8)
     ap.add_argument("--full", action="store_true", help="whole rods instead of the interface zoom")
+    ap.add_argument("--test", default="P1", help="P1 rods or P2 offset circles")
     ap.add_argument("--xy", type=float, nargs=2, metavar=("X", "Y"), help="half-widths of the zoom window (default 0.40 0.32)")
     a = ap.parse_args()
     cands = a.cand.split(",")
     multi = len(cands) > 1
     if multi:
         a.full = False
-    D = os.path.join(ROOT, "runs", cands[0], "P1", a.rung)
+    D = os.path.join(ROOT, "runs", cands[0], a.test, a.rung)
     res = json.load(open(os.path.join(D, "result.json")))
     d0 = res.get("d0") or json.load(open(os.path.join(D, "meta.json")))["d"]
-    ctrl = res.get("gizmo_control") or a.rung
+    ctrl = res.get("gizmo_control") or (a.rung if a.test == "P1" else "{}_{}".format(a.test, a.rung))
     panels, lines = [], []
     for c in cands:
-        Dc = os.path.join(ROOT, "runs", c, "P1", a.rung)
+        Dc = os.path.join(ROOT, "runs", c, a.test, a.rung)
         rc = json.load(open(os.path.join(Dc, "result.json")))
         panels.append(("{}  ({})".format(c, rc.get("verdict", "?")), snapshots(os.path.join(Dc, "output"))))
-        lines.append("{:<22} {}  {}".format(c, rc.get("verdict", "?"), rc.get("summary", "").split(" | ")[0].split("  [")[0]))
+        lines.append("{:<22} {}  {}".format(c, rc.get("verdict", "?"), rc.get("summary", "").split(" | ")[0].split("  [")[0][:120]))
     panels.append(("GIZMO control ({})".format(ctrl), snapshots(os.path.join(ROOT, "gizmo", "runs", ctrl, "conv"))))
     times = [t for t, _ in panels[0][1] if t <= panels[-1][1][-1][0] + 1e-9]
     if multi:
-        out = a.out or os.path.join(ROOT, "runs", "p1_compare_{}_{}.mp4".format(a.rung, "_".join(cands)))
+        out = a.out or os.path.join(ROOT, "runs", "{}_compare_{}_{}.mp4".format(a.test.lower(), a.rung, "_".join(cands)))
     else:
         out = a.out or os.path.join(D, "p1_{}_{}{}.mp4".format(cands[0], a.rung, "" if a.full else "_zoom"))
 
@@ -95,7 +96,7 @@ def main():
                 sp.set_visible(False)
             ax.set_title("{}   t = {:.2f}\nclumped (black dot): {}".format(lab, tt, int(cl.sum())), fontsize=11)
         cb = fig.colorbar(sc, cax=cax); cb.set_label(r"density $\rho$", color=INK2); cb.outline.set_visible(False)
-        fig.suptitle("P1 Taylor rods {}, {} vs GIZMO".format(a.rung, ", ".join(cands)), fontsize=12)
+        fig.suptitle("{} {}, {} vs GIZMO".format({"P1": "P1 Taylor rods", "P2": "P2 offset circles"}.get(a.test, a.test), a.rung, ", ".join(cands)), fontsize=12)
         fig.texts = [tx for tx in fig.texts if tx.get_gid() != "cap"]
         fig.text(0.02, 0.02, caption, fontsize=9, family="monospace", color=INK2, gid="cap")
         fig.savefig(os.path.join(tmp, "f{:04d}.png".format(k)))
