@@ -117,7 +117,7 @@ def intra_nn(x, nbody):
 # Symmetries of the testcase IC (exact on the lattice): a physically symmetric problem must
 # stay symmetric, so the partner mismatch is a pure numerical defect (user, 2026-10-02:
 # ref breaks the rod symmetry, GIZMO does not).
-SYMMETRIES = {"T1": [(-1, 1), (1, -1)], "P1": [(-1, 1), (1, -1)], "T2": [(-1, -1)]}
+SYMMETRIES = {"T1": [(-1, 1), (1, -1)], "P1": [(-1, 1), (1, -1)], "T2": [(-1, -1)], "P2": [(-1, -1)]}
 
 
 def sym_partners(x0, test):
@@ -465,6 +465,61 @@ def p1_control_fails(res, key, sfx):
     return out
 
 
+def body_state(x, v, m, half):
+    """Per body (index halves) at one snapshot: CoM velocity, spin about the own CoM, shape."""
+    out = []
+    for b in (slice(0, half), slice(half, None)):
+        xb, vb, mb = x[b], v[b], m[b]
+        c, vc = np.average(xb, axis=0, weights=mb), np.average(vb, axis=0, weights=mb)
+        r, w = xb - c, vb - vc
+        I = float(np.sum(mb * np.sum(r * r, axis=1)))
+        Lz = float(np.sum(mb * (r[:, 0] * w[:, 1] - r[:, 1] * w[:, 0])))
+        ev, evec = np.linalg.eigh(np.einsum("i,ia,ib->ab", mb, r, r))
+        out.append(dict(vx=float(vc[0]), vy=float(vc[1]), omega=Lz / I,
+                        aspect=float(np.sqrt(ev[1] / ev[0])),
+                        angle=float(np.degrees(np.arctan2(evec[1, 1], evec[0, 1])) % 180.0)))
+    return out
+
+
+def p2_metrics(outdir, x0, d0, half, KE0, t=None):
+    """State of an offset-circles run at time t (default: last snapshot): dynamics of one body (the
+    other is its point mirror), clumps, cell quality."""
+    import cellq
+    sn = snapshots(outdir)
+    tt, path = sn[-1] if t is None else min(sn, key=lambda q: abs(q[0] - t))
+    s = load(path, ("x", "v", "m", "rho"))
+    st = body_state(s["x"], s["v"], s["m"], half)
+    body = np.r_[np.zeros(half, int), np.ones(len(x0) - half, int)]
+    cq = cellq.score(s["x"], s["m"], s["rho"], x0, body, d0)
+    KE = float(0.5 * np.sum(s["m"] * np.sum(s["v"] ** 2, axis=1)))
+    return dict(t=tt, vx=st[0]["vx"], vy=st[0]["vy"], omega=st[0]["omega"],
+                aspect=st[0]["aspect"], angle=st[0]["angle"], KE_frac=KE / KE0,
+                gap_end=body_gap(s["x"], d0), final_clumps=int(np.sum(intra_nn(s["x"], 2) / d0 < CLUMP)),
+                kappa=cq["kappa"], g99=cq["g99"])
+
+
+def analyse_circles(D, meta):
+    """P2: generic body metrics (rip, clumps over time, point symmetry) + end state vs GIZMO."""
+    res = analyse_body(D, meta, "P2")
+    ic = meta.get("ic") or os.path.join(os.path.dirname(D), "..", "..", "..", "ics", "P2_{}.h5".format(meta["tag"]))
+    with h5py.File(ic, "r") as f:
+        x0, v0, m0 = f["x"][:], f["v"][:], f["m"][:]
+        d0 = float(f.attrs["spacing"])
+    half = len(x0) // 2
+    KE0 = float(0.5 * np.sum(m0 * np.sum(v0 ** 2, axis=1)))
+    import tests as T
+    t_cmp = T.CIRC["t_cmp"]
+    res["end"] = p2_metrics(os.path.join(D, "output"), x0, d0, half, KE0)
+    res["cmp"] = p2_metrics(os.path.join(D, "output"), x0, d0, half, KE0, t=t_cmp)
+    ctrl = os.path.join(os.path.dirname(__file__), "..", "gizmo", "runs", "P2_" + meta["tag"], "conv")
+    if os.path.isdir(ctrl) and snapshots(ctrl):
+        res["gizmo"] = p2_metrics(ctrl, x0, d0, half, KE0, t=t_cmp)
+        res["gizmo_end"] = p2_metrics(ctrl, x0, d0, half, KE0, t=meta["t_end"])
+        maps = sym_partners(x0, "P2")
+        res["gizmo"]["asym"] = max(sym_error(load(p, ("x",))["x"], maps, d0)[0] for _, p in snapshots(ctrl))
+    return res
+
+
 # ------------------------------------------------------------------ dispatch
 
 def analyse_run(D):
@@ -480,6 +535,8 @@ def analyse_run(D):
             res.update(analyse_disc(D, meta))
         elif test == "P1":
             res.update(analyse_rod(D, meta))
+        elif test == "P2":
+            res.update(analyse_circles(D, meta))
         else:
             res.update(analyse_wave(D, meta, test))
     except (IndexError, ValueError, OSError, KeyError) as e:
@@ -489,7 +546,7 @@ def analyse_run(D):
         fails.append("crash(exit={}, t={:.4g})".format(meta.get("exit"), t_last))
     if res.get("rip"):
         fails.append("rip")
-    if test in ("T1", "T2", "P1") and res.get("asym", 0) > ASYM_TOL:
+    if test in ("T1", "T2", "P1", "P2") and res.get("asym", 0) > ASYM_TOL:
         fails.append("asym={:.2g}d0".format(res["asym"]))
     if test == "T1" and res.get("stuck"):
         fails.append("stuck")
@@ -512,11 +569,15 @@ def analyse_run(D):
             if not ok:
                 fo = ["crash"] + fo
             res["fails_obj"], res["verdict_obj"] = fo, ("FAIL" if fo else "PASS")
+    if test == "P2" and res.get("gizmo_end") and res.get("end"):
+        fmax = int(1.1 * res["gizmo_end"]["final_clumps"]) + 4
+        if res["end"]["final_clumps"] > fmax:
+            fails.append("final_clumps={}>{}".format(res["end"]["final_clumps"], fmax))
     if "analysis_error" in res:
         fails.append("analysis_error")
     if fails:
         res["verdict"] = "FAIL"
-    elif test in ("T1", "T2", "P1"):
+    elif test in ("T1", "T2", "P1", "P2"):
         res["verdict"] = "PASS"
     else:
         res["verdict"] = "INFO"
@@ -537,6 +598,18 @@ def summary_line(r):
         s += " asym={:.2g}d0".format(r.get("asym", float("nan")))
         if t == "T2":
             s += " lines rho/u={:.0f}/{:.0f}".format(r.get("line_rho", 0), r.get("line_u", 0))
+    elif t == "P2":
+        e = r.get("end", {})
+        fmt = "v=({:+.3f},{:+.3f}) w={:+.3f} asp={:.2f} KE={:.2f} gap={:.1f}d0 clumps={} kappa={:.2f} g99={:.2f}"
+        def one(q):
+            return fmt.format(q.get("vx", float("nan")), q.get("vy", float("nan")), q.get("omega", float("nan")),
+                              q.get("aspect", float("nan")), q.get("KE_frac", float("nan")),
+                              q.get("gap_end", float("nan")), q.get("final_clumps"),
+                              q.get("kappa", float("nan")), q.get("g99", float("nan")))
+        s = "t={:.1f}: ".format(r.get("cmp", {}).get("t", float("nan"))) + one(r.get("cmp", {}))
+        if "gizmo" in r:
+            s += " | GIZMO " + one(r["gizmo"])
+        s += " || end: " + one(e) + " asym={:.2g}d0 clumps_max={}".format(r.get("asym", float("nan")), r.get("nclump_max"))
     elif t == "A1":
         s = "dLz(T)={:+.3e} max={:.3e}".format(r.get("dLz_T", float("nan")),
                                                 r.get("dLz_max", float("nan")))

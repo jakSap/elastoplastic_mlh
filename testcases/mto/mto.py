@@ -68,7 +68,7 @@ def read_flags(path):
     return out
 
 
-BODY_TESTS = ("T1", "T2", "P1", "A1")
+BODY_TESTS = ("T1", "T2", "P1", "P2", "A1")
 
 
 def mat_overrides(cand):

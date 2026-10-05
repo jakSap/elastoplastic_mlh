@@ -97,6 +97,21 @@ def rungs_P1():   # Taylor rods
     return out
 
 
+# P2 offset plastic circles (10-06): the rod material, glancing impact, short run
+# GIZMO (no contact model) welds the pair and spins it; the demonstrator (CONTACT_NO_TENSION) separates at
+# t ~ 1.6. So the comparison with GIZMO is taken at t_cmp = 1.2, both pairs still pressed together.
+CIRC = dict(R=0.25, gap=0.12, yoff=0.25, v=0.25, t_end=2.0, t_cmp=1.2)
+
+
+def rungs_P2():   # offset plastic circles, d = R/8, R/16, R/32
+    c = math.sqrt(1 + 4 / 3 * ROD["mu"])
+    R = CIRC["R"]
+    return {"c{}".format(k): _body("P2", "circles", R / k, CIRC["t_end"], 0.05, 4.0, c,
+                                   till(ROD["mu"], ROD["Y0"]),
+                                   R=R, gap=CIRC["gap"], yoff=CIRC["yoff"], v=CIRC["v"])
+            for k in (8, 16, 32)}
+
+
 def rungs_wave(test, mode, eos, mu, ns=(32, 64, 128, 256), eta=0.0):
     """eta: viscosity of the Tillotson waves (0 = the inviscid W1-W3; None = the code default)."""
     c = _wave_speed(eos, mu, mode)
@@ -120,6 +135,7 @@ TESTS = {
     "T1": ("body", rungs_T1, "colliding rings: no rip, no clumps"),
     "T2": ("body", rungs_T2, "offset blocks: no rip, no interior u/rho lines"),
     "P1": ("plastic", rungs_P1, "Taylor rods: contact-plane clumping, fold, flow vs GIZMO"),
+    "P2": ("plastic", rungs_P2, "offset plastic circles: symmetry, clumps, cells, dynamics vs GIZMO"),
     "A1": ("body", rungs_A1, "rotating disc: |dLz/Lz| after one rotation ~ d^2"),
     "W1i": ("wave_e0", lambda: rungs_wave("W1i", "p", "ideal", 0.0), "sound, ideal gas"),
     "W1m": ("wave_e1", lambda: rungs_wave("W1m", "p", "murnaghan", 0.0), "sound, Murnaghan"),
@@ -142,6 +158,7 @@ TIERS = {
           ("T1", "d0.1"), ("T1", "d0.08"), ("T1", "d0.06")],
     # P: plastic gate (compare with the GIZMO control in gizmo/).
     "P": [("P1", "w10"), ("P1", "w16"), ("P1", "w24")],
+    "C": [("P2", "c8"), ("P2", "c16"), ("P2", "c32")],
     # A: angular momentum order.
     "A": [("A1", "d0.05"), ("A1", "d0.035"), ("A1", "d0.025"), ("A1", "d0.0177")],
     # W: wave order; n = 32 is diagnostic only, the order is judged on 64/128/256.

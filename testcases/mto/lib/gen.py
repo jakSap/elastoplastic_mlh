@@ -89,6 +89,26 @@ def blocks(out, d, size=0.5, gap=0.1, yoff=0.25, v=0.059):
                                          velocity=v, t_contact=gap / (2 * v)))
 
 
+def circles(out, d, R=0.25, gap=0.12, yoff=0.25, v=0.25):
+    """Two discs of radius R, gap apart in x, centres offset by yoff in y, closing at 2v (P2).
+
+    Offset (glancing) plastic impact: the collision carries angular momentum, so the discs
+    flatten, shear and spin up. Disc B is the point mirror of disc A, (x, y) -> (-x, -y), so
+    the IC is exactly point-symmetric (lattice centred on each disc centre, as in rings).
+    """
+    n = int(np.ceil(R / d)) + 1
+    i = (np.arange(-n, n) + 0.5) * d
+    X, Y = np.meshgrid(i, i, indexing="ij")
+    keep = np.hypot(X, Y) < R
+    a = np.column_stack([X[keep], Y[keep]]) + [-(R + gap / 2), -yoff / 2]
+    pos = np.vstack([a, -a])
+    vel = np.zeros_like(pos)
+    vel[: len(a), 0] = v
+    vel[len(a):, 0] = -v
+    return _write(out, pos, vel, d, dict(test="circles", R=R, gap=gap, yoff=yoff, velocity=v,
+                                         t_contact=gap / (2 * v)))
+
+
 def disc_equilibrium(Rb, omega, mu, dev_dim, K=1.0, rho0=RHO0, R_end=None):
     """Radial equilibrium of a disc spinning at omega, free surface at reference radius Rb.
 

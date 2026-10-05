@@ -2,6 +2,7 @@
 """GIZMO control for the Taylor-rod test P1 (the reference "should look like GIZMO").
 
     ./rod.py w10 [w16 w24] [-j 2]     build IC from ../ics/P1_<rung>.h5, run, convert
+    ./rod.py --test P2 c8 c16 c32     offset plastic circles (../ics/P2_<rung>.h5 -> runs/P2_<rung>)
 
 Binary: ~/Documents/GIZMO/build_mto_elastic/GIZMO (Config.sh there): 2D, open box,
 HYDRO_MESHLESS_FINITE_MASS, EOS_TILLOTSON + EOS_ELASTIC, KERNEL_FUNCTION=6,
@@ -104,12 +105,12 @@ Tillotson_EOS_params_Y0         {Y0}
 """
 
 
-def setup(tag, Y0=None, name=None, eta=0.0):
-    r = T.rung("P1", tag)
-    src = os.path.join(HERE, "..", "ics", "P1_{}.h5".format(tag))
+def setup(tag, Y0=None, name=None, eta=0.0, test="P1"):
+    r = T.rung(test, tag)
+    src = os.path.join(HERE, "..", "ics", "{}_{}.h5".format(test, tag))
     if not os.path.exists(src):
         raise SystemExit("missing {} -- run `mto.py plan <cand> -t P` once to create it".format(src))
-    D = os.path.join(HERE, "runs", name or tag)
+    D = os.path.join(HERE, "runs", name or (tag if test == "P1" else "{}_{}".format(test, tag)))
     os.makedirs(os.path.join(D, "output"), exist_ok=True)
     with h5py.File(src, "r") as f:
         x, v, m, u = f["x"][:], f["v"][:], f["m"][:], f["u"][:]
@@ -169,13 +170,13 @@ def convert(D):
     return out
 
 
-def run(tag, Y0=None, name=None, eta=0.0, binary=None):
-    D = setup(tag, Y0, name, eta)
+def run(tag, Y0=None, name=None, eta=0.0, binary=None, test="P1"):
+    D = setup(tag, Y0, name, eta, test)
     with open(os.path.join(D, "run.log"), "w") as lf:
         rc = subprocess.run([binary or (GIZMO_VISC if eta > 0 else GIZMO), "rod.params"], cwd=D,
                             stdout=lf, stderr=subprocess.STDOUT).returncode
     out = convert(D)
-    return name or tag, rc, len(glob.glob(os.path.join(out, "*.h5")))
+    return name or (tag if test == "P1" else "{}_{}".format(test, tag)), rc, len(glob.glob(os.path.join(out, "*.h5")))
 
 
 if __name__ == "__main__":
@@ -183,6 +184,7 @@ if __name__ == "__main__":
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("tags", nargs="+")
     ap.add_argument("-j", type=int, default=2)
+    ap.add_argument("--test", default="P1", help="P1 rods (runs/<tag>) or P2 offset circles (runs/P2_<tag>)")
     ap.add_argument("--convert-only", action="store_true")
     ap.add_argument("--Y0", type=float, nargs="+", help="scan: one run per value, runs/<tag>_Y<val>")
     ap.add_argument("--eta", type=float, nargs="+",
@@ -203,6 +205,8 @@ if __name__ == "__main__":
         jobs = [(t, y, "{}_Y{:g}".format(t, y), 0.0) for t in a.tags for y in a.Y0]
     elif a.objjau:
         jobs = [(t, None, "{}_objjau".format(t), 0.0, GIZMO_OBJJAU) for t in a.tags]
+    elif a.test != "P1":
+        jobs = [(t, None, None, 0.0, None, a.test) for t in a.tags]
     else:
         jobs = [(t, None, None, 0.0) for t in a.tags]
     with cf.ThreadPoolExecutor(a.j) as ex:
