@@ -1,0 +1,6 @@
+# DIAGNOSTIC (rods only): dv1_eta1_notc_g2 (clean rods with eta 0.1) with eta 0. Is the constant viscosity what kept its rods clean?
+RECON_FACE_DV 1
+TENSILE_CORRECTION 0
+GNOG_PENALTY 2
+MATERIAL_VISCOSITY 1
+@mat eta 0.

@@ -1,0 +1,9 @@
+# role of the constant viscosity in clean rods
+dv1n_eta0 P1:w16
+nv_c8_eta P1:w16
+dv1n_eta0 P1:w10
+nv_c8_eta P1:w10
+nv_c8_sph_tc P1:w16
+nv_c8_sph_tc P1:w10
+nv_c8_sph_tc_ng P1:w16
+nv_c8_sph_tc_ng P1:w10
