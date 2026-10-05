@@ -1,0 +1,9 @@
+# nv_c8 clumps: does the SPH pair vector for the deviatoric force (ELASTIC_FACE_MODE 0) remove them, and what does it cost the waves?
+nv_c8_f0 P1:w16
+nv_c8_f0 W3:n128
+nv_c8_f0 W2:n128
+nv_c8_f0 P1:w10
+nv_c8_f0 W3:n64
+nv_c8_f0 W2:n64
+nv_c8_f0 W3:n32
+nv_c8_f0 W2:n32

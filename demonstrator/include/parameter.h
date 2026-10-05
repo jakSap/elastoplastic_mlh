@@ -551,7 +551,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // for small-amplitude waves at every resolution), strong in impacts, zero for rigid rotation (D = 0,
 // and the pair form removes the spin). One formula everywhere, no switch. Energy via the work term;
 // timestep dt <= 0.25 rho dx^2 / eta_AV.
-//   0 = off (baseline, bit-identical), 1 = on
+//   0 = off (baseline, bit-identical)
+//   1 = on, |D| of each particle (gradients; blind to pairing / zigzag modes)
+//   2 = on, the pair's own objective strain rate s_ij = |(v_i - v_j) - W r_ij| / r_ij in place of |D|:
+//       eta_ij = rho_ij (ART_VISC_C dx_ij)^2 s_ij (pair means of rho and dx^2). Equals |D r_hat| for a
+//       smooth field, so still O(h^2) and zero for rigid rotation, but it also sees a pair approaching
+//       its partner (pairing, clumping). The timestep uses the largest pair coefficient of a particle.
 #define ART_VISC 0
 #define ART_VISC_C 1.
 

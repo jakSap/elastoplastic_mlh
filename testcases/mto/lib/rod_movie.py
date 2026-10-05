@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """P1 movie: a candidate's Taylor rods above the GIZMO control, same times, coloured by density.
 
-    python3 lib/rod_movie.py CAND RUNG [-o OUT.mp4] [--fps 8]
+    python3 lib/rod_movie.py CAND RUNG [-o OUT.mp4] [--fps 8] [--full]
 
-Particles whose nearest neighbour in the same rod is closer than 0.5 d0 (the clump criterion of
-lib/analysis.py) are drawn black. The caption carries the mto verdict and summary of the run
+Default: zoom on the contact interface (|x| < 0.4), run and GIZMO side by side; --full: whole rods,
+run above GIZMO. Particles whose nearest neighbour in the same rod is closer than 0.5 d0 (the clump
+criterion of lib/analysis.py) carry a black centre dot. The caption carries the mto verdict and summary of the run
 (result.json). The GIZMO control is the one the analysis compared with (result.json 'gizmo_control').
 """
 import argparse, json, os, shutil, subprocess, sys
@@ -26,6 +27,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cand"); ap.add_argument("rung")
     ap.add_argument("-o", "--out"); ap.add_argument("--fps", type=float, default=8)
+    ap.add_argument("--full", action="store_true", help="whole rods instead of the interface zoom")
     a = ap.parse_args()
     D = os.path.join(ROOT, "runs", a.cand, "P1", a.rung)
     res = json.load(open(os.path.join(D, "result.json")))
@@ -34,12 +36,17 @@ def main():
     panels = [("{}  ({})".format(a.cand, res.get("verdict", "?")), snapshots(os.path.join(D, "output"))),
               ("GIZMO control ({})".format(ctrl), snapshots(os.path.join(ROOT, "gizmo", "runs", ctrl, "conv")))]
     times = [t for t, _ in panels[0][1] if t <= panels[1][1][-1][0] + 1e-9]
-    out = a.out or os.path.join(D, "p1_{}_{}.mp4".format(a.cand, a.rung))
+    out = a.out or os.path.join(D, "p1_{}_{}{}.mp4".format(a.cand, a.rung, "" if a.full else "_zoom"))
 
     plt.rcParams.update({"font.size": 10, "text.color": INK, "figure.facecolor": SURF, "axes.facecolor": SURF})
-    X, Y = 1.25, 0.30
-    fig, axs = plt.subplots(2, 1, figsize=(12, 7.2), dpi=100)
-    fig.subplots_adjust(left=0.02, right=0.90, bottom=0.10, top=0.90, hspace=0.18)
+    if a.full:
+        X, Y = 1.25, 0.30
+        fig, axs = plt.subplots(2, 1, figsize=(12, 7.2), dpi=100)
+        fig.subplots_adjust(left=0.02, right=0.90, bottom=0.10, top=0.90, hspace=0.18)
+    else:
+        X, Y = 0.40, 0.32
+        fig, axs = plt.subplots(1, 2, figsize=(12, 6.4), dpi=100)
+        fig.subplots_adjust(left=0.02, right=0.90, bottom=0.13, top=0.88, wspace=0.05)
     cax = fig.add_axes([0.92, 0.15, 0.015, 0.7])
     wpt = axs[0].get_window_extent().width * 72 / fig.dpi
     s = (0.85 * d0 / (2 * X) * wpt) ** 2
@@ -57,11 +64,11 @@ def main():
             f = load(path, ("x", "rho")); x = f["x"]
             cl = intra_nn(x, 2) / d0 < 0.5
             sc = ax.scatter(x[:, 0], x[:, 1], c=f["rho"], s=s, cmap=CMAP, vmin=0.8, vmax=1.2, linewidths=0)
-            ax.scatter(x[cl, 0], x[cl, 1], s=2.2 * s, c=INK, linewidths=0)
+            ax.scatter(x[cl, 0], x[cl, 1], s=0.3 * s, c=INK, linewidths=0)
             ax.set_xlim(-X, X); ax.set_ylim(-Y, Y); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
             for sp in ax.spines.values():
                 sp.set_visible(False)
-            ax.set_title("{}   t = {:.2f}   clumped (black): {}".format(lab, tt, int(cl.sum())), fontsize=11)
+            ax.set_title("{}   t = {:.2f}\nclumped (black dot): {}".format(lab, tt, int(cl.sum())), fontsize=11)
         cb = fig.colorbar(sc, cax=cax); cb.set_label(r"density $\rho$", color=INK2); cb.outline.set_visible(False)
         fig.suptitle("P1 Taylor rods {}, {} vs GIZMO".format(a.rung, a.cand), fontsize=12)
         fig.texts = [tx for tx in fig.texts if tx.get_gid() != "cap"]

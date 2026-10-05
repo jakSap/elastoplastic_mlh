@@ -1,0 +1,5 @@
+# clump diagnostics: bare longitudinal jump / tensile correction
+nv_c8_l1 P1:w16
+nv_c8_tc P1:w16
+nv_c8_l1 P1:w10
+nv_c8_tc P1:w10

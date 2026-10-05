@@ -1,0 +1,16 @@
+# One scheme for every test (num-visc v1): HLL damping on the reconstructed jump in both channels (NUM_VISC_L = NUM_VISC_T = 0, no bare difference), regularised only by the quadratic artificial viscosity rho (8 dx)^2 |D| that vanishes as h^2; should give second-order waves and enough damping in the rod impact.
+# Uniform choices (identical in every test): no tensile correction (GNOG 2 instead), matrix divergence (base), deviatoric force on the MFM face, 2D-traceless deviator as GIZMO, unlimited gradient in the stress rate, no adhesion between bodies, correct work-term sign, no physical viscosity.
+RECON_FACE_DV 0
+NUM_VISC 1
+NUM_VISC_L 0.
+NUM_VISC_T 0.
+ART_VISC 1
+ART_VISC_C 8.
+TENSILE_CORRECTION 0
+GNOG_PENALTY 2
+ELASTIC_FACE_MODE 2
+STRESS_2D_GIZMO 1
+STRESS_RATE_RAW_GRAD 1
+CONTACT_NO_TENSION 1
+ELASTIC_WORK_SIGN_FIX 1
+MATERIAL_VISCOSITY 0

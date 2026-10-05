@@ -1,0 +1,3 @@
+# pair-based AV coefficient (ART_VISC 2) on the rods
+nv_p8 P1:w16
+nv_p8 P1:w10

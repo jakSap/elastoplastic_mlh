@@ -1,0 +1,5 @@
+# ART_VISC_C scan on the rods (nv_c2 failed on clumps / width): C = 4, 8; waves only for a C that passes.
+nv_c8 P1:w16
+nv_c4 P1:w16
+nv_c8 P1:w10
+nv_c4 P1:w10

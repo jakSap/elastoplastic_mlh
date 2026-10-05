@@ -858,6 +858,19 @@ void Particles::compParticleTensileStress(){
 // Port of GIZMO solids/elastic_stress_tensor_force.h (eigenvalue branch), in the
 // demonstrator's lab frame. Computed once per pair (i<jj); the flux-symmetry copy
 // negates it for jj, matching GIZMO's antisymmetric +i/-j application.
+#if ART_VISC
+/// Pair coefficient of ART_VISC 2: rho_ij (C dx_ij)^2 |(v_i - v_j) - W_ij r_ij| / r_ij (see ART_VISC).
+static inline double artViscPair(double rhoI, double rhoJ, double mI, double mJ, double dx, double dy,
+                                 double dvx, double dvy, double w){
+    const double r2 = dx*dx + dy*dy;
+    if (r2 <= 0.) return 0.;
+    const double vtx = dvx + w*dy, vty = dvy - w*dx;   // W r = w (-dy, dx)
+    const double s = std::sqrt((vtx*vtx + vty*vty) / r2);
+    const double L2 = ART_VISC_C*ART_VISC_C * 0.5*(mI/rhoI + mJ/rhoJ);   // DIM == 2 (guarded)
+    return 0.5*(rhoI + rhoJ) * L2 * s;
+}
+
+#endif
 #if NUM_VISC
 static_assert(NUM_VISC_L >= 0. && NUM_VISC_L <= 1. && NUM_VISC_T >= 0. && NUM_VISC_T <= 1.,
               "NUM_VISC_L and NUM_VISC_T must lie in [0, 1].");
@@ -1396,10 +1409,14 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #else
         const int jA = jj;
 #endif
+        const double w = 0.25*(vyGradRaw[i][0] - vxGradRaw[i][1]
+                               + vyGradRaw[jA][0] - vxGradRaw[jA][1]);
+#if ART_VISC == 2
+        const double etaA = artViscPair(rhoi, rhoj, m[i], mJ[jj], dx, dy, dv[0], dv[1], w);
+#else
         const double etaA = 0.5*(artEta[i] + artEta[jA]);
+#endif
         if (etaA > 0.){
-            const double w = 0.25*(vyGradRaw[i][0] - vxGradRaw[i][1]
-                                   + vyGradRaw[jA][0] - vxGradRaw[jA][1]);
             const double vt[2] = { dv[0] + w*dy, dv[1] - w*dx };
             const double cv = etaA * FNormT * rinv;
             cmag[0] -= cv*vt[0];
@@ -4234,6 +4251,20 @@ void Particles::storeRawVelocityGradients(){
 
 #if ART_VISC
 void Particles::compArtVisc(){
+#if ART_VISC == 2
+    // largest pair coefficient of each particle, for the timestep (the flux evaluates each pair itself)
+    for (int i=0; i<N; ++i){
+        double eMax = 0.;
+        for (int jn=0; jn<noi[i]; ++jn){
+            const int j = nnl[i*MAX_NUM_INTERACTIONS + jn];
+            const double w = 0.25*(vyGradRaw[i][0] - vxGradRaw[i][1] + vyGradRaw[j][0] - vxGradRaw[j][1]);
+            const double e = artViscPair(rho[i], rho[j], m[i], m[j], x[i]-x[j], y[i]-y[j],
+                                         vx[i]-vx[j], vy[i]-vy[j], w);
+            if (e > eMax) eMax = e;
+        }
+        artEta[i] = eMax;
+    }
+#else
     // eta_AV = rho (ART_VISC_C dx)^2 |D|, D = sym(grad v) from the unlimited gradients (see ART_VISC)
     for (int i=0; i<N; ++i){
         const double dxx = vxGradRaw[i][0], dyy = vyGradRaw[i][1];
@@ -4242,6 +4273,7 @@ void Particles::compArtVisc(){
         const double L = ART_VISC_C * std::sqrt(m[i]/rho[i]);   // DIM == 2 (guarded)
         artEta[i] = rho[i] * L*L * Dn;
     }
+#endif
 }
 #endif
 
