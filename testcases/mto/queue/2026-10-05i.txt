@@ -1,0 +1,22 @@
+# nv_nv1_sph_gtc0_g2 (numerical viscosity fully on, SPH divergence, GIZMO TC form and gate, GNOG 2): Tillotson waves and rings.
+nv_nv1_sph_gtc0_g2 T1:d0.08
+nv_nv1_sph_gtc0_g2 T1:d0.1
+nv_nv1_sph_gtc0_g2 T1:d0.2
+nv_nv1_sph_gtc0_g2 W3:n128
+nv_nv1_sph_gtc0_g2 W2:n128
+nv_nv1_sph_gtc0_g2 W1t:n128
+nv_nv1_sph_gtc0_g2 W3:n64
+nv_nv1_sph_gtc0_g2 W2:n64
+nv_nv1_sph_gtc0_g2 W1t:n64
+nv_nv1_sph_gtc0_g2 W3:n32
+nv_nv1_sph_gtc0_g2 W2:n32
+nv_nv1_sph_gtc0_g2 W1t:n32
+# attribution of the wave errors of nv_nv1_sph_gtc0_g2: tensile correction vs SPH divergence
+nv_nv1_sph_gtc0_g2_notc W3:n128
+nv_nv1_sph_gtc0_g2_mdiv W3:n128
+nv_nv1_sph_gtc0_g2_notc W1t:n128
+nv_nv1_sph_gtc0_g2_mdiv W1t:n128
+nv_nv1_sph_gtc0_g2_notc W3:n64
+nv_nv1_sph_gtc0_g2_mdiv W3:n64
+nv_nv1_sph_gtc0_g2_notc W1t:n64
+nv_nv1_sph_gtc0_g2_mdiv W1t:n64
