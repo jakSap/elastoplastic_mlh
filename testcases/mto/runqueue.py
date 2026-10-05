@@ -4,7 +4,8 @@ of the queue file, which is re-read every time a slot frees -- lines can be inse
 while it runs. State (started lines) in runs/queue_state.txt; jobs via queue_job.sh.
 
     ./runqueue.py queue/2026-10-03.txt [-j 4]
-Runs on battery too (user 10-03); waits only while Low Power Mode is on.
+Runs on battery and in Low Power Mode (user 10-05: the laptop on Low Power Mode is the only machine;
+timings are ~10x the calibrated estimates then).
 """
 import os, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); os.chdir(HERE)
@@ -42,9 +43,7 @@ def busy(running):
 def started():
     return set(open(STATE).read().splitlines()) if os.path.exists(STATE) else set()
 
-while not power_ok():
-    log("waiting for Low Power Mode off"); time.sleep(120)
-log("dynamic queue {} started (-j {})".format(Q, J))
+log("dynamic queue {} started (-j {}, Low Power Mode {})".format(Q, J, "off" if power_ok() else "on"))
 running = {}
 while True:
     for e, p in list(running.items()):

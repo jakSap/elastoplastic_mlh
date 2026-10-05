@@ -62,6 +62,11 @@ public:
     double (*vxGradRaw)[DIM], (*vyGradRaw)[DIM];
     void storeRawVelocityGradients();
 #endif
+#if ART_VISC
+    /// Artificial viscosity coefficient eta_AV of this step (see ART_VISC), from the unlimited gradients.
+    double *artEta;
+    void compArtVisc();
+#endif
 
 #if OUTPUT_CONDITION_NUMBER
     double *conditionNumber;
@@ -208,6 +213,10 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
 #if RECON_FACE_TRACTION
                                    // per-side reconstructed face stress {Sxx,Sxy,Syy}
                                    , const double *SfaceI, const double *SfaceJ
+#endif
+#if NUM_VISC
+                                   // reconstructed face velocity jump v_R - v_L, lab frame (see NUM_VISC)
+                                   , const double *jRec
 #endif
 #if PERIODIC_BOUNDARIES
                                    , const Particles *gp = nullptr

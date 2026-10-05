@@ -263,6 +263,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
     vxGradRaw = new double[numParticles][DIM]();
     vyGradRaw = new double[numParticles][DIM]();
 #endif
+#if ART_VISC
+    artEta = new double[numParticles]();
+#endif
     vyGrad = new double[numParticles][DIM];
     PGrad = new double[numParticles][DIM];
 
@@ -520,6 +523,9 @@ Particles::~Particles() {
     delete[] vxGrad;
 #if STORE_RAW_VGRAD
     delete[] vxGradRaw; delete[] vyGradRaw;
+#endif
+#if ART_VISC
+    delete[] artEta;
 #endif
     delete[] vyGrad;
     delete[] PGrad;
@@ -852,9 +858,16 @@ void Particles::compParticleTensileStress(){
 // Port of GIZMO solids/elastic_stress_tensor_force.h (eigenvalue branch), in the
 // demonstrator's lab frame. Computed once per pair (i<jj); the flux-symmetry copy
 // negates it for jj, matching GIZMO's antisymmetric +i/-j application.
+#if NUM_VISC
+static_assert(NUM_VISC_L >= 0. && NUM_VISC_L <= 1. && NUM_VISC_T >= 0. && NUM_VISC_T <= 1.,
+              "NUM_VISC_L and NUM_VISC_T must lie in [0, 1].");
+#endif
 void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &fIn, double *Fout
 #if RECON_FACE_TRACTION
                                           , const double *SfaceI, const double *SfaceJ
+#endif
+#if NUM_VISC
+                                          , const double *jRec
 #endif
 #if PERIODIC_BOUNDARIES
                                           , const Particles *gp
@@ -1096,9 +1109,9 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
 #else
     const double wt_t = (denT > 0.) ? rhoi*cTi*rhoj*cTj / denT * FNormT : 0.;
 #endif
-#if RECON_FACE_DV
+#if RECON_FACE_DV || NUM_VISC
     // wt_rt is the fused radial coefficient of the raw-dv form; the RECON_FACE_DV
-    // path uses the explicitly decomposed wt_r/wt_t channels instead.
+    // and NUM_VISC paths use the explicitly decomposed wt_r/wt_t channels instead.
 #else
     const double wt_rt = (wt_r - wt_t) * vdotr * rinv * rinv;
 #endif
@@ -1201,7 +1214,18 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
     const double cDev[2] = { cmag[0], cmag[1] };
 #endif
     // HLL-type dissipation of velocity differences (longitudinal + transverse shear wave)
-#if RECON_FACE_DV
+#if NUM_VISC
+    {
+        // per channel: (1 - w) reconstructed face jump + w bare difference (see NUM_VISC)
+        const double wL = NUM_VISC_L, wT = NUM_VISC_T;
+        const double jL[2] = { (1. - wL)*jRec[0] + wL*dv[0], (1. - wL)*jRec[1] + wL*dv[1] };
+        const double jT[2] = { (1. - wT)*jRec[0] + wT*dv[0], (1. - wT)*jRec[1] + wT*dv[1] };
+        const double projR = (jL[0]*dx + jL[1]*dy) * rinv * rinv;
+        const double projT = (jT[0]*dx + jT[1]*dy) * rinv * rinv;
+        cmag[0] -= wt_r*projR*dx + wt_t*(jT[0] - projT*dx);
+        cmag[1] -= wt_r*projR*dy + wt_t*(jT[1] - projT*dy);
+    }
+#elif RECON_FACE_DV
     // Reconstructed face jump: the R row is particle i extrapolated to the shared
     // face point xij, the L row is particle jj extrapolated to the same point.
     // Both carry the same vFrame, so it cancels in the difference. For any linear
@@ -1358,6 +1382,26 @@ void Particles::addGizmoElasticStressFlux(int i, int jj, int ii, const double &f
             // r = x_i - x_j = (dx, dy); W r = w (-dy, dx)
             const double vt[2] = { dv[0] + w*dy, dv[1] - w*dx };
             const double cv = eta * FNormT * rinv;
+            cmag[0] -= cv*vt[0];
+            cmag[1] -= cv*vt[1];
+        }
+    }
+#endif
+#if ART_VISC
+    // Artificial viscosity (see ART_VISC): the objective Morris pair form of MATERIAL_VISCOSITY with the
+    // arithmetic pair mean of eta_AV (a ghost carries its parent's coefficient and gradient).
+    {
+#if PERIODIC_BOUNDARIES
+        const int jA = gp ? gp->parent[jj] : jj;
+#else
+        const int jA = jj;
+#endif
+        const double etaA = 0.5*(artEta[i] + artEta[jA]);
+        if (etaA > 0.){
+            const double w = 0.25*(vyGradRaw[i][0] - vxGradRaw[i][1]
+                                   + vyGradRaw[jA][0] - vxGradRaw[jA][1]);
+            const double vt[2] = { dv[0] + w*dy, dv[1] - w*dx };
+            const double cv = etaA * FNormT * rinv;
             cmag[0] -= cv*vt[0];
             cmag[1] -= cv*vt[1];
         }
@@ -4188,6 +4232,19 @@ void Particles::storeRawVelocityGradients(){
 }
 #endif
 
+#if ART_VISC
+void Particles::compArtVisc(){
+    // eta_AV = rho (ART_VISC_C dx)^2 |D|, D = sym(grad v) from the unlimited gradients (see ART_VISC)
+    for (int i=0; i<N; ++i){
+        const double dxx = vxGradRaw[i][0], dyy = vyGradRaw[i][1];
+        const double dxy = 0.5*(vxGradRaw[i][1] + vyGradRaw[i][0]);
+        const double Dn = std::sqrt(dxx*dxx + dyy*dyy + 2.*dxy*dxy);
+        const double L = ART_VISC_C * std::sqrt(m[i]/rho[i]);   // DIM == 2 (guarded)
+        artEta[i] = rho[i] * L*L * Dn;
+    }
+}
+#endif
+
 void Particles::slopeLimiter(Particles *ghostParticles){
     double *rhoGhost = nullptr, *vxGhost = nullptr, *vyGhost = nullptr,
 #if DIM==3
@@ -4462,6 +4519,13 @@ double Particles::compElasticTimestep(){
                 const double dtv = 0.25*rho[i]*L*L/eta;
                 if (dtv < dt) dt = dtv;
             }
+        }
+#endif
+#if ART_VISC
+        if (artEta[i] > 0.){   // explicit artificial viscosity, same bound as MATERIAL_VISCOSITY
+            const double L = std::sqrt(m[i]/rho[i]);
+            const double dtv = 0.25*rho[i]*L*L/artEta[i];
+            if (dtv < dt) dt = dtv;
         }
 #endif
         dt_ = dt < dt_ ? dt : dt_;
@@ -5514,6 +5578,10 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 int matIdR_ii = 0;
                 int matIdL_ii = 0;
 #endif
+#if NUM_VISC
+                // reconstructed velocity jump in the lab frame: the solver rotates WijR/WijL in place
+                const double jRec[2] = { WijR[ii][2] - WijL[ii][2], WijR[ii][3] - WijL[ii][3] };
+#endif
                 Riemann solver { WijL[ii], WijR[ii], vFrame[ii], Aij[ii], i,
                                 matIdL_ii, matIdR_ii, *MeshlessEOS
 #if ELASTIC
@@ -5577,6 +5645,9 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 addGizmoElasticStressFlux(i, jj, ii, fTC, Fij[ii]
 #if RECON_FACE_TRACTION
                                           , SfaceI_loc, SfaceJ_loc
+#endif
+#if NUM_VISC
+                                          , jRec
 #endif
                                           );
 #if CONTACT_NO_TENSION
@@ -5785,6 +5856,10 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 // WijLGhosts) and the L slots the i-side. Passing the stress the
                 // other way round -- as this call site used to -- silently hands
                 // the solver each side's neighbour stress.
+#if NUM_VISC
+                const double jRec[2] = { WijRGhosts[ii][2] - WijLGhosts[ii][2],
+                                         WijRGhosts[ii][3] - WijLGhosts[ii][3] };
+#endif
                 Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i,
                                matIdL_g, matIdR_g, *MeshlessEOS
 #if ELASTIC
@@ -5820,6 +5895,9 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                     addGizmoElasticStressFlux(i, jj, ii, fTCg, FijGhosts[ii]
 #if RECON_FACE_TRACTION
                                               , SfaceI_g, SfaceJ_g
+#endif
+#if NUM_VISC
+                                              , jRec
 #endif
                                               , &ghostParticles
                                               );

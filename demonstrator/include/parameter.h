@@ -525,6 +525,36 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // keeps the residual dissipation from turning anti-dissipative where the gradients are inexact.
 #define RECON_RESID_MINMOD 0
 
+// Numerical viscosity of the HLL damping in the GIZMO elastic stress flux (2026-10-05, branch num-visc).
+// The HLL damping acts on a velocity jump in two channels: longitudinal (along r_ij) and transverse.
+// Each channel's jump blends the RECONSTRUCTED face jump v_R - v_L (the HLLC's own limited,
+// time-predicted face states at the pair midpoint, taken in the lab frame before the Riemann solver
+// rotates them) with the BARE particle difference v_i - v_j:
+//     jump = (1 - w) (v_R - v_L) + w (v_i - v_j),   w = NUM_VISC_L (longitudinal), NUM_VISC_T (transverse).
+// w is a numerical viscosity and is named as one: the bare difference is O(h) for any smooth field,
+// so every w > 0 makes the damping first order with strength w. w = 0 is the Godunov/MUSCL damping:
+// zero for any linear field (rigid rotation included), O(h^2) in smooth flow, full strength at
+// discontinuities and on grid-scale (zigzag) modes, which the reconstruction cannot follow.
+// Replaces RECON_FACE_DV (which must be 0): DV 0 ~ (1, 1); DV 1 ~ (1, 0) and DV 2 ~ (0, 0), both
+// without their frame error (DV 1/2 read the face states after the solver rotated them).
+//   NUM_VISC 0 = off, RECON_FACE_DV decides (baseline, bit-identical)
+//   NUM_VISC 1 = on, weights NUM_VISC_L / NUM_VISC_T in [0, 1]
+#define NUM_VISC 0
+#define NUM_VISC_L 1.
+#define NUM_VISC_T 1.
+
+// Artificial viscosity (2026-10-05, branch num-visc): quadratic (von Neumann-Richtmyer type)
+// coefficient in the objective Morris pair form of MATERIAL_VISCOSITY,
+//     eta_AV,i = rho_i (ART_VISC_C dx_i)^2 |D_i|,   dx_i = (m_i/rho_i)^(1/DIM),   |D| = sqrt(D:D),
+// D = sym(grad v) from the unlimited gradients; pair coefficient (eta_AV,i + eta_AV,j)/2.
+// It scales with h^2 and with the strain rate: O(h^2) in smooth flow (and ~amplitude^2, so negligible
+// for small-amplitude waves at every resolution), strong in impacts, zero for rigid rotation (D = 0,
+// and the pair form removes the spin). One formula everywhere, no switch. Energy via the work term;
+// timestep dt <= 0.25 rho dx^2 / eta_AV.
+//   0 = off (baseline, bit-identical), 1 = on
+#define ART_VISC 0
+#define ART_VISC_C 1.
+
 // Nonlinearity switch for the GIZMO-like stabilisers (2D). phi_i = min(1, max(0, s_i/RECON_FACE_DV6_S0 - 1))
 // with s_i = h_i |D_i| / c_i (raw gradients; D = sym(grad v) vanishes for rigid rotation), the same
 // indicator as RECON_FACE_DV 6. Small-amplitude waves and rigid rotation have phi = 0, impacts and
@@ -661,7 +691,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       S_R = max(v_L,v_R) + max(a_L,a_R)
 #define HLLC_WAVESPEED_GIZMO 1
 
-#define STORE_RAW_VGRAD (MATERIAL_VISCOSITY || STRESS_RATE_RAW_GRAD || RECON_FACE_DV >= 3 || GNOG_PENALTY || NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE)
+#define STORE_RAW_VGRAD (MATERIAL_VISCOSITY || STRESS_RATE_RAW_GRAD || RECON_FACE_DV >= 3 || GNOG_PENALTY || NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE || ART_VISC)
 
 // Limited longitudinal dissipation of the GIZMO stress flux (option O5, Zhang-Hu-
 // Adams / Rezavand form): the impedance speeds of wt_r are replaced by
@@ -1176,6 +1206,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #endif
 #if GNOG_PENALTY && (DIM != 2 || !ELASTIC || (GNOG_PENALTY == 1 && PERIODIC_BOUNDARIES))
 #error "GNOG_PENALTY: DIM 2 and ELASTIC only; mode 1 also non-periodic."
+#endif
+#if NUM_VISC && (RECON_FACE_DV || !GIZMO_ELASTIC_FLUX || !USE_HLLC || DIM != 2 || AM_NO_TDISS || TORQUE_DIAG || CONTACT_FORCE_DIAG)
+#error "NUM_VISC replaces RECON_FACE_DV (set it to 0); DIM 2, HLLC + GIZMO elastic flux, no AM_NO_TDISS / TORQUE_DIAG / CONTACT_FORCE_DIAG."
+#endif
+#if ART_VISC && !(GIZMO_ELASTIC_FLUX && DIM == 2 && (EOS == 1 || EOS == 2))
+#error "ART_VISC lives in the 2D GIZMO elastic stress flux (EOS 1/2)."
 #endif
 #if RECON_FACE_DV >= 3 && DIM != 2
 #error "RECON_FACE_DV 3/4 (residual jump) is implemented for DIM == 2 only."

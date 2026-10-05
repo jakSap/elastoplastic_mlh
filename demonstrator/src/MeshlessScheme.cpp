@@ -339,6 +339,9 @@ void MeshlessScheme::run(){
 #if NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE
         particles->compNonlinSwitch(timeStep);
 #endif
+#if ART_VISC
+        particles->compArtVisc();
+#endif
 #endif
 
 #if SLOPE_LIMITING
@@ -410,6 +413,9 @@ void MeshlessScheme::run(){
         particles->storeRawVelocityGradients();
 #if NL_SWITCH_TC || NL_SWITCH_DIVV || NL_SWITCH_FACE
         particles->compNonlinSwitch(timeStep);
+#endif
+#if ART_VISC
+        particles->compArtVisc();
 #endif
 #endif
 #if SLOPE_LIMITING

@@ -1,0 +1,12 @@
+# num-visc v1 (nv_c2): one scheme for every test -- reconstructed HLL jump in both channels + quadratic AV (C = 2).
+# Screening on the laptop in Low Power Mode: Tillotson waves n32..n128, rods w16 / w10. Disc and rings later.
+nv_c2 P1:w16
+nv_c2 W3:n128
+nv_c2 W2:n128
+nv_c2 W1t:n128
+nv_c2 P1:w10
+nv_c2 W3:n64
+nv_c2 W2:n64
+nv_c2 W1t:n64
+nv_c2 W3:n32
+nv_c2 W1t:n32
