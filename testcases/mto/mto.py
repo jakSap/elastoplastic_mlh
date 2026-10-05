@@ -97,7 +97,8 @@ def sml_overrides(cand):
 def rung_for(cand, test, tag):
     """The rung as the candidate runs it: lib/tests.py + the candidate's @mat overrides, and the
     candidate's kernel / neighbour number (kernelSize, NNNTarget, wave mass correction) and 2D
-    P-wave modulus (wave IC + reference speed under STRESS_2D_GIZMO)."""
+    P-wave modulus (wave IC + reference speed under STRESS_2D_GIZMO), and the disc's
+    equilibrium pre-stress (2D or 3D deviator under STRESS_2D_GIZMO)."""
     r = T.rung(test, tag)
     so = sml_overrides(cand)
     if so:
@@ -111,6 +112,14 @@ def rung_for(cand, test, tag):
     r["nnn"], r["ic_tag"] = nnn, tag
     if nnn != 32:
         r["kernel"] = r["kernel"] * (nnn / 32.0) ** 0.5
+    if r["gen"] == "disc":
+        # seeded spinning equilibrium (gen.disc): the material after @mat overrides and the
+        # deviator of the build; own cache name, ics/A1_<tag>.h5 stays the unstressed lattice
+        # (GIZMO control, which zeroes S at start)
+        mat = r["materials"][0]
+        dd = 2 if pm1 else 3
+        r["genargs"] = dict(r["genargs"], mu=mat["mu"], K=mat["A"], dev_dim=dd)
+        r["ic_tag"] = tag + "_eq{}".format(dd) + ("" if mat["mu"] == T.MU_BODY else "_mu{:g}".format(mat["mu"]))
     if r["gen"] == "wave" and (nnn != 32 or kern != 6 or pm1):
         r["genargs"] = dict(r["genargs"], nnn=nnn, kernel=kern, pmod=1.0 if pm1 else 4.0 / 3.0)
         r["ic_tag"] = tag + ("_k{}n{}".format(kern, nnn) if (nnn != 32 or kern != 6) else "") \
@@ -471,6 +480,28 @@ def cmd_status(args):
                     st = "run  t={:.4g}/{:.4g} ({:.0%}) {:.0f}s, ETA {:.0f}s".format(
                         t or 0, m["t_end"], frac, el, eta)
                 print("{:10s} {:5s} {:8s} {}".format(cand, test, tag, st))
+    if not args.cand:
+        gizmo_status()
+
+
+def gizmo_status():
+    """GIZMO control runs (gizmo/runs/*): progress from run.log, ETA from the wall time since ic.hdf5."""
+    G = os.path.join(HERE, "gizmo", "runs")
+    for name in sorted(os.listdir(G)) if os.path.isdir(G) else []:
+        D = os.path.join(G, name)
+        log, ic = os.path.join(D, "output", "cpu.txt"), os.path.join(D, "ic.hdf5")
+        if not (os.path.exists(log) and os.path.exists(ic)) or time.time() - os.path.getmtime(log) > 600:
+            continue
+        t_end = 6.0
+        last = [l for l in open(log, errors="ignore").read().splitlines() if l.startswith("Step ")]
+        if not last:
+            continue
+        t = float(last[-1].split("Time:")[1].split(",")[0])
+        if t >= t_end:
+            continue
+        el = time.time() - os.path.getmtime(ic)
+        print("{:10s} {:5s} {:8s} run  t={:.4g}/{:.4g} ({:.0%}) {:.0f}s, ETA {:.0f}s".format(
+            "GIZMO", "P1", name, t, t_end, t / t_end, el, el / (t / t_end) - el if t > 0 else float("nan")))
 
 
 def cmd_analyze(args):

@@ -1,0 +1,26 @@
+# fin1_g2_eta001 (eta 0.01, CONTACT_NO_TENSION 1): same list as fin1_g2_eta001_nc
+fin1_g2_eta001 T1:d0.05
+fin1_g2_eta001 T1:d0.08
+fin1_g2_eta001 T1:d0.1
+fin1_g2_eta001 A1:d0.025
+fin1_g2_eta001 A1:d0.035
+fin1_g2_eta001 A1:d0.05
+fin1_g2_eta001 P1:w24
+fin1_g2_eta001 P1:w16
+fin1_g2_eta001 P1:w10
+fin1_g2_eta001 T2:d0.025
+fin1_g2_eta001 W4p:n32
+fin1_g2_eta001 W4p:n64
+fin1_g2_eta001 W4p:n128
+fin1_g2_eta001 W4s:n32
+fin1_g2_eta001 W4s:n64
+fin1_g2_eta001 W4s:n128
+fin1_g2_eta001 W3:n64
+fin1_g2_eta001 W3:n128
+fin1_g2_eta001 W3:n256
+fin1_g2_eta001 W2:n64
+fin1_g2_eta001 W2:n128
+fin1_g2_eta001 W2:n256
+fin1_g2_eta001 W1t:n64
+fin1_g2_eta001 W1t:n128
+fin1_g2_eta001 W1t:n256

@@ -1,0 +1,9 @@
+# GIZMO rotating disc, half a rotation (t_end = 15.708), purely elastic, d0 = 0.05 .. 0.005 (N = 1.2e3 .. 1.3e5);
+# the biggest rungs on several MPI ranks from the start. d0.05 was run as a smoke test.
+@sh python3 gizmo/disc.py d0.005 --np 3
+@sh python3 gizmo/disc.py d0.00625 --np 2
+@sh python3 gizmo/disc.py d0.00884
+@sh python3 gizmo/disc.py d0.0125
+@sh python3 gizmo/disc.py d0.0177
+@sh python3 gizmo/disc.py d0.025
+@sh python3 gizmo/disc.py d0.035

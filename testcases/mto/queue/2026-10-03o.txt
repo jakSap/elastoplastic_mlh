@@ -1,4 +1,4 @@
-# fin1_g2_eta1_mn (= fin1_g2_eta1 + VISC_MOMENT_NORM): body testcases and all waves (W4 already done)
+# started entries (kept for the record)
 fin1_g2_eta1_mn T1:d0.08
 fin1_g2_eta1_mn T1:d0.1
 fin1_g2_eta1_mn A1:d0.025
@@ -24,3 +24,97 @@ fin1_g2_eta1_mn W3:n64
 fin1_g2_eta1_mn W3:n128
 fin1_g2_eta1_mn W3:n256
 fin1_g2_eta1_mn T1:d0.05
+fin1_g2_eta001_nc T1:d0.05
+fin1_g2_eta001_nc T1:d0.08
+fin1_g2_eta001_nc T1:d0.1
+fin1_g2_eta001_nc A1:d0.025
+fin1_g2_eta001_nc A1:d0.035
+fin1_g2_eta001_nc A1:d0.05
+fin1_g2_eta001_nc P1:w24
+fin1_g2_eta001_nc P1:w16
+fin1_g2_eta001_nc P1:w10
+fin1_g2_eta001_nc T2:d0.025
+fin1_g2_eta001_nc W4p:n32
+fin1_g2_eta001_nc W4p:n64
+fin1_g2_eta001_nc W4p:n128
+fin1_g2_eta001_nc W4s:n32
+fin1_g2_eta001_nc W4s:n64
+fin1_g2_eta001_nc W4s:n128
+fin1_g2_eta001_nc W3:n64
+fin1_g2_eta001_nc W3:n128
+fin1_g2_eta001_nc W3:n256
+fin1_g2_eta001_nc W2:n64
+fin1_g2_eta001_nc W2:n128
+fin1_g2_eta001_nc W2:n256
+fin1_g2_eta001_nc W1t:n64
+fin1_g2_eta001_nc W1t:n128
+fin1_g2_eta001_nc W1t:n256
+fin1_g2_eta001 T1:d0.05
+fin1_g2_eta001 T1:d0.08
+# PRIORITY 1 (user via ma-all-80, 10-04): P1 viscosity sweep eta*(w); GIZMO controls at the same eta
+fin1_g2_eta002 P1:w24
+fin1_g2_eta002 P1:w16
+fin1_g2_eta002 P1:w10
+fin1_g2_eta003 P1:w24
+fin1_g2_eta003 P1:w16
+fin1_g2_eta003 P1:w10
+fin1_g2_eta005 P1:w24
+fin1_g2_eta005 P1:w16
+fin1_g2_eta005 P1:w10
+GIZMO w24 --eta 0.02
+GIZMO w16 --eta 0.02
+GIZMO w10 --eta 0.02
+GIZMO w24 --eta 0.05
+GIZMO w16 --eta 0.05
+GIZMO w10 --eta 0.05
+GIZMO w24 --eta 0.1
+GIZMO w16 --eta 0.1
+GIZMO w10 --eta 0.1
+# optional: w34 for eta 0.03 / 0.05 (ours + GIZMO control), then rings d0.08 at those eta
+fin1_g2_eta003 P1:w34
+fin1_g2_eta005 P1:w34
+GIZMO w34 --eta 0.03
+GIZMO w34 --eta 0.05
+fin1_g2_eta003 T1:d0.08
+# EXTENSION 1 (ma-all-80, user: sweep may use the machine until ~08:00): refine the bracket, eta 0.04
+fin1_g2_eta004 P1:w24
+fin1_g2_eta004 P1:w16
+fin1_g2_eta004 P1:w10
+GIZMO w24 --eta 0.04
+GIZMO w16 --eta 0.04
+GIZMO w10 --eta 0.04
+# EXTENSION 2: finer resolution at the bracketing eta (w34; w48 skipped: 2.4-3.9 h each)
+fin1_g2_eta004 P1:w34
+GIZMO w34 --eta 0.04
+fin1_g2_eta005 T1:d0.08
+# PRIORITY (user 10-04): eta 0.01 with no-tension contact (fin1_g2_eta001); the _nc series was stopped
+fin1_g2_eta001 P1:w24
+fin1_g2_eta001 P1:w16
+fin1_g2_eta001 P1:w10
+fin1_g2_eta001 T2:d0.025
+fin1_g2_eta001 T1:d0.1
+fin1_g2_eta001 W4p:n32
+fin1_g2_eta001 W4p:n64
+fin1_g2_eta001 W4p:n128
+fin1_g2_eta001 W4s:n32
+fin1_g2_eta001 W4s:n64
+fin1_g2_eta001 W4s:n128
+fin1_g2_eta001 A1:d0.025
+fin1_g2_eta001 A1:d0.035
+fin1_g2_eta001 A1:d0.05
+fin1_g2_eta001 W3:n64
+fin1_g2_eta001 W3:n128
+fin1_g2_eta001 W3:n256
+fin1_g2_eta001 W2:n64
+fin1_g2_eta001 W2:n128
+fin1_g2_eta001 W2:n256
+fin1_g2_eta001 W1t:n64
+fin1_g2_eta001 W1t:n128
+fin1_g2_eta001 W1t:n256
+# resolution study vs GIZMO (2x particles of w24, eta 0.1, current default)
+fin1_g2_eta1_mn P1:w34
+# EXTENSION 3: rings d0.08 at the eta bracketing eta* (0.04) and one inside the ring bracket 0.05-0.1 (0.07)
+fin1_g2_eta004 T1:d0.08
+fin1_g2_eta007 T1:d0.08
+# EXTENSION 4: rings d0.08 at eta 0.085 (ring threshold between 0.07 and 0.1)
+fin1_g2_eta0085 T1:d0.08

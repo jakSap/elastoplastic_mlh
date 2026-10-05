@@ -20,11 +20,13 @@ MU_WAVE = 6.0 / 13.0                    # nu = 0.3 at K = 1 (wave studies)
 ROD = dict(mu=0.5, Y0=0.1, v=0.2, length=1.0, width=0.25, gap=0.1)
 
 
-def till(mu, Y0=None):
+def till(mu, Y0=None, eta=None):
     m = dict(matId=0, rho0=1.0, A=1.0, B=0.0, u0=1.0, a=0.0, b=0.0, alpha=0.0, beta=0.0,
              u_iv=0.05, u_cv=0.18, mu=mu)
     if Y0 is not None:
         m["Y0"] = Y0
+    if eta is not None:                  # None = the code default (MATERIAL_ETA_DEFAULT)
+        m["eta"] = eta
     return m
 
 
@@ -70,19 +72,19 @@ def rungs_T2():   # offset blocks, contact t ~ 0.85
             for d in (0.05, 0.025, 0.0177, 0.0125)}
 
 
-def rungs_A1():   # rotating disc, one rotation at omega = 0.2
+def rungs_A1():   # rotating disc, one rotation at omega = 0.2; mto.py rung_for seeds the spinning equilibrium
     c = math.sqrt(1 + 4 / 3 * MU_BODY)
     T = 2 * math.pi / 0.2
     return {"d{:g}".format(d): _body("A1", "disc", d, T, T / 20, 3.0, c, till(MU_BODY),
                                      omega=0.2)
-            for d in (0.05, 0.035, 0.025, 0.0177)}
+            for d in (0.05, 0.035, 0.025, 0.0177, 0.0125, 0.00884, 0.00625, 0.005, 0.005 / 3, 0.002)}   # < 0.0177: GIZMO resolution study only
 
 
 def rungs_P1():   # Taylor rods
     c = math.sqrt(1 + 4 / 3 * ROD["mu"])
     w = ROD["width"]
     out = {}
-    for cells in (10, 16, 24):
+    for cells in (10, 16, 24, 34, 48):   # 34, 48: 2x and 4x the particles of w24 (resolution study vs GIZMO, 10-04), in no tier
         d = w / cells
         out["w{}".format(cells)] = _body("P1", "rod", d, 6.0, 0.1, 4.0, c,
                                          till(ROD["mu"], ROD["Y0"]),
@@ -91,14 +93,15 @@ def rungs_P1():   # Taylor rods
     return out
 
 
-def rungs_wave(test, mode, eos, mu, ns=(32, 64, 128, 256)):
+def rungs_wave(test, mode, eos, mu, ns=(32, 64, 128, 256), eta=0.0):
+    """eta: viscosity of the Tillotson waves (0 = the inviscid W1-W3; None = the code default)."""
     c = _wave_speed(eos, mu, mode)
     T = 1.0 / c
     out = {}
     for n in ns:
         d = 1.0 / n
         mat = None if eos == "ideal" else (dict(MURN, mu=mu) if eos == "murnaghan"
-                                           else till(mu))
+                                           else till(mu, eta=eta))
         out["n{}".format(n)] = dict(test=test, gen="wave", d=d,
                                     genargs=dict(n=n, mode=mode, eos=eos, mu=mu),
                                     t_end=T, dump=T / 10, box=None, kernel=d * SQ,
@@ -120,8 +123,8 @@ TESTS = {
     "W2": ("wave_e2", lambda: rungs_wave("W2", "p", "tillotson", MU_WAVE), "P-wave, mu = 6/13"),
     "W3": ("wave_e2", lambda: rungs_wave("W3", "s", "tillotson", MU_WAVE), "shear wave"),
     # viscous-wave study (10-03): mu = 1 Tillotson, low-resolution ladder; eta via the candidate's @mat
-    "W4p": ("wave_e2", lambda: rungs_wave("W4p", "p", "tillotson", 1.0, ns=(32, 64, 128)), "P-wave, mu = 1"),
-    "W4s": ("wave_e2", lambda: rungs_wave("W4s", "s", "tillotson", 1.0, ns=(32, 64, 128)), "shear wave, mu = 1"),
+    "W4p": ("wave_e2", lambda: rungs_wave("W4p", "p", "tillotson", 1.0, ns=(32, 64, 128), eta=None), "P-wave, mu = 1"),
+    "W4s": ("wave_e2", lambda: rungs_wave("W4s", "s", "tillotson", 1.0, ns=(32, 64, 128), eta=None), "shear wave, mu = 1"),
 }
 
 # Tiers = which (test, rung) pairs a stage runs. Order inside a tier does not matter:

@@ -1,0 +1,4 @@
+# resolution study (record only; GIZMO runs were started by hand at 00:50, ours was inserted into queue 2026-10-03o)
+GIZMO w34
+GIZMO w48
+fin1_g2_eta1_mn P1:w34

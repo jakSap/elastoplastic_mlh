@@ -8,8 +8,8 @@
 // Defaults since 2026-10-03 = the mto configuration that passes the whole testplan (rings, blocks,
 // Taylor rods, rotating disc with 2nd-order angular momentum, all waves 2nd order): candidate
 // testcases/mto/candidates/fin1_g2_eta1_mn.flags. Runtime part, not set here: smoothing-length
-// tolerance sml.tol 1e-10 (SML_TOL is only the fallback) and material viscosity eta 0.1 on the
-// bodies (config key `eta`, mu = 0.22 / 0.5 in code units). Flags documented as "0 = baseline"
+// tolerance sml.tol 1e-10 (SML_TOL is only the fallback); the material viscosity eta defaults to
+// MATERIAL_ETA_DEFAULT 0.1 (config key `eta` overrides, `eta 0` switches it off). Flags documented as "0 = baseline"
 // below refer to the pre-10-03 baseline, which testcases/mto/flags/base.flags still pins.
 
 /// possible values 2 or 3 for 2D or 3D simulations
@@ -587,6 +587,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 ///   0 = off (baseline, bit-identical)
 ///   1 = on (materials with eta > 0)
 #define MATERIAL_VISCOSITY 1
+
+/// Shear viscosity of a Tillotson material whose config block has no `eta` key
+/// (only used where MATERIAL_VISCOSITY is on). 0.1 since 2026-10-03: the plasticity of the Taylor rods needs
+/// some viscosity to stay well behaved (no clumping). Elastic-only waves and viscosity-free studies set
+/// `eta 0` explicitly in their material block.
+#define MATERIAL_ETA_DEFAULT 0.1
 
 /// Kernel-moment normalisation of the MATERIAL_VISCOSITY pair coefficient
 /// (2026-10-03, mto W4p/W4s). The pair force is eta * <operator> with

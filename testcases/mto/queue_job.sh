@@ -4,6 +4,12 @@
 # removed from the state file after a pause, so the runner starts it again later.
 cd "$(dirname "$0")"
 if [ "$1" = "@sh" ]; then shift; sh -c "$*" >> runs/queue_jobs.log 2>&1; exit; fi
+if [ "$1" = "GIZMO" ]; then   # "GIZMO <rung> [--eta E]": GIZMO P1 control (gizmo/rod.py) on the mto IC of the rung
+    shift; rung="$1"; echo "$(date +%H:%M:%S) start GIZMO $*" >> runs/queue_jobs.log
+    ./mto.py plan ref --only "P1:$rung" > /dev/null 2>&1          # makes ics/P1_<rung>.h5
+    out=$(python3 gizmo/rod.py "$@" 2>&1); rc=$?
+    echo "$out" >> runs/queue_jobs.log; echo "$(date +%H:%M:%S) done  GIZMO $* (exit $rc)" >> runs/queue_jobs.log; exit
+fi
 entry="$*"
 echo "$(date +%H:%M:%S) start $1 $2" >> runs/queue_jobs.log
 out=$(./mto.py run "$1" --only "$2" -j 1 2>&1)

@@ -152,7 +152,7 @@ int main(int argc, char *argv[]){
         m.Y_M           = optD("Y_M");
         m.frictionAngle = optD("frictionAngle");
         m.u_melt        = optD("u_melt");
-        m.eta           = optD("eta");
+        try { m.eta = mEntry.getVal<double>("eta"); } catch (...) { m.eta = MATERIAL_ETA_DEFAULT; }
         if ((int)mats.size() <= id) mats.resize(id + 1);
         mats[id] = m;
         Logger(INFO) << "    > Material " << id
