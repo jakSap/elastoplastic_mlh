@@ -1,0 +1,19 @@
+# wave ladders for the best rods among the second-order-wave schemes
+nv_c8 W3:n128
+nv_c8 W2:n128
+nv_c8 W1t:n128
+nv_p8 W3:n128
+nv_p8 W2:n128
+nv_p8 W1t:n128
+nv_c8 W3:n64
+nv_c8 W3:n32
+nv_c8 W2:n64
+nv_c8 W2:n32
+nv_c8 W1t:n64
+nv_c8 W1t:n32
+nv_p8 W3:n64
+nv_p8 W3:n32
+nv_p8 W2:n64
+nv_p8 W2:n32
+nv_p8 W1t:n64
+nv_p8 W1t:n32
