@@ -1,0 +1,24 @@
+# nv_nv1_sph_ltcU_ng with a smooth onset that starts slightly beyond the local spacing (user 10-05, lever a):
+# f = PREFAC (1 - s/S0)^2 for s = r/dp < S0 = 1.1; close-range strength kept (f(0.5) = 1.25). Price: f(s=1) = 0.035
+# on regular arrangements -> a small permanent stiffness tax (expected W3 c_err plateau ~ -0.2 %).
+RECON_FACE_DV 0
+NUM_VISC 1
+NUM_VISC_L 1.
+NUM_VISC_T 1.
+ART_VISC 0
+TENSILE_CORRECTION 1
+GNOG_PENALTY 0
+ELASTIC_FACE_MODE 2
+STRESS_2D_GIZMO 1
+STRESS_RATE_RAW_GRAD 1
+CONTACT_NO_TENSION 1
+ELASTIC_WORK_SIGN_FIX 1
+MATERIAL_VISCOSITY 0
+EXPLICIT_VOL_SPH_DIVV 1
+TENSILE_CORRECTION_LOCAL 1
+TENSILE_CORRECTION_DAMP 0.
+TC_TOTAL_STRESS_GATE 0
+TENSILE_CORRECTION_S0 1.1
+TENSILE_CORRECTION_PREFAC 4.2
+TENSILE_CORRECTION_POWER 2.
+TENSILE_CORRECTION_FMAX 10.0

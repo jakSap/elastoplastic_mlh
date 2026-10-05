@@ -55,9 +55,9 @@ def main():
 
     plt.rcParams.update({"font.size": 10, "text.color": INK, "figure.facecolor": SURF, "axes.facecolor": SURF})
     if multi:
-        X, Y = 0.40, 0.32
+        X, Y = a.xy or (0.40, 0.32)
         nrow = (len(panels) + 1) // 2
-        fig, axs = plt.subplots(nrow, 2, figsize=(12, 5.6 * nrow + 0.8), dpi=100, squeeze=False)
+        fig, axs = plt.subplots(nrow, 2, figsize=(12, 5.6 * nrow * Y / 0.32 * 0.40 / X + 0.8), dpi=100, squeeze=False)
         axs = axs.ravel()
         for ax in axs[len(panels):]:
             ax.axis("off")

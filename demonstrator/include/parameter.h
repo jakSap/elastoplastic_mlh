@@ -356,6 +356,12 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // internal energy at vmax = 0.60. Physically: never convert more than this
 // fraction of the tensile traction into repulsion.
 #define TENSILE_CORRECTION_FMAX 0.5
+// Onset of the local tensile correction (TENSILE_CORRECTION_LOCAL only): f = PREFAC (1 - s/S0)^POWER for
+// s = r/dp < S0, else 0. S0 = 1 (default, bit-identical): the factor is exactly 0 on any uniform lattice.
+// S0 > 1 starts the push before a pair is inside the local spacing, at the price of a small permanent
+// stiffness tax f(s=1) = PREFAC (1 - 1/S0)^POWER on regular arrangements (a resolution-independent
+// wave-speed offset).
+#define TENSILE_CORRECTION_S0 1.0
 
 // Approach damping (TENSILE_CORRECTION_LOCAL only). 0 disables it.
 //

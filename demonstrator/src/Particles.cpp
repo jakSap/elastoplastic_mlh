@@ -751,7 +751,7 @@ void Particles::computeFabMonaghan(
             const double dpA = pow(m[i] / rho[i], invDim);
             const double dpB = pow(m[j] / rho[j], invDim);
             const double sAB = r / (0.5 * (dpA + dpB));
-            fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = (sAB < 1.) ? (1. - sAB) : 0.;
+            fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = (sAB < TENSILE_CORRECTION_S0) ? (1. - sAB/TENSILE_CORRECTION_S0) : 0.;
 #else
             // q = r_ab / max(h_a, h_b) following Monaghan and GIZMO
             double q = r / std::max(sml[i], sml[j]);
@@ -791,7 +791,7 @@ void Particles::computeFabMonaghan(
                 const double dpB = pow(gp->m[j] / gp->rho[j], invDim);
                 const double sAB = r / (0.5 * (dpA + dpB));
                 fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn]
-                        = (sAB < 1.) ? (1. - sAB) : 0.;
+                        = (sAB < TENSILE_CORRECTION_S0) ? (1. - sAB/TENSILE_CORRECTION_S0) : 0.;
 #else
                 const double q = r / std::max(sml[i], gp->sml[j]);
                 fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn]
