@@ -1,0 +1,12 @@
+# nv_av8_sph_gtc0_g2: numerical -> artificial viscosity on the rods and the Tillotson waves
+nv_av8_sph_gtc0_g2 P1:w16
+nv_av8_sph_gtc0_g2 W3:n128
+nv_av8_sph_gtc0_g2 W2:n128
+nv_av8_sph_gtc0_g2 W1t:n128
+nv_av8_sph_gtc0_g2 P1:w10
+nv_av8_sph_gtc0_g2 W3:n64
+nv_av8_sph_gtc0_g2 W2:n64
+nv_av8_sph_gtc0_g2 W1t:n64
+nv_av8_sph_gtc0_g2 W3:n32
+nv_av8_sph_gtc0_g2 W2:n32
+nv_av8_sph_gtc0_g2 W1t:n32
