@@ -4264,6 +4264,14 @@ void Particles::compArtVisc(){
         }
         artEta[i] = eMax;
     }
+#elif ART_VISC == 3
+    // linear: eta_AV = ART_VISC_C rho c dx, c the P-wave speed (see ART_VISC)
+    for (int i=0; i<N; ++i){
+        const double K  = MeshlessEOS->EOSBulkModulus(matId[i], rho[i], P[i]);
+        const double mu = MeshlessEOS->EOSShearModulus(matId[i]);
+        const double c  = std::sqrt(std::max(0., K + PWAVE_MU_FAC*mu)/rho[i]);
+        artEta[i] = ART_VISC_C * rho[i] * c * std::sqrt(m[i]/rho[i]);   // DIM == 2 (guarded)
+    }
 #else
     // eta_AV = rho (ART_VISC_C dx)^2 |D|, D = sym(grad v) from the unlimited gradients (see ART_VISC)
     for (int i=0; i<N; ++i){

@@ -557,6 +557,10 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 //       eta_ij = rho_ij (ART_VISC_C dx_ij)^2 s_ij (pair means of rho and dx^2). Equals |D r_hat| for a
 //       smooth field, so still O(h^2) and zero for rigid rotation, but it also sees a pair approaching
 //       its partner (pairing, clumping). The timestep uses the largest pair coefficient of a particle.
+//   3 = LINEAR: eta_AV,i = ART_VISC_C rho_i c_i dx_i, c = P-wave speed sqrt((K + PWAVE_MU_FAC mu)/rho):
+//       O(h) like the numerical viscosity of the bare HLL jump (eta_num ~ rho c r_ij), first order, but in
+//       the objective pair form (no braking of rigid rotation), acting on the full pair difference.
+//       Timestep dt <= 0.25 dx / (C c).
 #define ART_VISC 0
 #define ART_VISC_C 1.
 
