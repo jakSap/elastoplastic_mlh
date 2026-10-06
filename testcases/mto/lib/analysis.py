@@ -139,11 +139,23 @@ def sym_error(x, maps, d0, q=99):
     return (max(float(np.percentile(e, q)) for e in errs), max(float(e.max()) for e in errs))
 
 
-def body_gap(x, d0):
-    """Closest distance between the two bodies (index halves), in d0. A welded pair sits at
-    ~1 d0; two bodies that rebounded are many d0 apart."""
+def stray_mask(x, k=6):
+    """Particles left on the other body after a contact (majority of their k nearest neighbours belong
+    to the other index half). Without a contact model a few interface particles get swapped (P1 w34,
+    T1 d0.06, P2 at all rungs, GIZMO too on P2); they must not count as the bodies sticking."""
+    n = len(x)
+    body = np.r_[np.zeros(n // 2, int), np.ones(n - n // 2, int)]
+    _, nb = cKDTree(x).query(x, k + 1)
+    return (body[nb[:, 1:]] != body[:, None]).mean(axis=1) > 0.5
+
+
+def body_gap(x, d0, keep=None):
+    """Closest distance between the two bodies (index halves, stray particles excluded via keep), in d0.
+    A welded pair sits at ~1 d0; two bodies that rebounded are many d0 apart."""
     h = len(x) // 2
-    d, _ = cKDTree(x[:h]).query(x[h:], k=1)
+    if keep is None:
+        keep = np.ones(len(x), bool)
+    d, _ = cKDTree(x[:h][keep[:h]]).query(x[h:][keep[h:]], k=1)
     return float(d.min() / d0)
 
 
@@ -264,7 +276,10 @@ def analyse_body(D, meta, test):
                line_rho=lines["rho"], line_u=lines["u"], asym=float(np.nanmax(S["asym"])),
                asym_max=float(np.nanmax(S["asym_max"])))
     res["rip"] = res["nfrag_max"] > 2 or res["main_frac_min"] < 0.995
-    res["gap_end"] = body_gap(load(snaps[-1][1], ("x",))["x"], d0)
+    xe = load(snaps[-1][1], ("x",))["x"]
+    ke = ~stray_mask(xe)
+    res["gap_end"] = body_gap(xe, d0, ke)
+    res["stray"] = int((~ke).sum())
     res["stuck"] = res["gap_end"] < 2.0
     res["series"] = {k: v.tolist() for k, v in S.items()}
     return res
@@ -364,17 +379,19 @@ def analyse_wave(D, meta, test):
 
 # ------------------------------------------------------------------ rods
 
-def rod_shape(x, d0, half, W0):
-    """Metrics of the right rod (second half of the particles, x > 0)."""
+def rod_shape(x, d0, half, W0, keep=None):
+    """Metrics of the right rod (second half of the particles, x > 0), stray particles excluded."""
     xb = x[half:]
-    xmin = xb[:, 0].min()
-    length = xb[:, 0].max() - xmin
-    near = xb[:, 0] - xmin < 3 * d0
-    width = 2 * np.abs(xb[near, 1]).max() if near.any() else float("nan")
+    kb = np.ones(len(xb), bool) if keep is None else keep[half:]
+    xk = xb[kb]
+    xmin = xk[:, 0].min()
+    length = xk[:, 0].max() - xmin
+    near = xk[:, 0] - xmin < 3 * d0
+    width = 2 * np.abs(xk[near, 1]).max() if near.any() else float("nan")
     bins = np.arange(0.0, length + d0, d0)
     idx = np.clip(((xb[:, 0] - xmin) / d0).astype(int), 0, len(bins) - 1)
     outline = np.zeros(len(bins))
-    np.maximum.at(outline, idx, np.abs(xb[:, 1]))
+    np.maximum.at(outline, idx[kb], np.abs(xk[:, 1]))
     return dict(length=length, width=width, outline=outline, idx=idx, xmin=xmin)
 
 
@@ -408,15 +425,16 @@ def analyse_rod(D, meta):
     asym, asym_max = max(a for a, _ in se), max(b for _, b in se)
     s = load(snaps[-1][1], ("x", "v", "m"))
     x = s["x"]
-    shp = rod_shape(x, d0, half, W0)
-    buried = int(np.sum(surface0 & (np.abs(x[half:, 1]) < shp["outline"][shp["idx"]] - 2.5 * d0)))
+    keep = ~stray_mask(x)
+    shp = rod_shape(x, d0, half, W0, keep)
+    buried = int(np.sum(surface0 & keep[half:] & (np.abs(x[half:, 1]) < shp["outline"][shp["idx"]] - 2.5 * d0)))
     g = geometry_metrics(x, d0, N, 2)
     res = dict(d0=d0, L_ratio=float(shp["length"] / L0), W_ratio=float(shp["width"] / W0),
                plane_clumps=plane_clumps, plane_dmin=plane_dmin, buried=buried,
                outline=(shp["outline"] / W0).tolist(), rip=g["nfrag"] > 2 or g["main_frac"] < 0.995,
                KE_end=float(0.5 * np.sum(s["m"] * np.sum(s["v"] ** 2, axis=1))),
-               gap_end=body_gap(x, d0), stuck=bool(body_gap(x, d0) < 2.0), asym=asym,
-               asym_max=asym_max)
+               gap_end=body_gap(x, d0, keep), stuck=bool(body_gap(x, d0, keep) < 2.0), asym=asym,
+               asym_max=asym_max, stray=int((~keep).sum()))
     res["final_clumps"] = int(np.sum(intra_nn(x, 2) / d0 < CLUMP))
     eta = float((meta.get("materials") or [{}])[0].get("eta", 0.0))
     ctrl_name = meta["tag"] + ("_eta{:g}".format(eta) if eta > 0 else "")
@@ -430,13 +448,14 @@ def analyse_rod(D, meta):
         gs = snapshots(ctrl)
         tg, pg = min(gs, key=lambda a: abs(a[0] - snaps[-1][0]))
         xg = load(pg, ("x",))["x"]
-        gsh = rod_shape(xg, d0, len(xg) // 2, W0)
+        kg = ~stray_mask(xg)
+        gsh = rod_shape(xg, d0, len(xg) // 2, W0, kg)
         n = min(len(gsh["outline"]), len(shp["outline"]))
         gpc, gpd, gcom = plane_metrics(gs, d0, len(xg) // 2)
         gasym = max(sym_error(load(p, ("x",))["x"], maps, d0)[0] for _, p in gs)
         res[key] = dict(t=tg, L_ratio=float(gsh["length"] / L0), plane_clumps=gpc,
-                        plane_dmin=gpd, asym=gasym, gap_end=body_gap(xg, d0),
-                        stuck=bool(body_gap(xg, d0) < 2.0),
+                        plane_dmin=gpd, asym=gasym, gap_end=body_gap(xg, d0, kg),
+                        stuck=bool(body_gap(xg, d0, kg) < 2.0), stray=int((~kg).sum()),
                         W_ratio=float(gsh["width"] / W0),
                         final_clumps=int(np.sum(intra_nn(xg, 2) / d0 < CLUMP)),
                         outline=(gsh["outline"] / W0).tolist())
@@ -494,7 +513,7 @@ def p2_metrics(outdir, x0, d0, half, KE0, t=None):
     KE = float(0.5 * np.sum(s["m"] * np.sum(s["v"] ** 2, axis=1)))
     return dict(t=tt, vx=st[0]["vx"], vy=st[0]["vy"], omega=st[0]["omega"],
                 aspect=st[0]["aspect"], angle=st[0]["angle"], KE_frac=KE / KE0,
-                gap_end=body_gap(s["x"], d0), final_clumps=int(np.sum(intra_nn(s["x"], 2) / d0 < CLUMP)),
+                gap_end=body_gap(s["x"], d0, ~stray_mask(s["x"])), stray=int(stray_mask(s["x"]).sum()), final_clumps=int(np.sum(intra_nn(s["x"], 2) / d0 < CLUMP)),
                 kappa=cq["kappa"], g99=cq["g99"])
 
 
@@ -614,10 +633,10 @@ def summary_line(r):
         s = "dLz(T)={:+.3e} max={:.3e}".format(r.get("dLz_T", float("nan")),
                                                 r.get("dLz_max", float("nan")))
     elif t == "P1":
-        s = "gap={:.1f}d0 L/L0={:.3f} W/W0={:.3f} plane_clumps={} buried={} asym={:.2g}d0".format(
+        s = "gap={:.1f}d0 L/L0={:.3f} W/W0={:.3f} plane_clumps={} buried={} asym={:.2g}d0 stray={}".format(
             r.get("gap_end", float("nan")), r.get("L_ratio", float("nan")),
             r.get("W_ratio", float("nan")), r.get("plane_clumps"), r.get("buried"),
-            r.get("asym", float("nan")))
+            r.get("asym", float("nan")), r.get("stray"))
         if "gizmo" in r:
             s += " | GIZMO gap={:.1f}d0 L/L0={:.3f} W/W0={:.3f} clumps={} outline dL1={:.3f}".format(
                 r["gizmo"]["gap_end"], r["gizmo"]["L_ratio"], r["gizmo"]["W_ratio"],

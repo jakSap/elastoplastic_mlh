@@ -106,10 +106,10 @@ CIRC = dict(R=0.25, gap=0.12, yoff=0.25, v=0.25, t_end=2.0, t_cmp=1.2)
 def rungs_P2():   # offset plastic circles, d = R/8, R/16, R/32
     c = math.sqrt(1 + 4 / 3 * ROD["mu"])
     R = CIRC["R"]
-    return {"c{}".format(k): _body("P2", "circles", R / k, CIRC["t_end"], 0.05, 4.0, c,
+    return {"c{}".format(k): _body("P2", "circles", R / k, 3.0 if k == 64 else CIRC["t_end"], 0.05, 4.0, c,
                                    till(ROD["mu"], ROD["Y0"]),
                                    R=R, gap=CIRC["gap"], yoff=CIRC["yoff"], v=CIRC["v"])
-            for k in (8, 16, 32)}
+            for k in (8, 16, 32, 64)}   # c64: 4x c32's particles, run to t = 3 (does the welded pair bounce off? 10-06)
 
 
 def rungs_wave(test, mode, eos, mu, ns=(32, 64, 128, 256), eta=0.0):
