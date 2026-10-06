@@ -139,14 +139,19 @@ def sym_error(x, maps, d0, q=99):
     return (max(float(np.percentile(e, q)) for e in errs), max(float(e.max()) for e in errs))
 
 
-def stray_mask(x, k=6):
-    """Particles left on the other body after a contact (majority of their k nearest neighbours belong
-    to the other index half). Without a contact model a few interface particles get swapped (P1 w34,
-    T1 d0.06, P2 at all rungs, GIZMO too on P2); they must not count as the bodies sticking."""
+def stray_mask(x, d0):
+    """Particles cut off from their own body (index half): not in the largest connected component
+    (link LINK d0) of their half -- e.g. particles left on the other body after a contact. Without a
+    contact model a few interface particles get carried over (P1 w34, T1 d0.06, P2; GIZMO too on P2);
+    they must not count as the bodies sticking."""
     n = len(x)
-    body = np.r_[np.zeros(n // 2, int), np.ones(n - n // 2, int)]
-    _, nb = cKDTree(x).query(x, k + 1)
-    return (body[nb[:, 1:]] != body[:, None]).mean(axis=1) > 0.5
+    out = np.zeros(n, bool)
+    for b in (np.arange(n // 2), np.arange(n // 2, n)):
+        pairs = cKDTree(x[b]).query_pairs(LINK * d0, output_type="ndarray")
+        g = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])), shape=(len(b), len(b)))
+        _, lab = connected_components(g, directed=False)
+        out[b] = lab != np.argmax(np.bincount(lab))
+    return out
 
 
 def body_gap(x, d0, keep=None):
@@ -277,7 +282,7 @@ def analyse_body(D, meta, test):
                asym_max=float(np.nanmax(S["asym_max"])))
     res["rip"] = res["nfrag_max"] > 2 or res["main_frac_min"] < 0.995
     xe = load(snaps[-1][1], ("x",))["x"]
-    ke = ~stray_mask(xe)
+    ke = ~stray_mask(xe, d0)
     res["gap_end"] = body_gap(xe, d0, ke)
     res["stray"] = int((~ke).sum())
     res["stuck"] = res["gap_end"] < 2.0
@@ -425,7 +430,7 @@ def analyse_rod(D, meta):
     asym, asym_max = max(a for a, _ in se), max(b for _, b in se)
     s = load(snaps[-1][1], ("x", "v", "m"))
     x = s["x"]
-    keep = ~stray_mask(x)
+    keep = ~stray_mask(x, d0)
     shp = rod_shape(x, d0, half, W0, keep)
     buried = int(np.sum(surface0 & keep[half:] & (np.abs(x[half:, 1]) < shp["outline"][shp["idx"]] - 2.5 * d0)))
     g = geometry_metrics(x, d0, N, 2)
@@ -448,7 +453,7 @@ def analyse_rod(D, meta):
         gs = snapshots(ctrl)
         tg, pg = min(gs, key=lambda a: abs(a[0] - snaps[-1][0]))
         xg = load(pg, ("x",))["x"]
-        kg = ~stray_mask(xg)
+        kg = ~stray_mask(xg, d0)
         gsh = rod_shape(xg, d0, len(xg) // 2, W0, kg)
         n = min(len(gsh["outline"]), len(shp["outline"]))
         gpc, gpd, gcom = plane_metrics(gs, d0, len(xg) // 2)
@@ -513,7 +518,7 @@ def p2_metrics(outdir, x0, d0, half, KE0, t=None):
     KE = float(0.5 * np.sum(s["m"] * np.sum(s["v"] ** 2, axis=1)))
     return dict(t=tt, vx=st[0]["vx"], vy=st[0]["vy"], omega=st[0]["omega"],
                 aspect=st[0]["aspect"], angle=st[0]["angle"], KE_frac=KE / KE0,
-                gap_end=body_gap(s["x"], d0, ~stray_mask(s["x"])), stray=int(stray_mask(s["x"]).sum()), final_clumps=int(np.sum(intra_nn(s["x"], 2) / d0 < CLUMP)),
+                gap_end=body_gap(s["x"], d0, ~stray_mask(s["x"], d0)), stray=int(stray_mask(s["x"], d0).sum()), final_clumps=int(np.sum(intra_nn(s["x"], 2) / d0 < CLUMP)),
                 kappa=cq["kappa"], g99=cq["g99"])
 
 
