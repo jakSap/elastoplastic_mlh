@@ -90,6 +90,11 @@ def rungs_P1():   # Taylor rods
                                          till(ROD["mu"], ROD["Y0"]),
                                          length=ROD["length"], width=w, gap=ROD["gap"],
                                          v=ROD["v"])
+    # 45-degree lattice (10-06: does the lattice orientation drive the matrix-divergence behaviour?), in no tier
+    for cells in (10, 16):
+        out["w{}r45".format(cells)] = _body("P1", "rod", w / cells, 6.0, 0.1, 4.0, c, till(ROD["mu"], ROD["Y0"]),
+                                            length=ROD["length"], width=w, gap=ROD["gap"], v=ROD["v"],
+                                            lattice="diag45")
     # double impact velocity, low resolution, in no tier (10-05: does the interface split where GIZMO's holds?)
     for cells in (10, 20):   # w20v2: does the double-velocity failure converge out? (10-05)
         out["w{}v2".format(cells)] = _body("P1", "rod", w / cells, 6.0, 0.1, 4.0, c, till(ROD["mu"], ROD["Y0"]),

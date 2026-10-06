@@ -202,8 +202,33 @@ def disc(out, d, R=1.0, omega=0.2, mu=None, dev_dim=3, K=1.0):
     return _write(out, pos, vel, d, attrs, S=S)
 
 
-def rod(out, d, length=1.0, width=0.25, gap=0.1, v=0.2):
-    """Two rods along x, mirror-symmetric about x = 0, closing at 2v (Taylor impact)."""
+def rod_lattice45(width, length, d_target):
+    k = max(1, int(round(width / (d_target / np.sqrt(2)) / 2 - 0.5)))
+    s = width / (2 * k + 1)
+    nx = int(round(length / s))
+    m = np.arange(nx) - nx / 2 + 0.5                   # x rows, symmetric about the rod centre
+    n = np.arange(-k, k + 1)
+    M, Nn = np.meshgrid(m, n, indexing="ij")
+    keep = (np.round(M - 0.5).astype(int) + Nn) % 2 == 0
+    pts = np.column_stack([M[keep] * s, Nn[keep] * s])
+    return pts, s * np.sqrt(2), nx * s
+
+
+def rod(out, d, length=1.0, width=0.25, gap=0.1, v=0.2, lattice="square"):
+    """Two rods along x, mirror-symmetric about x = 0, closing at 2v (Taylor impact).
+
+    lattice = "diag45": the rods are filled with a square lattice rotated by 45 degrees (spacing ~ d,
+    adjusted so that whole rows span the width; the actual spacing is written as 'spacing')."""
+    if lattice == "diag45":
+        pts, d, length = rod_lattice45(width, length, d)
+        b = pts + [gap / 2 + length / 2, 0.0]
+        a = b * [-1.0, 1.0]                                # exact mirror image
+        pos = np.vstack([a, b])
+        vel = np.zeros_like(pos)
+        vel[: len(a), 0] = v
+        vel[len(a):, 0] = -v
+        return _write(out, pos, vel, d, dict(test="rod", length=length, width=width, gap=gap,
+                                             velocity=v, t_contact=gap / (2 * v), lattice="diag45"))
     a = _lattice(-gap / 2 - length, -gap / 2, -width / 2, width / 2, d)
     b = _lattice(gap / 2, gap / 2 + length, -width / 2, width / 2, d)
     pos = np.vstack([a, b])
