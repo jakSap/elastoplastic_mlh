@@ -91,10 +91,16 @@ def rungs_P1():   # Taylor rods
                                          length=ROD["length"], width=w, gap=ROD["gap"],
                                          v=ROD["v"])
     # 45-degree lattice (10-06: does the lattice orientation drive the matrix-divergence behaviour?), in no tier
-    for cells in (10, 16):
+    # From 10-06 the rods are judged on this lattice: on the square lattice the impact compresses straight
+    # lines of particles, a pathological configuration (the matrix divergence sticks and breaks symmetry there).
+    for cells in (10, 16, 24, 34):
         out["w{}r45".format(cells)] = _body("P1", "rod", w / cells, 6.0, 0.1, 4.0, c, till(ROD["mu"], ROD["Y0"]),
                                             length=ROD["length"], width=w, gap=ROD["gap"], v=ROD["v"],
                                             lattice="diag45")
+    for cells in (10, 20):
+        out["w{}v2r45".format(cells)] = _body("P1", "rod", w / cells, 6.0, 0.1, 4.0, c, till(ROD["mu"], ROD["Y0"]),
+                                              length=ROD["length"], width=w, gap=ROD["gap"], v=2 * ROD["v"],
+                                              lattice="diag45")
     # double impact velocity, low resolution, in no tier (10-05: does the interface split where GIZMO's holds?)
     for cells in (10, 20):   # w20v2: does the double-velocity failure converge out? (10-05)
         out["w{}v2".format(cells)] = _body("P1", "rod", w / cells, 6.0, 0.1, 4.0, c, till(ROD["mu"], ROD["Y0"]),
@@ -164,6 +170,7 @@ TIERS = {
     # P: plastic gate (compare with the GIZMO control in gizmo/).
     "P": [("P1", "w10"), ("P1", "w16"), ("P1", "w24")],
     "C": [("P2", "c8"), ("P2", "c16"), ("P2", "c32")],
+    "R": [("P1", "w{}r45".format(k)) for k in (10, 16, 24, 34)] + [("P1", "w10v2r45"), ("P1", "w20v2r45")],
     # A: angular momentum order.
     "A": [("A1", "d0.05"), ("A1", "d0.035"), ("A1", "d0.025"), ("A1", "d0.0177")],
     # W: wave order; n = 32 is diagnostic only, the order is judged on 64/128/256.
