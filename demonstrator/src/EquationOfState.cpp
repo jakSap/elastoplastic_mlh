@@ -261,7 +261,10 @@ inline double tillotsonSoundSpeedSquared(const TillotsonMaterial &m,
     double P, dPdrho, dPdu;
     tillotsonPressureAndDerivs(m, rho, u, P, dPdrho, dPdu);
     double cs2 = dPdrho + P / (rho * rho) * dPdu;
-    if (cs2 < 0.0) cs2 = 0.0;
+    // GIZMO's floor (solids/elastic_physics.c: cs^2 rho <= 0 -> 1e-10 u0 rho0): far in expansion the cold branch
+    // A mu + B mu^2 has dP/drho < 0 (below eta = 1 - A/2B), and c = 0 made the HLLC wave speeds of a pair of such
+    // particles coincide -> 0/0 (granite G.1 corner jets, 2026-10-02). Was: cs2 = 0.
+    if (!(cs2 > 0.0)) cs2 = 1e-10 * m.u0 * m.rho0 / rho;
     return cs2;
 }
 
