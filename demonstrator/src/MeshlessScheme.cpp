@@ -291,7 +291,11 @@ void MeshlessScheme::run(){
 
 #if TENSILE_CORRECTION
         Logger(INFO) << "       > Computing fabMonaghan";
+#if PERIODIC_BOUNDARIES
+        particles->computeFabMonaghan(&ghostParticles);
+#else
         particles->computeFabMonaghan();
+#endif
 #endif
 
         Logger(DEBUG) << "      > Computing fluxes";

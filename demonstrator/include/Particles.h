@@ -91,7 +91,16 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
 #endif // DIM == 3
 #if TENSILE_CORRECTION
     double *fabMonaghan;    //f_ab berechnet nach Monaghan et al, 2000
-    void computeFabMonaghan();
+#if PERIODIC_BOUNDARIES
+    /// f_ab of the periodic-image pairs, indexed like nnlGhosts.
+    double *fabMonaghanGhosts;
+#endif
+    /// @param gp when non-null, also fills fabMonaghanGhosts.
+    void computeFabMonaghan(
+#if PERIODIC_BOUNDARIES
+        const Particles *gp = nullptr
+#endif
+    );
 #endif
     void integrateStressTensor(const double &dt);
 #endif // ELASTIC

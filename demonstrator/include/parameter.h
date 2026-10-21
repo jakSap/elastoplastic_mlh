@@ -265,9 +265,11 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// 1 = seed from the healed step-1 density (DEFAULT); 0 = seed from the t=0 density.
 #define EXPLICIT_VOL_SEED_SKIP 1
 
-#if EXPLICIT_VOL_INTEGRATION && PERIODIC_BOUNDARIES
-#error "EXPLICIT_VOL_INTEGRATION currently only wires the non-periodic path. The periodic gradient-recompute hooks would need additional ghost updates of rhoExplicit/rhoKernel. Set EXPLICIT_VOL_INTEGRATION to 0 for periodic runs."
-#endif
+// PERIODIC_BOUNDARIES note: ghosts hold no rhoExplicit/rhoKernel of their own -
+// they do not need to. applyExplicitVolumeOverride() runs after BOTH density
+// passes, so `rho` already carries the advected value by the time
+// updateGhostState() copies it out to the images, the ghost faces use V = m/rho,
+// and the div-v that drives the kick comes from the ghost-aware velocity gradients.
 
 #if EXPLICIT_VOL_INTEGRATION && !ELASTIC
 #error "EXPLICIT_VOL_INTEGRATION currently only wires the ELASTIC branch of MeshlessScheme::run(). The non-ELASTIC path uses updateStateAndPosition() with no post-update gradient recompute, so the half-step splitting has no second-kick anchor. Wire a single full-step kick before updateStateAndPosition and lift this guard if you need !ELASTIC."

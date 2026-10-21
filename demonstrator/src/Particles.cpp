@@ -124,6 +124,9 @@ Particles::Particles(int numParticles, EquationOfState *MeshlessEOS
         ghostMap = new int[numParticles*(DIM+1)]; // TODO: this is only applicable for DIM==2
         psijTilde_xiGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
         AijGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM];
+#if ELASTIC && TENSILE_CORRECTION
+        fabMonaghanGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS]();
+#endif
         WijLGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM+2];
         WijRGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM+2];
         FijGhosts = new double[numParticles*MAX_NUM_GHOST_INTERACTIONS][DIM+2]; // TODO: this buffer should not be needed
@@ -239,6 +242,9 @@ Particles::~Particles() {
         delete[] noiGhosts;
         delete[] psijTilde_xiGhosts;
         delete[] AijGhosts;
+#if ELASTIC && TENSILE_CORRECTION
+        delete[] fabMonaghanGhosts;
+#endif
         delete[] WijLGhosts;
         delete[] WijRGhosts;
         delete[] ghostMap;
@@ -258,7 +264,11 @@ Particles::~Particles() {
 
 #if ELASTIC
 #if TENSILE_CORRECTION
-void Particles::computeFabMonaghan(){
+void Particles::computeFabMonaghan(
+#if PERIODIC_BOUNDARIES
+    const Particles *gp
+#endif
+){
     // Get normalized mean particle distance within kernel length
     // Eqivalent to \Delta p in Monaghan paper
     double deltaP = sqrt(3.14159 / smlNNNTarget);
@@ -284,6 +294,26 @@ void Particles::computeFabMonaghan(){
             fabMonaghan[i*MAX_NUM_INTERACTIONS+jn] = kernelQ / kernelDeltaP;
         }
     }
+
+#if PERIODIC_BOUNDARIES
+    // Same f_ab for the periodic-image pairs. Skipping these would leave the
+    // tensile correction switched off on exactly the faces that wrap the box.
+    if (gp){
+        for(int i = 0; i < N; ++i){
+            for(int jn = 0; jn < noiGhosts[i]; ++jn){
+                const int j = nnlGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn];
+                double r2 = pow(gp->x[j] - x[i], 2) + pow(gp->y[j] - y[i], 2);
+#if DIM == 3
+                r2 += pow(gp->z[j] - z[i], 2);
+#endif
+                const double r = sqrt(r2);
+                const double q = r / std::max(sml[i], gp->sml[j]);
+                fabMonaghanGhosts[i*MAX_NUM_GHOST_INTERACTIONS+jn]
+                        = Kernel::W(q, 1.) / kernelDeltaP;
+            }
+        }
+    }
+#endif // PERIODIC_BOUNDARIES
 }
 #endif // TENSILE_CORRECTION
 void Particles::integrateStressTensor(const double &dt) {
@@ -3048,11 +3078,15 @@ void Particles::solveRiemannProblems(const Particles &ghostParticles){
                 Riemann solver{WijLGhosts[ii], WijRGhosts[ii], vFrameGhosts[ii], AijGhosts[ii], i,
                                matIdL_g, matIdR_g, *MeshlessEOS
 #if ELASTIC
-                               , fSxxR, fSxyR, fSyyR
+#if TENSILE_CORRECTION
+                               , fabMonaghanGhosts[ii]
+#endif
+                               // same slot order as the real-pair call: neighbour (L) first
                                , fSxxL, fSxyL, fSyyL
+                               , fSxxR, fSxyR, fSyyR
 #if DIM == 3
-                               , fSxzR, fSyzR, fSzzR
                                , fSxzL, fSyzL, fSzzL
+                               , fSxzR, fSyzR, fSzzR
 #endif
 #endif
                 };
@@ -3483,6 +3517,7 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
         if (foundGhostX || foundGhostY) {
             ghostMap[i*(DIM+1)] = iGhost;
             ghostParticles.parent[iGhost] = i;
+            ghostParticles.m[iGhost] = m[i]; // mass is constant, so set once here
             //Logger(DEBUG) << "particle@" << i << " = [" << x[i] << ", " << y[i] << "] makes "
             //          << "ghost@" << iGhost << " = [" << ghostParticles.x[iGhost] << ", "
             //          << ghostParticles.y[iGhost] << "]";
@@ -3500,6 +3535,7 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
             }
             ghostMap[i*(DIM+1)+1] = iGhost;
             ghostParticles.parent[iGhost] = i;
+            ghostParticles.m[iGhost] = m[i]; // mass is constant, so set once here
             //Logger(DEBUG) << "particle@" << i << " = [" << x[i] << ", " << y[i] << "] makes "
             //              <<"ghost@" << iGhost << " = [" << ghostParticles.x[iGhost] << ", "
             //              << ghostParticles.y[iGhost] << "]";
@@ -3512,6 +3548,7 @@ void Particles::createGhostParticles(Domain &domain, Particles &ghostParticles,
             ghostParticles.y[iGhost] = y[i];
             ghostMap[i*(DIM+1)+2] = iGhost;
             ghostParticles.parent[iGhost] = i;
+            ghostParticles.m[iGhost] = m[i]; // mass is constant, so set once here
             //Logger(DEBUG) << "particle@" << i << " = [" << x[i] << ", " << y[i] << "] makes "
             //              << "ghost@" << iGhost << " = [" << ghostParticles.x[iGhost] << ", "
             //              << ghostParticles.y[iGhost] << "]";
@@ -3967,8 +4004,13 @@ void Particles::compEffectiveFace(const Particles &ghostParticles){
             //          << "], psijTilde_xiGhost[ji] = [" << psijTilde_xiGhosts[ij+ghostParticles.parent[ji]*MAX_NUM_GHOST_INTERACTIONS][0]
             //          << ", " << psijTilde_xiGhosts[ij+ghostParticles.parent[ji]*MAX_NUM_GHOST_INTERACTIONS][1] << "]";
 
+            // V = m/rho, as in the non-periodic compEffectiveFace(). The 1/omega
+            // form equals it only while rho == m*omega, which is false under
+            // EXPLICIT_VOL_INTEGRATION (rho = rhoExplicit).
+            const double Vi  = m[i] / rho[i];
+            const double Vji = ghostParticles.m[ji] / ghostParticles.rho[ji];
             for (int alpha=0; alpha<DIM; ++alpha){
-                AijGhosts[ii][alpha] = 1./omega[i]*psijTilde_xiGhosts[ii][alpha] - 1./ghostParticles.omega[ji]
+                AijGhosts[ii][alpha] = Vi*psijTilde_xiGhosts[ii][alpha] - Vji
                                        * psijTilde_xiGhosts[ij+ghostParticles.parent[ji]*MAX_NUM_GHOST_INTERACTIONS][alpha];
             }
         }
