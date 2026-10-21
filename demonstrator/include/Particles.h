@@ -65,6 +65,8 @@ public:
     /// call we seed rhoExplicit from the kernel density rather than overwriting
     /// rho; on every subsequent call we substitute rho <- rhoExplicit.
     bool explicitVolInitialized { false };
+    /// Steps left before rhoExplicit is seeded (EXPLICIT_VOL_SEED_SKIP).
+    int explicitVolSeedSkip { EXPLICIT_VOL_SEED_SKIP };
 
     /// Replace rho with rhoExplicit (after stashing kernel rho in rhoKernel),
     /// or seed rhoExplicit from rho on the first call. Must be called right

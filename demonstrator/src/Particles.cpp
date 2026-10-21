@@ -1475,6 +1475,14 @@ void Particles::compDensity(){
 void Particles::applyExplicitVolumeOverride(){
     // Mirror of GIZMO master/hydro/density.c:982-987. The kernel-sum density
     // is the relaxation target; downstream physics sees the integrated value.
+    // Skip the first EXPLICIT_VOL_SEED_SKIP step(s): keep the working rho at the
+    // kernel density so the t=0 startup-NNS truncation (~0.89) self-heals by
+    // re-summation before it seeds the (re-summation-free) advected density.
+    if (explicitVolSeedSkip > 0){
+        for (int i = 0; i < N; ++i) rhoKernel[i] = rho[i];
+        --explicitVolSeedSkip;
+        return;
+    }
     if (!explicitVolInitialized){
         for (int i = 0; i < N; ++i){
             rhoKernel[i]   = rho[i];
@@ -1495,6 +1503,9 @@ void Particles::applyExplicitVolumeOverride(){
 void Particles::integrateExplicitVolumeHalfStep(const double &dt, bool finalize){
     // Mirror of GIZMO master/kicks.c:308-318. Called twice per outer step
     // with dt = full_step / 2 to bracket the flux/updateState block.
+    // No-op until the advected density has been seeded (see applyExplicitVolumeOverride):
+    // during the seed-skip step(s) rho is the kernel density and must not be advected.
+    if (!explicitVolInitialized) return;
     for (int i = 0; i < N; ++i){
         // Advection step: d ln rho / dt = -div v.
         double divV = vxGrad[i][0] + vyGrad[i][1];

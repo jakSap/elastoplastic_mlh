@@ -226,7 +226,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 // Bisection on the colliding-rings test (MA-Obsidian/2026-05-25-bisection-results.md)
 // identified this as the single highest-impact missing GIZMO feature for elastic
 // rebound; without it the rings stick instead of bouncing.
-#define EXPLICIT_VOL_INTEGRATION 0
+#define EXPLICIT_VOL_INTEGRATION 1
 /// Maximum |div v * dt/2| inside the half-step exponential. Caps the per-step
 /// density change at exp(EXPLICIT_VOL_DIVV_CLAMP) ~ 4.5 (matches GIZMO).
 #define EXPLICIT_VOL_DIVV_CLAMP 1.5
@@ -257,6 +257,13 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// 0 = legacy: re-sync rho = rhoExplicit inside every half-kick (desyncs P and
 ///     rho for the flux pass, since pressure was computed before kick A).
 #define EXPLICIT_VOL_FREEZE_RHO 1
+
+/// Number of initial steps to run on the kernel density before seeding the advected
+/// density. The t=0 kernel density is truncated by the incomplete startup NNS (bulk
+/// ~0.89) and self-heals by re-summation at step 1; seeding the (re-summation-free)
+/// advected density from that value induces a spurious breathing/expansion.
+/// 1 = seed from the healed step-1 density (DEFAULT); 0 = seed from the t=0 density.
+#define EXPLICIT_VOL_SEED_SKIP 1
 
 #if EXPLICIT_VOL_INTEGRATION && PERIODIC_BOUNDARIES
 #error "EXPLICIT_VOL_INTEGRATION currently only wires the non-periodic path. The periodic gradient-recompute hooks would need additional ghost updates of rhoExplicit/rhoKernel. Set EXPLICIT_VOL_INTEGRATION to 0 for periodic runs."
