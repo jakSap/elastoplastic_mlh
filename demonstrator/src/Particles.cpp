@@ -1501,6 +1501,14 @@ void Particles::compDensity(){
     }
 }
 
+#if TIME_DKD
+void Particles::compOmegaOnly(){
+    for(int i=0; i<N; ++i){
+        compOmega(i);
+    }
+}
+#endif
+
 #if EXPLICIT_VOL_INTEGRATION
 void Particles::applyExplicitVolumeOverride(){
     // Mirror of GIZMO master/hydro/density.c:982-987. The kernel-sum density
@@ -1612,6 +1620,12 @@ void Particles::integrateExplicitVolumeHalfStep(const double &dt, bool finalize)
 #endif
     }
 }
+
+#if TIME_DKD
+void Particles::swapRhoExplicit(){
+    if (explicitVolInitialized) std::swap(rho, rhoExplicit);
+}
+#endif
 #endif // EXPLICIT_VOL_INTEGRATION
 
 #if VARIABLE_SML
@@ -2157,6 +2171,27 @@ void Particles::slopeLimiter(Particles *ghostParticles){
     slopeLimiter(P, PGrad, ghostParticles, PGhost);
 }
 
+#if TIME_DKD
+void Particles::slopeLimiterVelocity(Particles *ghostParticles){
+    double *vxGhost = nullptr, *vyGhost = nullptr;
+#if DIM==3
+    double *vzGhost = nullptr;
+#endif
+#if PERIODIC_BOUNDARIES
+    vxGhost = ghostParticles->vx;
+    vyGhost = ghostParticles->vy;
+#if DIM==3
+    vzGhost = ghostParticles->vz;
+#endif
+#endif
+    slopeLimiter(vx, vxGrad, ghostParticles, vxGhost);
+    slopeLimiter(vy, vyGrad, ghostParticles, vyGhost);
+#if DIM==3
+    slopeLimiter(vz, vzGrad, ghostParticles, vzGhost);
+#endif
+}
+#endif // TIME_DKD
+
 #if ELASTIC
 void Particles::slopeLimiterStress(Particles *ghostParticles){
     double *SxxGhost = nullptr, *SxyGhost = nullptr, *SyyGhost = nullptr;
@@ -2643,8 +2678,15 @@ void Particles::compRiemannStatesLR(const double &dt){
             vjDiv += vzGrad[j][2];
 #endif // DIM == 3
             // density
+#if TIME_DKD
+            // The drift already carried the particle to x^{n+1/2}, so the state only
+            // moves along the particle path: D/Dt, no (v - vFrame).grad f.
+            WijR[iW][0] -= dt/2. * rho[i] * viDiv;
+            WijL[iW][0] -= dt/2. * rho[j] * vjDiv;
+#else
             WijR[iW][0] -= dt/2. * (rho[i] * viDiv + (vx[i]-vFrame[iW][0])*rhoGrad[i][0] + (vy[i]-vFrame[iW][1])*rhoGrad[i][1]);
             WijL[iW][0] -= dt/2. * (rho[j] * vjDiv + (vx[j]-vFrame[iW][0])*rhoGrad[j][0] + (vy[j]-vFrame[iW][1])*rhoGrad[j][1]);
+#endif
 
             // energy
             // WijR[iW][1] -= dt/2. * (hydro_gamma*P[i] * viDiv + (vx[i]-vFrame[iW][0])*PGrad[i][0] + (vy[i]-vFrame[iW][1])*PGrad[i][1]);
@@ -2656,17 +2698,29 @@ void Particles::compRiemannStatesLR(const double &dt){
             double Ki = MeshlessEOS->EOSBulkModulus(rho[i], P[i]);
             double Kj = MeshlessEOS->EOSBulkModulus(rho[j], P[j]);
 #endif
+#if TIME_DKD
+            WijR[iW][1] -= dt/2. * Ki * viDiv;
+            WijL[iW][1] -= dt/2. * Kj * vjDiv;
+#else
             WijR[iW][1] -= dt/2. * (Ki * viDiv
                                         + (vx[i]-vFrame[iW][0])*PGrad[i][0] + (vy[i]-vFrame[iW][1])*PGrad[i][1]);
             WijL[iW][1] -= dt/2. * (Kj * vjDiv
                                         + (vx[j]-vFrame[iW][0])*PGrad[j][0] + (vy[j]-vFrame[iW][1])*PGrad[j][1]);
+#endif
 
             // velocities
             // TODO: center vL and vR and update vFrame (compare to GIZMO code hydro_core_meshless.h:178ff) ??
+#if TIME_DKD
+            WijR[iW][2] -= dt/2. * PGrad[i][0]/rho[i];
+            WijL[iW][2] -= dt/2. * PGrad[j][0]/rho[j];
+            WijR[iW][3] -= dt/2. * PGrad[i][1]/rho[i];
+            WijL[iW][3] -= dt/2. * PGrad[j][1]/rho[j];
+#else
             WijR[iW][2] -= dt/2. * (PGrad[i][0]/rho[i] + (vx[i]-vFrame[iW][0])*vxGrad[i][0] + (vy[i]-vFrame[iW][1])*vxGrad[i][1]);
             WijL[iW][2] -= dt/2. * (PGrad[j][0]/rho[j] + (vx[j]-vFrame[iW][0])*vxGrad[j][0] + (vy[j]-vFrame[iW][1])*vxGrad[j][1]);
             WijR[iW][3] -= dt/2. * (PGrad[i][1]/rho[i] + (vx[i]-vFrame[iW][0])*vyGrad[i][0] + (vy[i]-vFrame[iW][1])*vyGrad[i][1]);
             WijL[iW][3] -= dt/2. * (PGrad[j][1]/rho[j] + (vx[j]-vFrame[iW][0])*vyGrad[j][0] + (vy[j]-vFrame[iW][1])*vyGrad[j][1]);
+#endif
 #if ELASTIC
             // Elastic source: dv/dt += (1/ρ) ∇·S
             WijR[iW][2] += dt/2. * (SxxGrad[i][0] + SxyGrad[i][1]) / rho[i];
@@ -2681,6 +2735,7 @@ void Particles::compRiemannStatesLR(const double &dt){
             }
 #endif
 #if DIM==3
+#if !TIME_DKD
             // density
             WijR[iW][0] -= dt/2. * (vz[i]-vFrame[iW][2])*rhoGrad[i][2];
             WijL[iW][0] -= dt/2. * (vz[j]-vFrame[iW][2])*rhoGrad[j][2];
@@ -2688,6 +2743,7 @@ void Particles::compRiemannStatesLR(const double &dt){
             // energy
             WijR[iW][1] -= dt/2. * (vz[i]-vFrame[iW][2])*PGrad[i][2];
             WijL[iW][1] -= dt/2. * (vz[j]-vFrame[iW][2])*PGrad[j][2];
+#endif // !TIME_DKD
 
 #if DEBUG_LVL
 #if EOS == 0
@@ -2714,6 +2770,10 @@ void Particles::compRiemannStatesLR(const double &dt){
 #endif // DEBUG_LVL
 
             // velocities
+#if TIME_DKD
+            WijR[iW][4] -= dt/2. * PGrad[i][2]/rho[i];
+            WijL[iW][4] -= dt/2. * PGrad[j][2]/rho[j];
+#else
             WijR[iW][2] -= dt/2. * (vz[i]-vFrame[iW][2])*vxGrad[i][2];
             WijL[iW][2] -= dt/2. * (vz[i]-vFrame[iW][2])*vxGrad[j][2];
             WijR[iW][3] -= dt/2. * (vz[i]-vFrame[iW][2])*vyGrad[i][2];
@@ -2722,6 +2782,7 @@ void Particles::compRiemannStatesLR(const double &dt){
             WijR[iW][4] -= dt/2. * (PGrad[i][2]/rho[i] + (vx[i]-vFrame[iW][0])*vzGrad[i][0] + (vy[i]-vFrame[iW][1])*vzGrad[i][1] + (vz[i]-vFrame[iW][2])*vzGrad[i][2]);
             WijL[iW][4] -= dt/2. * (PGrad[j][2]/rho[j] + (vx[j]-vFrame[iW][0])*vzGrad[j][0] + (vy[j]-vFrame[iW][1])*vzGrad[j][1] + (vz[j]-vFrame[iW][2])*vzGrad[j][2]);
 #endif // DIM == 3
+#endif // TIME_DKD
 #if ELASTIC
             // Elastic 3D source terms for velocity prediction
             WijR[iW][2] += dt/2. * SxzGrad[i][2] / rho[i];
@@ -3679,6 +3740,14 @@ void Particles::compDensity(const Particles &ghostParticles){
     }
 }
 
+#if TIME_DKD
+void Particles::compOmegaOnly(const Particles &ghostParticles){
+    for(int i=0; i<N; ++i){
+        compOmega(i, ghostParticles);
+    }
+}
+#endif
+
 void Particles::compOmega(int i, const Particles &ghostParticles){
     const double hi = sml[i];
     double omg = omega[i];
@@ -4153,6 +4222,17 @@ void Particles::compRiemannStatesLR(const double &dt,
             double Kj = MeshlessEOS->EOSBulkModulus(ghostParticles.rho[j], ghostParticles.P[j]);
 #endif
 
+#if TIME_DKD
+            // Lagrangian predictor, see the real-pair overload.
+            WijRGhosts[iW][0] -= dt/2. * rho[i] * viDiv;
+            WijLGhosts[iW][0] -= dt/2. * ghostParticles.rho[j] * vjDiv;
+            WijRGhosts[iW][1] -= dt/2. * Ki * viDiv;
+            WijLGhosts[iW][1] -= dt/2. * Kj * vjDiv;
+            WijRGhosts[iW][2] -= dt/2. * PGrad[i][0]/rho[i];
+            WijLGhosts[iW][2] -= dt/2. * ghostParticles.PGrad[j][0]/ghostParticles.rho[j];
+            WijRGhosts[iW][3] -= dt/2. * PGrad[i][1]/rho[i];
+            WijLGhosts[iW][3] -= dt/2. * ghostParticles.PGrad[j][1]/ghostParticles.rho[j];
+#else
             WijRGhosts[iW][0] -= dt/2. * (rho[i] * viDiv + (vx[i]-vFrameGhosts[iW][0])*rhoGrad[i][0] + (vy[i]-vFrameGhosts[iW][1])*rhoGrad[i][1]);
             WijLGhosts[iW][0] -= dt/2. * (ghostParticles.rho[j] * vjDiv + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.rhoGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.rhoGrad[j][1]);
             WijRGhosts[iW][1] -= dt/2. * (Ki * viDiv + (vx[i]-vFrameGhosts[iW][0])*PGrad[i][0] + (vy[i]-vFrameGhosts[iW][1])*PGrad[i][1]);
@@ -4161,6 +4241,7 @@ void Particles::compRiemannStatesLR(const double &dt,
             WijLGhosts[iW][2] -= dt/2. * (ghostParticles.PGrad[j][0]/ghostParticles.rho[j] + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.vxGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.vxGrad[j][1]);
             WijRGhosts[iW][3] -= dt/2. * (PGrad[i][1]/rho[i] + (vx[i] - vFrameGhosts[iW][0])*vyGrad[i][0] + (vy[i] - vFrameGhosts[iW][1])*vyGrad[i][1]);
             WijLGhosts[iW][3] -= dt/2. * (ghostParticles.PGrad[j][1]/ghostParticles.rho[j] + (ghostParticles.vx[j]-vFrameGhosts[iW][0])*ghostParticles.vyGrad[j][0] + (ghostParticles.vy[j]-vFrameGhosts[iW][1])*ghostParticles.vyGrad[j][1]);
+#endif // TIME_DKD
 #if ELASTIC
             // Elastic source: dv/dt += (1/ρ) ∇·S
             WijRGhosts[iW][2] += dt/2. * (SxxGrad[i][0] + SxyGrad[i][1]) / rho[i];

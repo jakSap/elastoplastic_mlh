@@ -275,6 +275,30 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 #error "EXPLICIT_VOL_INTEGRATION currently only wires the ELASTIC branch of MeshlessScheme::run(). The non-ELASTIC path uses updateStateAndPosition() with no post-update gradient recompute, so the half-step splitting has no second-kick anchor. Wire a single full-step kick before updateStateAndPosition and lift this guard if you need !ELASTIC."
 #endif
 
+/// Drift-kick-drift time integration, with the flux evaluated at the midpoint geometry.
+/// One step: x, S and rhoExplicit drift by dt/2 with v_n, the geometry is rebuilt at
+/// x_{n+1/2}, the flux of that geometry kicks v and u from t_n to t_{n+1}, and x drifts by
+/// dt/2 with v_{n+1}. S and rhoExplicit close the second half step at the top of the next
+/// step, on the rebuilt geometry x_{n+1}, so velocity and geometry belong to the same time
+/// in both halves. Every drift means new h, Omega, psi-tilde, gradients and limiters.
+/// The predictor is Lagrangian: the drift has already moved the particle, so the face
+/// states get D/Dt only, without (v - vFrame).grad f. rho, P and v stay at t_n and are
+/// predicted, S is already at n+1/2 and is not. V = m/rho in the faces uses rhoExplicit,
+/// which is at n+1/2 after its half step.
+/// 1 = this scheme (MA-Obsidian/2026-10-30-dkd-plan.md); 0 = kick, then drift with v_{n+1}
+/// on the old geometry (regression baseline only).
+#define TIME_DKD 0
+
+#if TIME_DKD && !ELASTIC
+#error "TIME_DKD is only wired for the ELASTIC path of MeshlessScheme::run(). updateStateAndPosition() drifts inside the kick."
+#endif
+#if TIME_DKD && !EXPLICIT_VOL_INTEGRATION
+#error "TIME_DKD needs EXPLICIT_VOL_INTEGRATION: the kernel density would already be at n+1/2 at the kick, so the predictor of rho and P would count it twice."
+#endif
+#if TIME_DKD && !EXPLICIT_VOL_FREEZE_RHO
+#error "TIME_DKD needs EXPLICIT_VOL_FREEZE_RHO: the kick reads rho_n after the half step of rhoExplicit."
+#endif
+
 // Diagnostic: dump per-pair Riemann-flux contributions to the first particle
 // whose conditionNumber crosses DIAG_COND_TRIGGER. The target particle is
 // selected dynamically (highest cond above the threshold on the first step

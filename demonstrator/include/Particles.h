@@ -80,6 +80,11 @@ public:
     /// EXPLICIT_VOL_FREEZE_RHO only the finalize kick writes rho <- rhoExplicit, so
     /// the working density stays frozen through the hydro pass.
     void integrateExplicitVolumeHalfStep(const double &dt, bool finalize = false);
+#if TIME_DKD
+    /// Exchanges rho and rhoExplicit, for the faces only (V = m/rho at n+1/2). Does
+    /// nothing before rhoExplicit is seeded. Call twice, the second time to swap back.
+    void swapRhoExplicit();
+#endif
 #endif
 
 #if ELASTIC
@@ -200,6 +205,10 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
 #endif // RUNSPH
 
     void compDensity(); // also computes omega
+#if TIME_DKD
+    /// compDensity() without the write to rho: the geometry moves, the density does not.
+    void compOmegaOnly();
+#endif
 
 #if VARIABLE_SML
     /// Runtime overrides for the Newton iteration. Initialized to the
@@ -249,6 +258,10 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     void compPsijTilde(Helper &helper);
     void gradient(double *f, double (*grad)[DIM]);
     void slopeLimiter(Particles *ghostParticles=nullptr);
+#if TIME_DKD
+    /// slopeLimiter() for the velocity gradients only.
+    void slopeLimiterVelocity(Particles *ghostParticles=nullptr);
+#endif
     void compPressure();
     void compEffectiveFace();
 
@@ -287,6 +300,9 @@ double (*SxzGrad)[DIM], (*SyzGrad)[DIM], (*SzzGrad)[DIM];
     void ghostNNS(Domain &domain, const Particles &ghostParticles, const double &kernelSize);
 
     void compDensity(const Particles &ghostParticles);
+#if TIME_DKD
+    void compOmegaOnly(const Particles &ghostParticles);
+#endif
 
     void compPsijTilde(Helper &helper, const Particles &ghostParticles);
     void gradient(double *f, double (*grad)[DIM], double *fGhost, const Particles &ghostParticles); //TODO: remove ghostParticles argument
