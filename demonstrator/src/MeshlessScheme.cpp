@@ -35,6 +35,206 @@ MeshlessScheme::MeshlessScheme(Configuration config, Particles *particles,
 #endif
 }
 
+void MeshlessScheme::rebuildGeometry(){
+    // Search radius used for the grid, NNS and ghost-particle generation.
+    // With VARIABLE_SML, h_i may grow beyond config.kernelSize. To keep
+    // neighbor relations symmetric (i in nnl[j] iff j in nnl[i]), we
+    // search with the largest h currently in use; flux symmetry is then
+    // preserved by the existing ENFORCE_FLUX_SYM machinery.
+#if VARIABLE_SML
+    const double nnsRadius = std::max(config.kernelSize, particles->hMax());
+#else
+    const double nnsRadius = config.kernelSize;
+#endif
+
+#if !PERIODIC_BOUNDARIES
+    Logger(INFO) << "    > Computing domain limits ...";
+    double domainLimits[DIM*2];
+    particles->getDomainLimits(domainLimits);
+    Domain::Cell boundingBox { domainLimits };
+    domain.bounds = boundingBox;
+    domain.printout();
+    Logger(DEBUG) << "      > ... creating grid ...";
+    domain.createGrid(nnsRadius);
+    Logger(INFO) << "    > ... done.";
+#else // PERIODIC_BOUNDARIES
+#if VARIABLE_SML
+    // The periodic grid is built once in the constructor with cell size
+    // based on config.kernelSize. If h_max grows past the current cell
+    // size, we must rebuild the grid so that gridNNS' 3^DIM cell scan
+    // still covers the search radius.
+    if (nnsRadius > domain.cellSizeX){
+        Logger(DEBUG) << "      > h_max=" << nnsRadius
+                      << " exceeds cellSizeX=" << domain.cellSizeX
+                      << ", rebuilding periodic grid";
+        domain.createGrid(nnsRadius);
+    }
+#endif // VARIABLE_SML
+#endif
+    Logger(INFO) << "    > Assigning particles ...";
+    particles->assignParticlesAndCells(domain);
+    Logger(INFO) << "    > ... done.";
+#if PERIODIC_BOUNDARIES
+    Logger(INFO) << "    > Creating ghost particles ...";
+    //Logger(DEBUG) << "      > Creating ghost grid";
+    //domain.createGhostGrid();
+    Logger(DEBUG) << "      > Creating ghost particles ... ";
+    particles->createGhostParticles(domain, ghostParticles, nnsRadius);
+    Logger(DEBUG) << "      > ... found " << ghostParticles.N << " ghosts";
+    Logger(INFO) << "    > ... done.";
+
+#endif
+    Logger(INFO) << "    > Nearest neighbor search";
+    particles->gridNNS(domain, nnsRadius);
+#if PERIODIC_BOUNDARIES
+    Logger(DEBUG) << "      > Ghosts NNS";
+    particles->ghostNNS(domain, ghostParticles, nnsRadius);
+    //particles->printNoi();
+#endif
+#if VARIABLE_SML
+    Logger(INFO) << "    > Updating smoothing lengths";
+#if PERIODIC_BOUNDARIES
+    particles->updateAllSmoothingLengths(ghostParticles);
+#else
+    particles->updateAllSmoothingLengths();
+#endif
+#endif // VARIABLE_SML
+}
+
+void MeshlessScheme::compGradients(){
+#if PERIODIC_BOUNDARIES
+    particles->updateGhostState(ghostParticles);
+    particles->compPsijTilde(helper, ghostParticles);
+    //Logger(DEBUG) << "      > Update ghost psij_xiTilde";
+    //particles->updateGhostPsijTilde(ghostParticles);
+
+    particles->gradient(particles->rho, particles->rhoGrad, ghostParticles.rho, ghostParticles);
+    particles->gradient(particles->vx, particles->vxGrad, ghostParticles.vx, ghostParticles);
+    particles->gradient(particles->vy, particles->vyGrad, ghostParticles.vy, ghostParticles);
+#if DIM == 3
+    particles->gradient(particles->vz, particles->vzGrad, ghostParticles.vz, ghostParticles);
+#endif
+    particles->gradient(particles->P, particles->PGrad, ghostParticles.P, ghostParticles);
+#if ELASTIC
+    // Stress tensor gradients
+    particles->gradient(particles->Sxx, particles->SxxGrad, ghostParticles.Sxx, ghostParticles);
+    particles->gradient(particles->Sxy, particles->SxyGrad, ghostParticles.Sxy, ghostParticles);
+    particles->gradient(particles->Syy, particles->SyyGrad, ghostParticles.Syy, ghostParticles);
+#if DIM == 3
+    particles->gradient(particles->Sxz, particles->SxzGrad, ghostParticles.Sxz, ghostParticles);
+    particles->gradient(particles->Syz, particles->SyzGrad, ghostParticles.Syz, ghostParticles);
+    particles->gradient(particles->Szz, particles->SzzGrad, ghostParticles.Szz, ghostParticles);
+#endif // DIM == 3
+#endif // ELASTIC
+    Logger(DEBUG) << "      > Update ghost gradients";
+    particles->updateGhostGradients(ghostParticles);
+
+#if SLOPE_LIMITING
+    // TODO: Check slope limiter
+    Logger(DEBUG) << "      > Limiting slopes";
+    particles->slopeLimiter(&ghostParticles);
+#if ELASTIC
+    particles->slopeLimiterStress(&ghostParticles);
+#endif
+    Logger(DEBUG) << "      > Update limited ghost gradients";
+    particles->updateGhostGradients(ghostParticles);
+#endif // SLOPE_LIMITING
+#else // PERIODIC_BOUNDARIES
+    particles->compPsijTilde(helper);
+
+#if OUTPUT_CONDITION_NUMBER
+    // Diagnostic: identify the particles with the worst (largest)
+    // condition number. A high conditionNumber means the E matrix is
+    // near-singular and the gradient estimator is unreliable. We want
+    // to correlate bad gradients with the EXTREME reconstruction events.
+    {
+        const int TOP = 5;
+        int    worst[TOP];
+        double worstVal[TOP];
+        for (int k = 0; k < TOP; ++k) { worst[k] = -1; worstVal[k] = -1.; }
+        for (int i = 0; i < particles->N; ++i){
+            double c = particles->conditionNumber[i];
+            if (!(c > worstVal[TOP-1])) continue;
+            int k = TOP - 1;
+            while (k > 0 && c > worstVal[k-1]){
+                worst[k] = worst[k-1];
+                worstVal[k] = worstVal[k-1];
+                --k;
+            }
+            worst[k] = i;
+            worstVal[k] = c;
+        }
+        for (int k = 0; k < TOP; ++k){
+            int i = worst[k];
+            if (i < 0) break;
+            Logger(DEBUG) << "      > worst cond[" << k << "] @ i=" << i
+                          << " cond=" << worstVal[k]
+                          << " x=[" << particles->x[i] << "," << particles->y[i] << "]"
+                          << " v=[" << particles->vx[i] << "," << particles->vy[i] << "]"
+                          << " rho=" << particles->rho[i]
+                          << " sml=" << particles->sml[i];
+        }
+    }
+#endif
+
+    particles->gradient(particles->rho, particles->rhoGrad);
+    particles->gradient(particles->vx, particles->vxGrad);
+    particles->gradient(particles->vy, particles->vyGrad);
+#if DIM == 3
+    particles->gradient(particles->vz, particles->vzGrad);
+#endif
+    particles->gradient(particles->P, particles->PGrad);
+#if ELASTIC
+    particles->gradient(particles->Sxx, particles->SxxGrad);
+    particles->gradient(particles->Sxy, particles->SxyGrad);
+    particles->gradient(particles->Syy, particles->SyyGrad);
+#if DIM == 3
+    particles->gradient(particles->Sxz, particles->SxzGrad);
+    particles->gradient(particles->Syz, particles->SyzGrad);
+    particles->gradient(particles->Szz, particles->SzzGrad);
+#endif
+#endif // ELASTIC
+#if SLOPE_LIMITING
+    // TODO: check how to properly limit gradiens
+    Logger(DEBUG) << "      > Limiting slopes";
+    particles->slopeLimiter();
+#if ELASTIC
+    particles->slopeLimiterStress();
+#endif // ELASTIC
+#endif // SLOPE_LIMITING
+#endif
+}
+
+void MeshlessScheme::prepareRiemannStates(){
+    Logger(INFO) << "    > Preparing Riemann solver";
+    Logger(DEBUG) << "      > Computing effective faces";
+    particles->compEffectiveFace();
+#if PERIODIC_BOUNDARIES
+    particles->compEffectiveFace(ghostParticles);
+#endif // PERIODIC_BOUNDARIES
+
+#if TENSILE_CORRECTION
+    Logger(INFO) << "       > Computing fabMonaghan";
+#if PERIODIC_BOUNDARIES
+    particles->computeFabMonaghan(&ghostParticles);
+#else
+    particles->computeFabMonaghan();
+#endif
+#endif
+
+    Logger(DEBUG) << "      > Computing fluxes";
+    particles->compRiemannStatesLR(timeStep);
+
+#if PERIODIC_BOUNDARIES
+    Logger(DEBUG) << "      > Computing ghost fluxes";
+    particles->compRiemannStatesLR(timeStep,
+                                 ghostParticles);
+    //Logger(DEBUG) << "Aborting for debugging.";
+    //exit(6);
+
+#endif// PERIODIC_BOUNDARIES
+}
+
 void MeshlessScheme::run(){
     auto tStart = std::chrono::steady_clock::now();
     double t = 0;
@@ -57,69 +257,7 @@ void MeshlessScheme::run(){
     do {
         Logger(INFO) << "  > TIME: " << t << ", STEP: " << step;
 
-        // Search radius used for the grid, NNS and ghost-particle generation.
-        // With VARIABLE_SML, h_i may grow beyond config.kernelSize. To keep
-        // neighbor relations symmetric (i in nnl[j] iff j in nnl[i]), we
-        // search with the largest h currently in use; flux symmetry is then
-        // preserved by the existing ENFORCE_FLUX_SYM machinery.
-#if VARIABLE_SML
-        const double nnsRadius = std::max(config.kernelSize, particles->hMax());
-#else
-        const double nnsRadius = config.kernelSize;
-#endif
-
-#if !PERIODIC_BOUNDARIES
-        Logger(INFO) << "    > Computing domain limits ...";
-        double domainLimits[DIM*2];
-        particles->getDomainLimits(domainLimits);
-        Domain::Cell boundingBox { domainLimits };
-        domain.bounds = boundingBox;
-        domain.printout();
-        Logger(DEBUG) << "      > ... creating grid ...";
-        domain.createGrid(nnsRadius);
-        Logger(INFO) << "    > ... done.";
-#else // PERIODIC_BOUNDARIES
-#if VARIABLE_SML
-        // The periodic grid is built once in the constructor with cell size
-        // based on config.kernelSize. If h_max grows past the current cell
-        // size, we must rebuild the grid so that gridNNS' 3^DIM cell scan
-        // still covers the search radius.
-        if (nnsRadius > domain.cellSizeX){
-            Logger(DEBUG) << "      > h_max=" << nnsRadius
-                          << " exceeds cellSizeX=" << domain.cellSizeX
-                          << ", rebuilding periodic grid";
-            domain.createGrid(nnsRadius);
-        }
-#endif // VARIABLE_SML
-#endif
-        Logger(INFO) << "    > Assigning particles ...";
-        particles->assignParticlesAndCells(domain);
-        Logger(INFO) << "    > ... done.";
-#if PERIODIC_BOUNDARIES
-        Logger(INFO) << "    > Creating ghost particles ...";
-        //Logger(DEBUG) << "      > Creating ghost grid";
-        //domain.createGhostGrid();
-        Logger(DEBUG) << "      > Creating ghost particles ... ";
-        particles->createGhostParticles(domain, ghostParticles, nnsRadius);
-        Logger(DEBUG) << "      > ... found " << ghostParticles.N << " ghosts";
-        Logger(INFO) << "    > ... done.";
-
-#endif
-        Logger(INFO) << "    > Nearest neighbor search";
-        particles->gridNNS(domain, nnsRadius);
-#if PERIODIC_BOUNDARIES
-        Logger(DEBUG) << "      > Ghosts NNS";
-        particles->ghostNNS(domain, ghostParticles, nnsRadius);
-        //particles->printNoi();
-#endif
-#if VARIABLE_SML
-        Logger(INFO) << "    > Updating smoothing lengths";
-#if PERIODIC_BOUNDARIES
-        particles->updateAllSmoothingLengths(ghostParticles);
-#else
-        particles->updateAllSmoothingLengths();
-#endif
-#endif // VARIABLE_SML
+        rebuildGeometry();
         Logger(INFO) << "    > Computing density";
         particles->compDensity();
 #if PERIODIC_BOUNDARIES
@@ -166,107 +304,7 @@ void MeshlessScheme::run(){
 #endif // ADAPTIVE_TIMESTEP
 
         Logger(INFO) << "    > Computing gradients";
-#if PERIODIC_BOUNDARIES
-        particles->updateGhostState(ghostParticles);
-        particles->compPsijTilde(helper, ghostParticles);
-        //Logger(DEBUG) << "      > Update ghost psij_xiTilde";
-        //particles->updateGhostPsijTilde(ghostParticles);
-
-        particles->gradient(particles->rho, particles->rhoGrad, ghostParticles.rho, ghostParticles);
-        particles->gradient(particles->vx, particles->vxGrad, ghostParticles.vx, ghostParticles);
-        particles->gradient(particles->vy, particles->vyGrad, ghostParticles.vy, ghostParticles);
-#if DIM == 3
-        particles->gradient(particles->vz, particles->vzGrad, ghostParticles.vz, ghostParticles);
-#endif
-        particles->gradient(particles->P, particles->PGrad, ghostParticles.P, ghostParticles);
-#if ELASTIC
-        // Stress tensor gradients
-        particles->gradient(particles->Sxx, particles->SxxGrad, ghostParticles.Sxx, ghostParticles);
-        particles->gradient(particles->Sxy, particles->SxyGrad, ghostParticles.Sxy, ghostParticles);
-        particles->gradient(particles->Syy, particles->SyyGrad, ghostParticles.Syy, ghostParticles);
-#if DIM == 3
-        particles->gradient(particles->Sxz, particles->SxzGrad, ghostParticles.Sxz, ghostParticles);
-        particles->gradient(particles->Syz, particles->SyzGrad, ghostParticles.Syz, ghostParticles);
-        particles->gradient(particles->Szz, particles->SzzGrad, ghostParticles.Szz, ghostParticles);
-#endif // DIM == 3
-#endif // ELASTIC
-        Logger(DEBUG) << "      > Update ghost gradients";
-        particles->updateGhostGradients(ghostParticles);
-
-#if SLOPE_LIMITING
-        // TODO: Check slope limiter
-        Logger(DEBUG) << "      > Limiting slopes";
-        particles->slopeLimiter(&ghostParticles);
-#if ELASTIC
-        particles->slopeLimiterStress(&ghostParticles);
-#endif
-        Logger(DEBUG) << "      > Update limited ghost gradients";
-        particles->updateGhostGradients(ghostParticles);
-#endif // SLOPE_LIMITING
-#else // PERIODIC_BOUNDARIES
-        particles->compPsijTilde(helper);
-
-#if OUTPUT_CONDITION_NUMBER
-        // Diagnostic: identify the particles with the worst (largest)
-        // condition number. A high conditionNumber means the E matrix is
-        // near-singular and the gradient estimator is unreliable. We want
-        // to correlate bad gradients with the EXTREME reconstruction events.
-        {
-            const int TOP = 5;
-            int    worst[TOP];
-            double worstVal[TOP];
-            for (int k = 0; k < TOP; ++k) { worst[k] = -1; worstVal[k] = -1.; }
-            for (int i = 0; i < particles->N; ++i){
-                double c = particles->conditionNumber[i];
-                if (!(c > worstVal[TOP-1])) continue;
-                int k = TOP - 1;
-                while (k > 0 && c > worstVal[k-1]){
-                    worst[k] = worst[k-1];
-                    worstVal[k] = worstVal[k-1];
-                    --k;
-                }
-                worst[k] = i;
-                worstVal[k] = c;
-            }
-            for (int k = 0; k < TOP; ++k){
-                int i = worst[k];
-                if (i < 0) break;
-                Logger(DEBUG) << "      > worst cond[" << k << "] @ i=" << i
-                              << " cond=" << worstVal[k]
-                              << " x=[" << particles->x[i] << "," << particles->y[i] << "]"
-                              << " v=[" << particles->vx[i] << "," << particles->vy[i] << "]"
-                              << " rho=" << particles->rho[i]
-                              << " sml=" << particles->sml[i];
-            }
-        }
-#endif
-
-        particles->gradient(particles->rho, particles->rhoGrad);
-        particles->gradient(particles->vx, particles->vxGrad);
-        particles->gradient(particles->vy, particles->vyGrad);
-#if DIM == 3
-        particles->gradient(particles->vz, particles->vzGrad);
-#endif
-        particles->gradient(particles->P, particles->PGrad);
-#if ELASTIC
-        particles->gradient(particles->Sxx, particles->SxxGrad);
-        particles->gradient(particles->Sxy, particles->SxyGrad);
-        particles->gradient(particles->Syy, particles->SyyGrad);
-#if DIM == 3
-        particles->gradient(particles->Sxz, particles->SxzGrad);
-        particles->gradient(particles->Syz, particles->SyzGrad);
-        particles->gradient(particles->Szz, particles->SzzGrad);
-#endif
-#endif // ELASTIC
-#if SLOPE_LIMITING
-        // TODO: check how to properly limit gradiens
-        Logger(DEBUG) << "      > Limiting slopes";
-        particles->slopeLimiter();
-#if ELASTIC
-        particles->slopeLimiterStress();
-#endif // ELASTIC
-#endif // SLOPE_LIMITING
-#endif
+        compGradients();
 #if ELASTIC
 	Logger(INFO) << "    > Performing stress integration 1 / 2";
         particles->integrateStressTensor(timeStep / 2.0);
@@ -282,33 +320,7 @@ void MeshlessScheme::run(){
         Logger(DEBUG) << "      > Explicit-volume half-step kick A";
         particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/false);
 #endif
-        Logger(INFO) << "    > Preparing Riemann solver";
-        Logger(DEBUG) << "      > Computing effective faces";
-        particles->compEffectiveFace();
-#if PERIODIC_BOUNDARIES
-        particles->compEffectiveFace(ghostParticles);
-#endif // PERIODIC_BOUNDARIES
-
-#if TENSILE_CORRECTION
-        Logger(INFO) << "       > Computing fabMonaghan";
-#if PERIODIC_BOUNDARIES
-        particles->computeFabMonaghan(&ghostParticles);
-#else
-        particles->computeFabMonaghan();
-#endif
-#endif
-
-        Logger(DEBUG) << "      > Computing fluxes";
-        particles->compRiemannStatesLR(timeStep);
-
-#if PERIODIC_BOUNDARIES
-        Logger(DEBUG) << "      > Computing ghost fluxes";
-        particles->compRiemannStatesLR(timeStep,
-                                     ghostParticles);
-        //Logger(DEBUG) << "Aborting for debugging.";
-        //exit(6);
-
-#endif// PERIODIC_BOUNDARIES
+        prepareRiemannStates();
 
 #if ADAPTIVE_TIMESTEP
         if (dump){

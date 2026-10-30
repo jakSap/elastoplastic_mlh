@@ -62,6 +62,13 @@ private:
     Domain domain;
     Helper helper {};
 
+    /// Grid, ghosts, neighbour search and smoothing lengths at the current positions.
+    void rebuildGeometry();
+    /// psi-tilde, gradients of rho, v, P, S and their limiters at the current positions.
+    void compGradients();
+    /// Faces, f_ab and the time-predicted face states for the Riemann solve.
+    void prepareRiemannStates();
+
 };
 
 
