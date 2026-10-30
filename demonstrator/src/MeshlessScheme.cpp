@@ -205,13 +205,57 @@ void MeshlessScheme::compGradients(){
 #endif
 }
 
+#if TIME_DKD
+void MeshlessScheme::compVelocityGradients(){
+#if PERIODIC_BOUNDARIES
+    particles->updateGhostState(ghostParticles);
+    particles->compPsijTilde(helper, ghostParticles);
+
+    particles->gradient(particles->vx, particles->vxGrad, ghostParticles.vx, ghostParticles);
+    particles->gradient(particles->vy, particles->vyGrad, ghostParticles.vy, ghostParticles);
+#if DIM == 3
+    particles->gradient(particles->vz, particles->vzGrad, ghostParticles.vz, ghostParticles);
+#endif
+    particles->updateGhostGradients(ghostParticles);
+#if SLOPE_LIMITING
+    particles->slopeLimiterVelocity(&ghostParticles);
+    particles->updateGhostGradients(ghostParticles);
+#endif // SLOPE_LIMITING
+#else // PERIODIC_BOUNDARIES
+    particles->compPsijTilde(helper);
+
+    particles->gradient(particles->vx, particles->vxGrad);
+    particles->gradient(particles->vy, particles->vyGrad);
+#if DIM == 3
+    particles->gradient(particles->vz, particles->vzGrad);
+#endif
+#if SLOPE_LIMITING
+    particles->slopeLimiterVelocity();
+#endif // SLOPE_LIMITING
+#endif // PERIODIC_BOUNDARIES
+}
+#endif // TIME_DKD
+
 void MeshlessScheme::prepareRiemannStates(){
     Logger(INFO) << "    > Preparing Riemann solver";
     Logger(DEBUG) << "      > Computing effective faces";
+#if TIME_DKD
+    // psi-tilde is at n+1/2, so V = m/rho has to be too: rhoExplicit is, rho is not.
+    particles->swapRhoExplicit();
+#if PERIODIC_BOUNDARIES
+    particles->updateGhostState(ghostParticles);
+#endif
+#endif // TIME_DKD
     particles->compEffectiveFace();
 #if PERIODIC_BOUNDARIES
     particles->compEffectiveFace(ghostParticles);
 #endif // PERIODIC_BOUNDARIES
+#if TIME_DKD
+    particles->swapRhoExplicit();
+#if PERIODIC_BOUNDARIES
+    particles->updateGhostState(ghostParticles);
+#endif
+#endif // TIME_DKD
 
 #if TENSILE_CORRECTION
     Logger(INFO) << "       > Computing fabMonaghan";
@@ -253,6 +297,10 @@ void MeshlessScheme::run(){
     bool dumpNext = false;
 #endif // ADAPTIVE_TIMESTEP
 
+#if TIME_DKD
+    // Step size of the drift to close. Not `step > 0`: `step` also moves at non-adaptive dumps.
+    double dtPrev = 0.;
+#endif
 
     do {
         Logger(INFO) << "  > TIME: " << t << ", STEP: " << step;
@@ -263,6 +311,18 @@ void MeshlessScheme::run(){
 #if PERIODIC_BOUNDARIES
         particles->compDensity(ghostParticles);
 #endif
+
+#if TIME_DKD
+        // Second half of the last step's drift, on the geometry it moved to: v_n on x_n.
+        // Velocity first: P_n needs rho_n, and rho_n needs this half step. It also has to
+        // come before the override below, which seeds rhoExplicit at t_n when it is due.
+        Logger(INFO) << "    > Closing the drift";
+        compVelocityGradients();
+        if (dtPrev > 0.){
+            particles->integrateStressTensor(dtPrev / 2.0);
+            particles->integrateExplicitVolumeHalfStep(dtPrev / 2.0, /*finalize=*/false);
+        }
+#endif // TIME_DKD
 
 #if EXPLICIT_VOL_INTEGRATION
         // GIZMO HYDRO_EXPLICITLY_INTEGRATE_VOLUME: from step 1 onward, rho
@@ -303,6 +363,7 @@ void MeshlessScheme::run(){
         timeStep = config.timeStep;
 #endif // ADAPTIVE_TIMESTEP
 
+#if !TIME_DKD
         Logger(INFO) << "    > Computing gradients";
         compGradients();
 #if ELASTIC
@@ -321,6 +382,7 @@ void MeshlessScheme::run(){
         particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/false);
 #endif
         prepareRiemannStates();
+#endif // !TIME_DKD
 
 #if ADAPTIVE_TIMESTEP
         if (dump){
@@ -367,6 +429,24 @@ void MeshlessScheme::run(){
         }
 
 
+#if TIME_DKD
+        // Everything is at t_n here. First half of the drift, then the kick at the
+        // geometry x_{n+1/2}: rho and P stay at t_n, the predictor takes them to n+1/2.
+        Logger(INFO) << "    > Drift 1 / 2";
+        particles->integrateStressTensor(timeStep / 2.0);
+        particles->integrateExplicitVolumeHalfStep(timeStep / 2.0, /*finalize=*/false);
+        particles->moveParticles(timeStep / 2.0, domain);
+
+        rebuildGeometry();
+        particles->compOmegaOnly();
+#if PERIODIC_BOUNDARIES
+        particles->compOmegaOnly(ghostParticles);
+#endif
+        Logger(INFO) << "    > Computing gradients";
+        compGradients();
+        prepareRiemannStates();
+#endif // TIME_DKD
+
         Logger(INFO) << "    > Solving Riemann problems";
 #if PERIODIC_BOUNDARIES
         particles->solveRiemannProblems(ghostParticles);
@@ -394,6 +474,12 @@ void MeshlessScheme::run(){
 
         Logger(INFO) << "    > Updating state";
         particles->updateState(timeStep);
+#if TIME_DKD
+        // S and rhoExplicit follow at the top of the next step, on x_{n+1}.
+        Logger(INFO) << "    > Drift 2 / 2";
+        particles->moveParticles(timeStep / 2.0, domain);
+        dtPrev = timeStep;
+#else // TIME_DKD
         Logger(INFO) << "    > Recomputing velocity and stress gradients";
 #if PERIODIC_BOUNDARIES
         particles->updateGhostState(ghostParticles);
@@ -452,6 +538,7 @@ void MeshlessScheme::run(){
         //Logger(INFO) << "    > Moving particles";
         Logger(INFO) << "    > Moving particles";
         particles->moveParticles(timeStep, domain);
+#endif // TIME_DKD
 #endif // !ELASTIC
 
         t += timeStep;

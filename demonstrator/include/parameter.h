@@ -287,7 +287,7 @@ Supported: ideal gas (=0), Murnaghan (=1), Tillotson (=2). */
 /// which is at n+1/2 after its half step.
 /// 1 = this scheme (MA-Obsidian/2026-10-30-dkd-plan.md); 0 = kick, then drift with v_{n+1}
 /// on the old geometry (regression baseline only).
-#define TIME_DKD 0
+#define TIME_DKD 1
 
 #if TIME_DKD && !ELASTIC
 #error "TIME_DKD is only wired for the ELASTIC path of MeshlessScheme::run(). updateStateAndPosition() drifts inside the kick."

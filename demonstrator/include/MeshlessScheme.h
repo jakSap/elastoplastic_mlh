@@ -66,6 +66,10 @@ private:
     void rebuildGeometry();
     /// psi-tilde, gradients of rho, v, P, S and their limiters at the current positions.
     void compGradients();
+#if TIME_DKD
+    /// psi-tilde and limited velocity gradients only, for the half step closed at the top of a step.
+    void compVelocityGradients();
+#endif
     /// Faces, f_ab and the time-predicted face states for the Riemann solve.
     void prepareRiemannStates();
 
